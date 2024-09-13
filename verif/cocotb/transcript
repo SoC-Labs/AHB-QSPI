@@ -1,0 +1,80 @@
+# do sim_build/runsim.do
+# QuestaSim-64 vmap 2022.4 Lib Mapping Utility 2022.10 Oct 18 2022
+# vmap -c 
+# ** Warning: vmap will not overwrite local modelsim.ini.
+# QuestaSim-64 vmap 2022.4 Lib Mapping Utility 2022.10 Oct 18 2022
+# vmap work sim_build/work 
+# Modifying modelsim.ini
+# QuestaSim-64 vlog 2022.4 Compiler 2022.10 Oct 18 2022
+# Start time: 11:27:31 on Sep 13,2024
+# vlog -work work "+define+COCOTB_SIM" -sv -timescale 1ns/1ns -mfcu "+acc" "+acc" ./ahb_qspi_cocotb.v 
+# -- Compiling module ahb_qspi_cocotb
+# 
+# Top level modules:
+# 	ahb_qspi_cocotb
+# End time: 11:27:31 on Sep 13,2024, Elapsed time: 0:00:00
+# Errors: 0, Warnings: 0
+# vsim -onfinish exit -pli "/usr/local/lib64/python3.6/site-packages/cocotb/libs/libcocotbvpi_modelsim.so" sim_build/work.ahb_qspi_cocotb 
+# Start time: 11:27:31 on Sep 13,2024
+# ** Note: (vsim-3812) Design is being optimized...
+# ** Warning: (vsim-3865) Due to PLI being present, global +acc is being enabled automatically. This will cause your simulation to run very slowly. Please use vsim -no_autoacc to disable this feature. This feature is now deprecated and will be removed from future releases.
+# ** Warning: (vopt-10587) Some optimizations are turned off because the +acc switch is in effect. This will cause your simulation to run slowly. Please use -access/-debug to maintain needed visibility.
+# ** Note: (vsim-12126) Error and warning message counts have been restored: Errors=0, Warnings=2.
+# //  Questa Sim-64
+# //  Version 2022.4 linux_x86_64 Oct 18 2022
+# //
+# //  Copyright 1991-2022 Mentor Graphics Corporation
+# //  All Rights Reserved.
+# //
+# //  QuestaSim and its associated documentation contain trade
+# //  secrets and commercial or financial information that are the property of
+# //  Mentor Graphics Corporation and are privileged, confidential,
+# //  and exempt from disclosure under the Freedom of Information Act,
+# //  5 U.S.C. Section 552. Furthermore, this information
+# //  is prohibited from disclosure under the Trade Secrets Act,
+# //  18 U.S.C. Section 1905.
+# //
+# Loading sv_std.std
+# Loading work.ahb_qspi_cocotb(fast)
+# Loading /usr/local/lib64/python3.6/site-packages/cocotb/libs/libcocotbvpi_modelsim.so
+#      -.--ns INFO     gpi                                ..mbed/gpi_embed.cpp:81   in set_program_name_in_venv        Did not detect Python virtual environment. Using system-wide Python interpreter
+#      -.--ns INFO     gpi                                ../gpi/GpiCommon.cpp:101  in gpi_print_registered_impl       VPI registered
+#      0.00ns INFO     cocotb                             Running on ModelSim for Questa-64 version 2022.4 2022.10
+#      0.00ns INFO     cocotb                             Running tests with cocotb v1.9.1 from /usr/local/lib64/python3.6/site-packages/cocotb
+#      0.00ns INFO     cocotb                             Seeding Python random module with 1726223252
+#      0.00ns INFO     cocotb.regression                  Found test ahb_qspi_tests.AHB_QSPI_1
+#      0.00ns INFO     cocotb.regression                  running AHB_QSPI_1 (1/1)
+#      0.00ns INFO     ...ahb_lite.cocotb.ahb_qspi_cocotb AHB (ahb_lite) master
+#      0.00ns INFO     ...ahb_lite.cocotb.ahb_qspi_cocotb cocotbext-ahb version 0.4.0
+#      0.00ns INFO     ...ahb_lite.cocotb.ahb_qspi_cocotb Copyright (c) 2024 Anderson Ignacio da Silva
+#      0.00ns INFO     ...ahb_lite.cocotb.ahb_qspi_cocotb https://github.com/aignacio/cocotbext-ahb
+#    290.00ns INFO     ...ahb_lite.cocotb.ahb_qspi_cocotb AHB write txn:
+#                                                         	ID = 0
+#                                                         	ADDR = 0x0
+#                                                         	DATA = 0x15
+#                                                         	SIZE = 4 bytes
+#   1290.00ns INFO     cocotb.regression                  AHB_QSPI_1 failed
+#                                                         Traceback (most recent call last):
+#                                                           File "/home/dwn1c21/SoC-Labs/ahb_qspi/verif/cocotb/ahb_qspi_tests.py", line 34, in AHB_QSPI_1
+#                                                             await tb.ahb_master.write(0x00,0x15)
+#                                                           File "/usr/local/lib/python3.6/site-packages/cocotbext/ahb/ahb_master.py", line 331, in write
+#                                                             t_address, t_value, t_size, t_mode, t_trans, pip, sync
+#                                                           File "/usr/local/lib/python3.6/site-packages/cocotbext/ahb/ahb_master.py", line 221, in _send_txn
+#                                                             f"Timeout value of {timeout_counter}"
+#                                                         Exception: Timeout value of 100 clock cycles has been reached because AHB.SLAVEsignals are not resolvable!
+#                                                         hready: False
+#                                                         hrdata: False
+#                                                         hresp: False
+#                                                         
+#   1290.00ns INFO     cocotb.regression                  **************************************************************************************
+#                                                         ** TEST                          STATUS  SIM TIME (ns)  REAL TIME (s)  RATIO (ns/s) **
+#                                                         **************************************************************************************
+#                                                         ** ahb_qspi_tests.AHB_QSPI_1      FAIL        1290.00           0.02      57536.30  **
+#                                                         **************************************************************************************
+#                                                         ** TESTS=1 PASS=0 FAIL=1 SKIP=0               1290.00           0.83       1561.41  **
+#                                                         **************************************************************************************
+#                                                         
+# ** Note: $finish
+#    Time: 1290001 ps  Iteration: 0  Instance: /ahb_qspi_cocotb
+# End time: 11:27:33 on Sep 13,2024, Elapsed time: 0:00:02
+# Errors: 0, Warnings: 2
