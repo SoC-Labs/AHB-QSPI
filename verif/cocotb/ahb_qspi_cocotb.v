@@ -23,6 +23,7 @@ module ahb_qspi_cocotb(
 top_ahb_qspi u_top_ahb_qspi(
     .HCLK(HCLK),
     .HRESETn(HRESETn),
+
     .HADDR(cocotb_HADDR),
     .HTRANS(cocotb_HTRANS),
     .HWRITE(cocotb_HWRITE),
@@ -35,12 +36,15 @@ top_ahb_qspi u_top_ahb_qspi(
     .HREADY(cocotb_HREADY),
     .HREADYOUT(cocotb_HREADYOUT),
     .HRESP(cocotb_HRESP),
+
     .QSPI_SCLK(),
     .QSPI_nCS(),
     .QSPI_IO_o(),
     .QSPI_IO_i(),
     .QSPI_IO_e()
-)
+);
+
+
 
 
 endmodule 

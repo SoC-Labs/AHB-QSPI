@@ -53,7 +53,7 @@ else ifeq ($(SIM), verilator)
 else ifeq ($(SIM), questa)
 	COMPILE_ARGS += +acc
 endif
-#include $(SOCLABS_SRAM_CHIPLET_DIR)/simulate/sim/cocotb/makefile.flist
+include $(SOCLABS_AHB_QSPI_DIR)/simulate/sim/cocotb/makefile.flist
 include $(shell cocotb-config --makefiles)/Makefile.sim
 
 iverilog_dump.v:

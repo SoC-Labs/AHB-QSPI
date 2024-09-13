@@ -1,0 +1,7 @@
+simulate/
+
+verif/cocotb/*.ini
+verif/cocotb/*.xml
+verif/cocotb/transcript
+verif/cocotb/sim_build
+verif/cocotb/__pycache__

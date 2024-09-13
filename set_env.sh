@@ -1,0 +1,2 @@
+export SOCLABS_AHB_QSPI_DIR=$(pwd)
+export SOCLABS_SOCTOOLS_FLOW_DIR=$SOCLABS_AHB_QSPI_DIR/soctools_flow
