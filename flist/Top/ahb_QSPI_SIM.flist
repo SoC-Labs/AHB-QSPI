@@ -1,0 +1,2 @@
+-f $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI.flist 
+-f $(SOCLABS_AHB_QSPI_DIR)/flist/VIP/ahb_QSPI_VIP.flist

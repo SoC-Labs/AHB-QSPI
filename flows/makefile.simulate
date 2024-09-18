@@ -20,6 +20,8 @@ else ifeq ($(SIMULATOR),xm)
 	COCOTB_SIMULATOR := xcelium
 else ifeq ($(SIMULATOR),vcs)
 	COCOTB_SIMULATOR := vcs
+else ifeq ($(SIMULATOR), icarus)
+	COCOTB_SIMULATOR := icarus
 endif
 
 # Cocotb GUI Variable

@@ -1,3 +1,5 @@
+include $(SOCLABS_AHB_QSPI_DIR)/make.cfg
+
 #-------------------------------------
 # - Commonly Overloaded Variables
 #-------------------------------------
@@ -15,8 +17,10 @@ SIM_DIR ?= $(SIM_TOP_DIR)
 ifeq ($(ASIC),yes)
 	DESIGN_VC ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_ASIC.flist
 else
-	DESIGN_VC ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI.flist
+	DESIGN_VC ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_SIM.flist
 endif
 
 #Include flows
 include ./flows/makefile.simulate
+
+export BP210_DIR
