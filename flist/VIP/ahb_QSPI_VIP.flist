@@ -1,1 +1,3 @@
-/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/BP210-BU-00000-r1p1-00rel0/logical/cmsdk_ahb_to_apb/verilog/cmsdk_ahb_to_apb.v
+$(ARM_IP_LIBRARY_PATH)/latest/Corstone-101/logical/cmsdk_ahb_to_apb/verilog/cmsdk_ahb_to_apb.v
+
+$(SOCLABS_AHB_QSPI_DIR)/verif/VIP/sst26wf040b.v

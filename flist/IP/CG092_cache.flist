@@ -2,17 +2,17 @@
 // ============= Verilog library extensions ===========
 +libext+.v+.vlib
 
-+incdir+/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog
++incdir+$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog
 
-/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/p_flash_cache_f0_bus_logic.v
-/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/p_flash_cache_f0_mrb.v
-/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/p_flash_cache_f0_core.v 
-/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/p_flash_cache_f0.v
-/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/p_flash_cache_f0_reg_block.v
+$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/p_flash_cache_f0_bus_logic.v
+$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/p_flash_cache_f0_mrb.v
+$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/p_flash_cache_f0_core.v 
+$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/p_flash_cache_f0.v
+$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/p_flash_cache_f0_reg_block.v
 
-/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/models/cells/generic/p_flash_cache_f0_capt_sync.v
-/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/models/cells/generic/cdc_capt_sync.v
+/$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/models/cells/generic/p_flash_cache_f0_capt_sync.v
+/$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/models/cells/generic/cdc_capt_sync.v
 
-/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/models/modules/generic/p_flash_cache_f0_static_reg.v
-/Users/danielnewbrook/Documents/SoCLabs/AAA/ip_dir/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/models/modules/generic/static_reg.v
+$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/models/modules/generic/p_flash_cache_f0_static_reg.v
+$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/models/modules/generic/static_reg.v
 

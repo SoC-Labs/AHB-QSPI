@@ -39,7 +39,7 @@ begin
 end
 
 
-wire [11:0]          PADDR;
+wire [15:0]          PADDR;
 wire [2:0]           PPROT;
 wire                 PSEL;
 wire                 PENABLE;
@@ -51,7 +51,7 @@ wire                 PREADY;
 wire                 PSLVERR;   
 
 cmsdk_ahb_to_apb #(
-    .ADDRWIDTH(12),
+    .ADDRWIDTH(16),
     .REGISTER_RDATA(1),
     .REGISTER_WDATA(0)
 ) u_cmsdk_ahb_to_apb (
@@ -60,7 +60,7 @@ cmsdk_ahb_to_apb #(
     .PCLKEN(1'b1),
 
     .HSEL(config_HSEL),
-    .HADDR(config_HADDR[11:0]),
+    .HADDR(config_HADDR[15:0]),
     .HTRANS(config_HTRANS),
     .HSIZE(config_HSIZE),
     .HPROT(config_HPROT),
@@ -85,6 +85,13 @@ cmsdk_ahb_to_apb #(
     .PSLVERR(PSLVERR)
 );
 
+
+wire QSPI_SCLK;
+wire QSPI_nCS;
+wire [3:0] QSPI_IO_o;
+wire [3:0] QSPI_IO_i;
+wire [3:0] QSPI_IO_e;
+wire [3:0] QSPI_IO;
 top_ahb_qspi u_top_ahb_qspi(
     .HCLK(HCLK),
     .HRESETn(HRESETn),
@@ -104,7 +111,7 @@ top_ahb_qspi u_top_ahb_qspi(
     .HREADYOUT(data_HREADY),
     .HRESP(data_HRESP),
     
-    .PADDR(PADDR[11:2]),
+    .PADDR(PADDR),
     .PPROT(PPROT),
     .PSEL(PSEL),
     .PENABLE(PENABLE),
@@ -114,14 +121,35 @@ top_ahb_qspi u_top_ahb_qspi(
     .PRDATA(PRDATA),
     .PREADY(PREADY),
     .PSLVERR(PSLVERR), 
-    .QSPI_SCLK(),
-    .QSPI_nCS(),
-    .QSPI_IO_o(),
-    .QSPI_IO_i(),
-    .QSPI_IO_e()
+    .QSPI_SCLK(QSPI_SCLK),
+    .QSPI_nCS(QSPI_nCS),
+    .QSPI_IO_o(QSPI_IO_o),
+    .QSPI_IO_i(QSPI_IO_i),
+    .QSPI_IO_e(QSPI_IO_e)
 );
 
+assign QSPI_IO[0] = QSPI_IO_e[0] ? QSPI_IO_o[0] : 1'bz;
+assign QSPI_IO[1] = QSPI_IO_e[1] ? QSPI_IO_o[1] : 1'bz;
+assign QSPI_IO[2] = QSPI_IO_e[2] ? QSPI_IO_o[2] : 1'bz;
+assign QSPI_IO[3] = QSPI_IO_e[3] ? QSPI_IO_o[3] : 1'bz;
 
+assign QSPI_IO_i[0] = QSPI_IO[0];
+assign QSPI_IO_i[1] = QSPI_IO[1];
+assign QSPI_IO_i[2] = QSPI_IO[2];
+assign QSPI_IO_i[3] = QSPI_IO[3];
 
+sst26wfxxxb u_sst26wfxxxb(
+    .SCK(QSPI_SCLK),
+    .SIO(QSPI_IO),
+    .CEb(QSPI_nCS)
+);
+
+defparam u_sst26wfxxxb.Ksize = 4096;
+defparam u_sst26wfxxxb.Msize = 4;
+defparam u_sst26wfxxxb.ADDR_MSB = 21;
+defparam u_sst26wfxxxb.Memory_Capacity = 8'h52;
+defparam u_sst26wfxxxb.WLLD_value = 24'h00_0000;
+defparam u_sst26wfxxxb.INIT_WPEN = 1'b0;
+defparam u_sst26wfxxxb.SECURITY_LOCKOUT_VALUE = 1'b0;
 
 endmodule 

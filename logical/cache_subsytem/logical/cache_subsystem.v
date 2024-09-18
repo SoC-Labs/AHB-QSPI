@@ -51,6 +51,34 @@ module cache_subsystem(
     output wire             CACHEHIT
 );
 
+// Data RAM way 0 wires
+wire [7:0]      RAMCLD0ADDR;
+wire            RAMCLD0WE;
+wire [3:0]      RAMCLD0RD;
+wire [3:0]      RAMCLD0CS;
+wire [127:0]    RAMCLD0WDATA;
+wire [127:0]    RAMCLD0RDATA;
+// TAG RAM way 0 wires
+wire [7:0]      RAMTAG0ADDR;
+wire            RAMTAG0WE;
+wire            RAMTAG0RD;
+wire            RAMTAG0CS;
+wire [10:0]     RAMTAG0WDATA;
+wire [10:0]     RAMTAG0RDATA;
+// Data RAM way 1 wires
+wire [7:0]      RAMCLD1ADDR;
+wire            RAMCLD1WE;
+wire [3:0]      RAMCLD1RD;
+wire [3:0]      RAMCLD1CS;
+wire [127:0]    RAMCLD1WDATA;
+wire [127:0]    RAMCLD1RDATA;
+// TAG RAM way 1 wires
+wire [7:0]      RAMTAG1ADDR;
+wire            RAMTAG1WE;
+wire            RAMTAG1RD;
+wire            RAMTAG1CS;
+wire [10:0]     RAMTAG1WDATA;
+wire [10:0]     RAMTAG1RDATA;
 
 
 p_flash_cache_f0 #(
@@ -94,33 +122,33 @@ p_flash_cache_f0 #(
         .RAMPWRUPREQ(),
         .RAMPWRUPACK(),
         // TAG RAM way 0
-        .RAMTAG0ADDR(),
-        .RAMTAG0WE(),
-        .RAMTAG0RD(),
-        .RAMTAG0CS(),
-        .RAMTAG0WDATA(),
-        .RAMTAG0RDATA(),
+        .RAMTAG0ADDR(RAMTAG0ADDR),
+        .RAMTAG0WE(RAMTAG0WE),
+        .RAMTAG0RD(RAMTAG0RD),
+        .RAMTAG0CS(RAMTAG0CS),
+        .RAMTAG0WDATA(RAMTAG0WDATA),
+        .RAMTAG0RDATA(RAMTAG0RDATA),
         // Data RAM way 0
-        .RAMCLD0ADDR(),
-        .RAMCLD0WE(),
-        .RAMCLD0RD(),
-        .RAMCLD0CS(),
-        .RAMCLD0WDATA(),
-        .RAMCLD0RDATA(),
+        .RAMCLD0ADDR(RAMCLD0ADDR),
+        .RAMCLD0WE(RAMCLD0WE),
+        .RAMCLD0RD(RAMCLD0RD),
+        .RAMCLD0CS(RAMCLD0CS),
+        .RAMCLD0WDATA(RAMCLD0WDATA),
+        .RAMCLD0RDATA(RAMCLD0RDATA),
         // TAG RAM way 1
-        .RAMTAG1ADDR(),
-        .RAMTAG1WE(),
-        .RAMTAG1RD(),
-        .RAMTAG1CS(),
-        .RAMTAG1WDATA(),
-        .RAMTAG1RDATA(),
+        .RAMTAG1ADDR(RAMTAG1ADDR),
+        .RAMTAG1WE(RAMTAG1WE),
+        .RAMTAG1RD(RAMTAG1RD),
+        .RAMTAG1CS(RAMTAG1CS),
+        .RAMTAG1WDATA(RAMTAG1WDATA),
+        .RAMTAG1RDATA(RAMTAG1RDATA),
         // Data RAM Way 1
-        .RAMCLD1ADDR(),
-        .RAMCLD1WE(),
-        .RAMCLD1RD(),
-        .RAMCLD1CS(),
-        .RAMCLD1WDATA(),
-        .RAMCLD1RDATA(),
+        .RAMCLD1ADDR(RAMCLD1ADDR),
+        .RAMCLD1WE(RAMCLD1WE),
+        .RAMCLD1RD(RAMCLD1RD),
+        .RAMCLD1CS(RAMCLD1CS),
+        .RAMCLD1WDATA(RAMCLD1WDATA),
+        .RAMCLD1RDATA(RAMCLD1RDATA),
         // AHB Manager
         .HSELM(HSELM),
         .HADDRM(HADDRM),

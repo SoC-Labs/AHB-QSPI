@@ -1,8 +1,0 @@
-<testsuites name="results">
-  <testsuite name="all" package="all">
-    <property name="random_seed" value="1726223252" />
-    <testcase classname="ahb_qspi_tests" file="/home/dwn1c21/SoC-Labs/ahb_qspi/verif/cocotb/ahb_qspi_tests.py" lineno="29" name="AHB_QSPI_1" ratio_time="57536.30253728772" sim_time_ns="1290.001" time="0.022420644760131836">
-      <failure message="Test failed with RANDOM_SEED=1726223252" />
-    </testcase>
-  </testsuite>
-</testsuites>

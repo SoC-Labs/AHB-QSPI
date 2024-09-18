@@ -20,6 +20,9 @@ else
 	DESIGN_VC ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_SIM.flist
 endif
 
+get_flash_model:
+	@cd $(SOCLABS_AHB_QSPI_DIR)/verif/VIP; wget https://ww1.microchip.com/downloads/en/DeviceDoc/sst26wf040b.v
+
 #Include flows
 include ./flows/makefile.simulate
 

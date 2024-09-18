@@ -8,3 +8,4 @@ $(SOCLABS_AHB_QSPI_DIR)/logical/qspi_controller/logical/qspi_controller.sv
 
 $(SOCLABS_AHB_QSPI_DIR)/logical/cache_subsytem/logical/cache_subsystem.v
 -f $(SOCLABS_AHB_QSPI_DIR)/flist/IP/CG092_cache.flist
+-f $(SOCLABS_AHB_QSPI_DIR)/flist/IP/corstone_101_ip.flist

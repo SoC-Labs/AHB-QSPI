@@ -13,8 +13,8 @@ from cocotbext.ahb import AHBLiteMaster, AHBBus
 
 FREQ = 240
 
-CONFIG_ADDR = 0x0
-DATA_ADDR = 0x10000000
+QSPI_CONFIG_ADDR = 0x0
+CACHE_CONFIG_ADDR = 0x1000
 
 class TB:
     def __init__(self,dut):
@@ -47,3 +47,13 @@ async def AHB_QSPI_1(dut):
     print(data)
     data = await tb.config_ahb_master.read(0x04,4)
     assert int(data[0]['data'],16) == 0xcafecafe
+
+@cocotb.test()
+async def CACHE_CONFIG(dut):
+    tb = TB(dut)
+    await tb.cycle_reset()
+    data = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR,4)
+    # After reset CCR register should = 0x40
+    assert int(data[0]['data'],16) == 0x40
+    data = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x20,4)
+    print(data)

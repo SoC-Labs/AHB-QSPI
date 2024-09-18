@@ -31,7 +31,7 @@ DUT      = ahb_qspi_cocotb
 TOPLEVEL = ahb_qspi_cocotb
 MODULE   = ahb_qspi_tests
 
-VERILOG_SOURCES += ./ahb_qspi_cocotb.v
+VERILOG_SOURCES += $(SOCLABS_AHB_QSPI_DIR)/verif/cocotb/ahb_qspi_cocotb.v
 
 ifeq ($(SIM), icarus)
 	PLUSARGS += -fst
