@@ -32,21 +32,6 @@ class TB:
         self.dut.HRESETn.setimmediatevalue(1)
         await ClockCycles(self.dut.HCLK,10)
             
-@cocotb.test()
-async def AHB_QSPI_1(dut):
-    tb = TB(dut)
-    await tb.cycle_reset()
-    
-    await tb.config_ahb_master.write(0x00,0xBEEFBEEF)
-    await tb.config_ahb_master.write(0x04,0xCAFECAFE)
-    await ClockCycles(dut.HCLK,2)
-    data = await tb.config_ahb_master.read(0x00,4)
-    await ClockCycles(dut.HCLK,2)
-    print(data)
-    data = await tb.config_ahb_master.read(0x00,4)
-    print(data)
-    data = await tb.config_ahb_master.read(0x04,4)
-    assert int(data[0]['data'],16) == 0xcafecafe
 
 @cocotb.test()
 async def CACHE_CONFIG(dut):
@@ -57,3 +42,91 @@ async def CACHE_CONFIG(dut):
     assert int(data[0]['data'],16) == 0x40
     data = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x20,4)
     print(data)
+    
+async def SPI_RESET(dut,tb):
+    await tb.config_ahb_master.write(0x08, 0x00000066)
+    await tb.config_ahb_master.write(0x08, 0x00000166)
+
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,2)
+        data = await tb.config_ahb_master.read(0x04,4)
+    
+    await tb.config_ahb_master.write(0x08, 0x00000099)
+    await tb.config_ahb_master.write(0x08, 0x00000199)
+    
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,2)
+        data = await tb.config_ahb_master.read(0x04,4)
+            
+async def SPI_READ_JEDIC(dut, tb):
+    await tb.config_ahb_master.write(0x08, 0x0002009F)
+    await tb.config_ahb_master.write(0x08, 0x0002039F)
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+
+async def SET_QPI_MODE(dut,tb):
+    await tb.config_ahb_master.write(0x08, 0x00000038)
+    await tb.config_ahb_master.write(0x08, 0x00000138)
+
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,2)
+        data = await tb.config_ahb_master.read(0x04,4)
+
+async def QPI_READ_JEDIC(dut, tb):
+    await tb.config_ahb_master.write(0x08, 0x000210AF)
+    await tb.config_ahb_master.write(0x08, 0x000213AF)
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+        
+async def SPI_WRITE_ENABLE(dut, tb):
+    await tb.config_ahb_master.write(0x08, 0x00000006)
+    await tb.config_ahb_master.write(0x08, 0x00000106)
+
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,2)
+        data = await tb.config_ahb_master.read(0x04,4)
+        
+async def SPI_CLR_PROTECTION(dut, tb):
+    await tb.config_ahb_master.write(0x08, 0x00000098)
+    await tb.config_ahb_master.write(0x08, 0x00000198)
+
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,2)
+        data = await tb.config_ahb_master.read(0x04,4)
+   
+
+async def SPI_BLOCK_ERASE(dut, tb):
+    await tb.config_ahb_master.write(0x08, 0x000008D8)
+    await tb.config_ahb_master.write(0x08, 0x000009D8)
+
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,2)
+        data = await tb.config_ahb_master.read(0x04,4)
+   
+
+
+@cocotb.test()
+async def QSPI_TESTS(dut):  
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+    await SPI_READ_JEDIC(dut, tb)
+    await SET_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00,0x1)
+    await QPI_READ_JEDIC(dut, tb)
+    await SPI_WRITE_ENABLE(dut, tb)
+    await SPI_CLR_PROTECTION(dut, tb)
+    await SPI_CHIP_ERASE(dut, tb)
+
+    
+    

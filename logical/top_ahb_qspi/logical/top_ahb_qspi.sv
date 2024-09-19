@@ -43,15 +43,31 @@ module top_ahb_qspi #(
 );
 
 
-wire             qspi_psel;
-wire     [31:0]  qspi_prdata;
-wire             qspi_pready;
-wire             qspi_pslverr;
+wire            qspi_psel;
+wire     [31:0] qspi_prdata;
+wire            qspi_pready;
+wire            qspi_pslverr;
 
-wire             cache_psel;
-wire     [31:0]  cache_prdata;
-wire             cache_pready;
-wire             cache_pslverr;
+wire            cache_psel;
+wire     [31:0] cache_prdata;
+wire            cache_pready;
+wire            cache_pslverr;
+
+
+  // AHB Outputs 
+wire            flash_HSELM;        // Device select
+wire [21:0]     flash_HADDRM;       // Address
+wire [2:0]      flash_HBURSTM;      // Burst Type - Not used (tied to 0)!
+wire            flash_HMASTLOCKM;   // Master Lock - Not used (tied to 0)!
+wire [1:0]      flash_HTRANSM;      // Transfer control
+wire [2:0]      flash_HSIZEM;       // Transfer size
+wire [3:0]      flash_HPROTM;       // Transfer Protection
+wire            flash_HWRITEM;      // Write control
+wire [127:0]    flash_HWDATAM;      // Write data
+wire            flash_HREADYM;      // Transfer phase done
+wire            flash_HREADYOUTM;   // Device ready
+wire [127:0]    flash_HRDATAM;      // Read data output
+wire            flash_HRESPM;       // Error response
 
 
 cmsdk_apb_slave_mux #(
@@ -109,39 +125,49 @@ cache_subsystem u_cache_subsystem(
     .PSLVERR(cache_pslverr),
     .PREADY(cache_pready),
 
-    .HSELS(),
-    .HADDRS(),
-    .HBURSTS(),
+    .HSELS(HSELx),
+    .HADDRS(HADDR[21:0]),
+    .HBURSTS(HBURST),
     .HMASTLOCKS(),
-    .HTRANSS(),
-    .HSIZES(),
-    .HPROTS(),
-    .HWRITES(),
-    .HWDATAS(),
-    .HREADYS(),
+    .HTRANSS(HTRANS),
+    .HSIZES(HSIZE),
+    .HPROTS(HPROT),
+    .HWRITES(HWRITE),
+    .HWDATAS(HWDATA),
+    .HREADYS(HREADY),
     .HMASTERS(),
-    .HREADYOUTS(),
-    .HRDATAS(),
-    .HRESPS(),
+    .HREADYOUTS(HREADYOUT),
+    .HRDATAS(HRDATA),
+    .HRESPS(HRESP),
 
-    .HSELM(),
-    .HADDRM(),
-    .HBURSTM(),
-    .HMASTLOCKM(),
-    .HTRANSM(),
-    .HSIZEM(),
-    .HPROTM(),
-    .HWRITEM(),
-    .HWDATAM(),
-    .HREADYM(),
-    .HREADYOUTM(),
-    .HRDATAM(),
-    .HRESPM(),
+    .HSELM(flash_HSELM),
+    .HADDRM(flash_HADDRM),
+    .HBURSTM(flash_HBURSTM),
+    .HMASTLOCKM(flash_HMASTLOCKM),
+    .HTRANSM(flash_HTRANSM),
+    .HSIZEM(flash_HSIZEM),
+    .HPROTM(flash_HPROTM),
+    .HWRITEM(flash_HWRITEM),
+    .HWDATAM(flash_HWDATAM),
+    .HREADYM(flash_HREADYM),
+    .HREADYOUTM(flash_HREADYOUTM),
+    .HRDATAM(flash_HRDATAM),
+    .HRESPM(flash_HRESPM),
 
     .IRQ(),
     .CACHEMISS(),
     .CACHEHIT()
 );
+
+wire [7:0]  QSPI_CMD;
+wire        QSPI_ENABLE;
+wire        QSPI_ENABLE_ACK;
+wire        QSPI_READ;
+wire        QSPI_WRITE;
+wire        QSPI_ADDR_EN;
+wire [3:0]  QSPI_N_RW_BYTES;
+wire        QSPI_QIO_MODE;
+wire [3:0]  QSPI_DUMMY_CYCLES;
 
 apb_qspi_regs u_apb_qspi_regs(
     .PCLK(PCLK),
@@ -155,39 +181,62 @@ apb_qspi_regs u_apb_qspi_regs(
     .PSTRB(PSTRB),
     .PRDATA(qspi_prdata),
     .PREADY(qspi_pready),
-    .PSLVERR(qspi_pslverr)
+    .PSLVERR(qspi_pslverr),
+
+    .QSPI_CMD(QSPI_CMD),
+    .QSPI_ENABLE(QSPI_ENABLE),
+    .QSPI_ENABLE_ACK(QSPI_ENABLE_ACK),
+    .QSPI_READ(QSPI_READ),
+    .QSPI_WRITE(QSPI_WRITE),
+    .QSPI_ADDR_EN(QSPI_ADDR_EN),
+    .QSPI_DUMMY_CYCLES(QSPI_DUMMY_CYCLES),
+    .QSPI_N_RW_BYTES(QSPI_N_RW_BYTES),
+    .QSPI_BUSY(~QSPI_nCS),
+    .QSPI_QIO_MODE(QSPI_QIO_MODE)
 );
 
 ahb_qspi_interface #(
-    .ADDR_W(ADDR_W),
-    .DATA_W(DATA_W)
+    .ADDR_W(22),
+    .DATA_W(128)
     ) u_ahb_qspi_interface (
         .HCLK(HCLK),
         .HRESETn(HRESETn),
-        .HADDR(HADDR),
-        .HTRANS(HTRANS),
-        .HWRITE(HWRITE),
-        .HSIZE(HSIZE),
-        .HBURST(HBURST),
-        .HPROT(HPROT),
-        .HWDATA(HWDATA),
-        .HSELx(HSELx),
-        .HRDATA(HRDATA),
-        .HREADY(HREADY),
-        .HREADYOUT(HREADYOUT),
-        .HRESP(HRESP)
+        .HADDR(flash_HADDRM),
+        .HTRANS(flash_HTRANSM),
+        .HWRITE(flash_HWRITEM),
+        .HSIZE(flash_HSIZEM),
+        .HBURST(flash_HBURSTM),
+        .HPROT(flash_HPROTM),
+        .HWDATA(flash_HWDATAM),
+        .HSELx(flash_HSELM),
+        .HRDATA(flash_HRDATAM),
+        .HREADY(flash_HREADYM),
+        .HREADYOUT(flash_HREADYOUTM),
+        .HRESP(flash_HRESPM)
 );
 
 qspi_controller u_qspi_controller(
     .HCLK(HCLK),
     .HRESETn(HRESETn),
     .QSPI_CLK_DIV(8'h02),
-    .QSPI_SPI_MODE(2'b11),
-    .QSPI_CMD(),
+    .QSPI_SPI_MODE(2'b00),
+    .QSPI_CMD(QSPI_CMD),
+    .QSPI_ENABLE(QSPI_ENABLE),
+    .QSPI_ENABLE_ACK(QSPI_ENABLE_ACK),
+    .QSPI_READ(QSPI_READ),
+    .QSPI_WRITE(QSPI_WRITE),
+    .QSPI_ADDR_EN(QSPI_ADDR_EN),
+    .QSPI_DUMMY_CYCLES(QSPI_DUMMY_CYCLES),
+    .QSPI_N_RW_BYTES(QSPI_N_RW_BYTES),
+    .QSPI_QIO_MODE(QSPI_QIO_MODE),
     .QSPI_ADDR(),
     .QSPI_WDATA(),
     .QSPI_RDATA(),
 
-    .QSPI_SCLK(QSPI_SCLK)
+    .QSPI_SCLK(QSPI_SCLK),
+    .QSPI_nCS(QSPI_nCS),
+    .QSPI_IO_o(QSPI_IO_o),
+    .QSPI_IO_i(QSPI_IO_i),
+    .QSPI_IO_e(QSPI_IO_e)
 );
 endmodule

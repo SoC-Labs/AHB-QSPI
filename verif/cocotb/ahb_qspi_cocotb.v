@@ -138,18 +138,18 @@ assign QSPI_IO_i[1] = QSPI_IO[1];
 assign QSPI_IO_i[2] = QSPI_IO[2];
 assign QSPI_IO_i[3] = QSPI_IO[3];
 
-sst26wfxxxb u_sst26wfxxxb(
+sst26wf040b u_sst26wfxxxb(
     .SCK(QSPI_SCLK),
     .SIO(QSPI_IO),
     .CEb(QSPI_nCS)
 );
-
-defparam u_sst26wfxxxb.Ksize = 4096;
-defparam u_sst26wfxxxb.Msize = 4;
-defparam u_sst26wfxxxb.ADDR_MSB = 21;
-defparam u_sst26wfxxxb.Memory_Capacity = 8'h52;
-defparam u_sst26wfxxxb.WLLD_value = 24'h00_0000;
-defparam u_sst26wfxxxb.INIT_WPEN = 1'b0;
-defparam u_sst26wfxxxb.SECURITY_LOCKOUT_VALUE = 1'b0;
+	//defparam u_sst26wfxxxb.IO.Ksize = 512;  //Size of memory in Kilo bytes
+	//defparam u_sst26wfxxxb.I0.Msize = 0;				// Size of memory in Mega bites. I.E. 8-bit field size, use S080=1, S016=2, S032=4
+	//defparam u_sst26wfxxxb.I0.ADDR_MSB=18;			// most significant address bit, 32Mb=21,16Mb=20, 8Mb=19, 4Mb=18;
+	//defparam u_sst26wfxxxb.I0.Memory_Capacity = 8'h54;		// ID read memory size 32M=52,16M=51,8M=58, JEDEC read value
+	//// change below values if you need non-default values on POR
+	//defparam u_sst26wfxxxb.I0.WLLD_value = 24'h00_0000;	// init WLLD protection register non-volitale, default to all 0's
+	//defparam u_sst26wfxxxb.I0.INIT_WPEN = 1'b0;			// value of WPEN, configuration register bit 7 default on POR
+	//defparam u_sst26wfxxxb.I0.SECURITY_LOCKOUT_VALUE=1'b0;	// Value of SEC, status register bit 5 on POR
 
 endmodule 
