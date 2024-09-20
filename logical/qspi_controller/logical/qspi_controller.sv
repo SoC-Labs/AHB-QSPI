@@ -14,9 +14,9 @@ module qspi_controller (
     input  wire         QSPI_ADDR_EN,
     input  wire [3:0]   QSPI_DUMMY_CYCLES,
     input  wire [3:0]   QSPI_N_RW_BYTES,
-    input  wire [23:0]  QSPI_ADDR,
-    input  wire [31:0]  QSPI_WDATA,
-    output wire [31:0]  QSPI_RDATA,
+    input  wire [21:0]  QSPI_ADDR,
+    input  wire [127:0] QSPI_WDATA,
+    output reg  [127:0] QSPI_RDATA,
     input  wire         QSPI_QIO_MODE,
 
     // QSPI Interface
@@ -25,6 +25,7 @@ module qspi_controller (
     output wire [3:0]   QSPI_IO_o,
     input  wire [3:0]   QSPI_IO_i,
     output wire [3:0]   QSPI_IO_e
+
 );
 
 reg [7:0] QSPI_CLK_DIV_COUNTER;
@@ -56,13 +57,17 @@ end
 
 enum {IDLE, OP, ADDR, DUMMY, DATA_O, DATA_I} current_state, next_state;
 
-reg [2:0] op_counter;
-reg [7:0] data_counter;
-reg [3:0] dummy_counter;
-reg [4:0] byte_counter;
-reg [7:0] op_code;
-reg [3:0] QSPI_IO_o_reg;
-reg [7:0] data_in_reg;
+reg [2:0]   op_counter;
+reg [4:0]   addr_counter;
+reg [2:0]   data_counter;
+reg [3:0]   dummy_counter;
+reg [4:0]   byte_counter;
+reg [7:0]   op_code;
+reg [23:0]  addr_code;
+reg [3:0]   QSPI_IO_o_reg;
+reg [127:0]   data_in_reg;
+reg [127:0]   QSPI_WDATA_reg;
+
 assign QSPI_IO_o = QSPI_IO_o_reg;
 
 always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
@@ -114,7 +119,26 @@ always @(*) begin
             end
         end     
         ADDR: begin
-            
+            if(QSPI_QIO_MODE==1'b1 & addr_counter==3'h5) begin
+                if(QSPI_DUMMY_CYCLES>4'h0)
+                    next_state <= DUMMY;
+                else if(QSPI_READ)
+                    next_state = DATA_I;
+                else if(QSPI_WRITE)
+                    next_state = DATA_O;
+                else
+                    next_state = IDLE;
+            end 
+            else if(QSPI_QIO_MODE==1'b0 & addr_counter==3'h21) begin
+                if(QSPI_DUMMY_CYCLES>4'h0)
+                    next_state <= DUMMY;
+                else if(QSPI_READ)
+                    next_state = DATA_I;
+                else if(QSPI_WRITE)
+                    next_state = DATA_O;
+                else
+                    next_state = IDLE;
+            end
         end 
         DUMMY: begin
             if(dummy_counter >= QSPI_DUMMY_CYCLES - 1'b1) begin
@@ -127,11 +151,26 @@ always @(*) begin
             end 
         end 
         DATA_O: begin
-            
+            if(QSPI_QIO_MODE==1'b0) begin 
+
+            end else begin 
+                if(byte_counter==QSPI_N_RW_BYTES) begin
+                    if(data_counter==3'h1)
+                        next_state = IDLE;
+                end
+            end
         end 
         DATA_I: begin 
-            if(byte_counter==QSPI_N_RW_BYTES+1'b1) begin
-                next_state = IDLE;
+            if(QSPI_QIO_MODE==1'b0) begin 
+                if((byte_counter==QSPI_N_RW_BYTES+1'b1)) begin
+                    if(data_counter==3'h6)
+                        next_state = IDLE;
+                end
+            end else begin
+                if((byte_counter==QSPI_N_RW_BYTES)) begin
+                    if(data_counter==3'h1)
+                        next_state = IDLE;
+                end
             end
         end
     endcase
@@ -153,11 +192,26 @@ always @(negedge QSPI_SCLK_i) begin
     end else if(current_state == DATA_I) begin
         QSPI_IO_e_int <= 1'b0;
         QSPI_SCLK_e <= 1'b1;
+    end else if(current_state == DATA_O) begin
+        QSPI_IO_e_int <= 1'b1;
+        QSPI_SCLK_e <= 1'b1;
+    end else if(current_state == ADDR) begin
+        QSPI_IO_e_int <= 1'b1;
+        QSPI_SCLK_e <= 1'b1;
+        if(QSPI_QIO_MODE==1'b1) begin
+            QSPI_IO_o_reg[3:0]<=addr_code[23:20];
+            addr_code[23:0] <= {addr_code[19:0],4'h0};
+        end else begin
+            QSPI_IO_o_reg[3:0]<={3'h7, addr_code[23]};
+            addr_code[23:0] <= {addr_code[22:0], 1'b0};
+        end
+
     end else if(current_state == DUMMY) begin 
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
     end else begin 
         op_code <= QSPI_CMD;
+        addr_code <= {2'b00,QSPI_ADDR};
         QSPI_SCLK_e<=1'b0;
         QSPI_IO_o_reg<=4'hF;
         QSPI_IO_e_int <= 1'b1;
@@ -165,6 +219,7 @@ always @(negedge QSPI_SCLK_i) begin
 end
 always @(posedge QSPI_SCLK_i) begin 
     if(current_state==OP) begin 
+        data_in_reg <= 128'd0;
         op_counter<=op_counter+1'b1;
     end else begin 
         op_counter <= 3'h0;
@@ -179,21 +234,80 @@ always @(posedge QSPI_SCLK_i) begin
             data_counter <= 3'h0;
         end
     end else begin 
-        data_counter <= 3'h0;
+        data_counter <= 3'h7;
         byte_counter <= 4'h0;
     end
     if(current_state == DATA_I) begin
         if(QSPI_QIO_MODE==1'b1) begin 
-            data_in_reg <= {data_in_reg[3:0], QSPI_IO_i};
+            data_in_reg <= {data_in_reg[124:0], QSPI_IO_i};
         end else begin 
-            data_in_reg <= {data_in_reg[6:0],QSPI_IO_i[1]};
+            data_in_reg <= {data_in_reg[126:0],QSPI_IO_i[1]};
         end
+    end
+    if(current_state == DATA_O) begin 
+        if(QSPI_QIO_MODE==1'b1) begin 
+            QSPI_IO_o_reg <= QSPI_WDATA_reg[3:0];
+            QSPI_WDATA_reg <= {4'h0, QSPI_WDATA_reg[127:4]};
+        end else begin 
+            QSPI_IO_o_reg[0] <= QSPI_WDATA_reg[0];
+            QSPI_WDATA_reg <= {1'b0, QSPI_WDATA_reg[127:1]};
+        end
+    end else begin
+        QSPI_WDATA_reg <= QSPI_WDATA;
     end
 
     if(current_state == DUMMY) begin 
         dummy_counter <= dummy_counter + 1'b1;
     end else begin 
         dummy_counter <= 4'h0;
+    end
+
+    if(current_state == ADDR) begin 
+        addr_counter <= addr_counter + 1'b1;
+    end else begin 
+        addr_counter <= 5'h00;
+    end
+
+end
+
+// RDATA latch
+always @(posedge QSPI_nCS or negedge HRESETn) begin
+    if(~HRESETn)
+        QSPI_RDATA <= 128'd0;
+    else begin
+        if(QSPI_N_RW_BYTES==4'h0)
+            QSPI_RDATA <= {{120{1'b0}}, data_in_reg[7:0]};
+        else if(QSPI_N_RW_BYTES==4'h1)
+            QSPI_RDATA <= {{112{1'b0}}, data_in_reg[15:0]};
+        else if(QSPI_N_RW_BYTES==4'h2)
+            QSPI_RDATA <= {{104{1'b0}}, data_in_reg[23:0]};
+        else if(QSPI_N_RW_BYTES==4'h3)
+            QSPI_RDATA <= {{96{1'b0}}, data_in_reg[31:0]};
+        else if(QSPI_N_RW_BYTES==4'h4)
+            QSPI_RDATA <= {{88{1'b0}}, data_in_reg[39:0]};
+        else if(QSPI_N_RW_BYTES==4'h5)
+            QSPI_RDATA <= {{80{1'b0}}, data_in_reg[47:0]};
+        else if(QSPI_N_RW_BYTES==4'h6)
+            QSPI_RDATA <= {{72{1'b0}}, data_in_reg[55:0]};
+        else if(QSPI_N_RW_BYTES==4'h7)
+            QSPI_RDATA <= {{64{1'b0}}, data_in_reg[63:0]};
+        else if(QSPI_N_RW_BYTES==4'h8)
+            QSPI_RDATA <= {{56{1'b0}}, data_in_reg[71:0]};
+        else if(QSPI_N_RW_BYTES==4'h9)
+            QSPI_RDATA <= {{48{1'b0}}, data_in_reg[79:0]};
+        else if(QSPI_N_RW_BYTES==4'hA)
+            QSPI_RDATA <= {{40{1'b0}}, data_in_reg[87:0]};
+        else if(QSPI_N_RW_BYTES==4'hB)
+            QSPI_RDATA <= {{32{1'b0}}, data_in_reg[95:0]};
+        else if(QSPI_N_RW_BYTES==4'hC)
+            QSPI_RDATA <= {{24{1'b0}}, data_in_reg[103:0]};
+        else if(QSPI_N_RW_BYTES==4'hD)
+            QSPI_RDATA <= {{16{1'b0}}, data_in_reg[111:0]};
+        else if(QSPI_N_RW_BYTES==4'hE)
+            QSPI_RDATA <= {{8{1'b0}}, data_in_reg[120:0]};
+        else if(QSPI_N_RW_BYTES==4'hF)
+            QSPI_RDATA <=  data_in_reg[127:0];
+        
     end
 
 end

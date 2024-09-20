@@ -67,6 +67,9 @@ async def SPI_READ_JEDIC(dut, tb):
     while(int(data[0]['data'],16)&1):
         await ClockCycles(dut.HCLK,10)
         data = await tb.config_ahb_master.read(0x04,4)
+    ID = await tb.config_ahb_master.read(0x10,4)
+    print(ID)
+    assert int(ID[0]['data'],16) == 0x4326BF00
 
 async def SET_QPI_MODE(dut,tb):
     await tb.config_ahb_master.write(0x08, 0x00000038)
@@ -84,7 +87,10 @@ async def QPI_READ_JEDIC(dut, tb):
     while(int(data[0]['data'],16)&1):
         await ClockCycles(dut.HCLK,10)
         data = await tb.config_ahb_master.read(0x04,4)
-        
+    ID = await tb.config_ahb_master.read(0x10,4)
+    print(ID)
+    assert int(ID[0]['data'],16) == 0x4326BF00
+      
 async def SPI_WRITE_ENABLE(dut, tb):
     await tb.config_ahb_master.write(0x08, 0x00000006)
     await tb.config_ahb_master.write(0x08, 0x00000106)
@@ -93,7 +99,16 @@ async def SPI_WRITE_ENABLE(dut, tb):
     while(int(data[0]['data'],16)&1):
         await ClockCycles(dut.HCLK,2)
         data = await tb.config_ahb_master.read(0x04,4)
-        
+ 
+async def SPI_WRITE_DISABLE(dut, tb):
+    await tb.config_ahb_master.write(0x08, 0x00000004)
+    await tb.config_ahb_master.write(0x08, 0x00000104)
+
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,2)
+        data = await tb.config_ahb_master.read(0x04,4)
+       
 async def SPI_CLR_PROTECTION(dut, tb):
     await tb.config_ahb_master.write(0x08, 0x00000098)
     await tb.config_ahb_master.write(0x08, 0x00000198)
@@ -103,8 +118,19 @@ async def SPI_CLR_PROTECTION(dut, tb):
         await ClockCycles(dut.HCLK,2)
         data = await tb.config_ahb_master.read(0x04,4)
    
+async def SPI_CHIP_ERASE(dut, tb):
+    await tb.config_ahb_master.write(0x08, 0x000000C7)
+    await tb.config_ahb_master.write(0x08, 0x000001C7)
+
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,2)
+        data = await tb.config_ahb_master.read(0x04,4)
 
 async def SPI_BLOCK_ERASE(dut, tb):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, 0x000000)
+    
     await tb.config_ahb_master.write(0x08, 0x000008D8)
     await tb.config_ahb_master.write(0x08, 0x000009D8)
 
@@ -112,7 +138,66 @@ async def SPI_BLOCK_ERASE(dut, tb):
     while(int(data[0]['data'],16)&1):
         await ClockCycles(dut.HCLK,2)
         data = await tb.config_ahb_master.read(0x04,4)
+    SPI_STAT = await SPI_READ_STAT_REG(dut, tb)
+    while(SPI_STAT&1):
+        SPI_STAT = await SPI_READ_STAT_REG(dut, tb)
+        await Timer(time=1, units='ms')
    
+async def SPI_READ_STAT_REG(dut,tb):
+    await tb.config_ahb_master.write(0x08, 0x00001005)
+    await tb.config_ahb_master.write(0x08, 0x00001305)
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+    data = await tb.config_ahb_master.read(0x10,4)
+    return (int(data[0]['data'],16))
+
+async def SPI_READ_SLOW(dut, tb):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, 0x000000)
+    
+    await tb.config_ahb_master.write(0x08, 0x00001003)
+    await tb.config_ahb_master.write(0x08, 0x00001303)
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+    rData = await tb.config_ahb_master.read(0x10,4)
+    print(rData)
+
+async def QPI_READ(dut,tb):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, 0x000000)
+
+    await tb.config_ahb_master.write(0x08, 0x36A0B)
+    await tb.config_ahb_master.write(0x08, 0x36B0B)
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+    rData = await tb.config_ahb_master.read(0x10,4)
+    print(rData)
+    
+async def QPI_PAGE_PROGRAM(dut, tb):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, 0x000000)
+    # Write Data
+    await tb.config_ahb_master.write(0x20, 0x84736251)
+    await tb.config_ahb_master.write(0x24, 0xF0F0F0F0)
+    await tb.config_ahb_master.write(0x28, 0xF0F0F0F0)
+    await tb.config_ahb_master.write(0x2C, 0xF0F0F0F0)
+
+    await tb.config_ahb_master.write(0x08, 0x30C02)
+    await tb.config_ahb_master.write(0x08, 0x30D02)
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+    SPI_STAT = await SPI_READ_STAT_REG(dut, tb)
+    while(SPI_STAT&1):
+        SPI_STAT = await SPI_READ_STAT_REG(dut, tb)
+        await Timer(time=10, units='us')
 
 
 @cocotb.test()
@@ -126,7 +211,18 @@ async def QSPI_TESTS(dut):
     await QPI_READ_JEDIC(dut, tb)
     await SPI_WRITE_ENABLE(dut, tb)
     await SPI_CLR_PROTECTION(dut, tb)
-    await SPI_CHIP_ERASE(dut, tb)
+    await SPI_WRITE_ENABLE(dut, tb)
+    
+    await QPI_PAGE_PROGRAM(dut, tb)
+    
+    await SPI_WRITE_DISABLE(dut,tb)
+    await QPI_READ(dut, tb)
+    
+    #await SPI_WRITE_ENABLE(dut, tb)
+    #await SPI_CLR_PROTECTION(dut, tb)
+    #await SPI_WRITE_ENABLE(dut, tb)
+    #await SPI_BLOCK_ERASE(dut, tb)
+    #await ClockCycles(dut.HCLK,50)
 
     
     

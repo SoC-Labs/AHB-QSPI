@@ -21,7 +21,9 @@ else
 endif
 
 get_flash_model:
-	@cd $(SOCLABS_AHB_QSPI_DIR)/verif/VIP; wget https://ww1.microchip.com/downloads/en/DeviceDoc/sst26wf040b.v
+	@cd $(SOCLABS_AHB_QSPI_DIR)/verif/VIP; wget https://ww1.microchip.com/downloads/en/DeviceDoc/SST26VF064B.zip 
+	@cd $(SOCLABS_AHB_QSPI_DIR)/verif/VIP; unzip SST26VF064B.zip
+	@cd $(SOCLABS_AHB_QSPI_DIR)/verif/VIP; rm SST26VF064B.zip
 
 #Include flows
 include ./flows/makefile.simulate

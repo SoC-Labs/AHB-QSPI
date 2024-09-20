@@ -159,15 +159,21 @@ cache_subsystem u_cache_subsystem(
     .CACHEHIT()
 );
 
-wire [7:0]  QSPI_CMD;
-wire        QSPI_ENABLE;
-wire        QSPI_ENABLE_ACK;
-wire        QSPI_READ;
-wire        QSPI_WRITE;
-wire        QSPI_ADDR_EN;
-wire [3:0]  QSPI_N_RW_BYTES;
-wire        QSPI_QIO_MODE;
-wire [3:0]  QSPI_DUMMY_CYCLES;
+wire [7:0]      QSPI_CMD;
+wire            QSPI_ENABLE;
+wire            QSPI_ENABLE_ACK;
+wire            QSPI_READ;
+wire            QSPI_WRITE;
+wire            QSPI_ADDR_EN;
+wire [3:0]      QSPI_N_RW_BYTES;
+wire            QSPI_QIO_MODE;
+wire [3:0]      QSPI_DUMMY_CYCLES;
+wire [21:0]     QSPI_ADDR;
+wire [127:0]    QSPI_RDATA;
+wire [127:0]    QSPI_WDATA;
+
+
+wire XIP_ACTIVE;
 
 apb_qspi_regs u_apb_qspi_regs(
     .PCLK(PCLK),
@@ -191,8 +197,12 @@ apb_qspi_regs u_apb_qspi_regs(
     .QSPI_ADDR_EN(QSPI_ADDR_EN),
     .QSPI_DUMMY_CYCLES(QSPI_DUMMY_CYCLES),
     .QSPI_N_RW_BYTES(QSPI_N_RW_BYTES),
+    .QSPI_ADDR(QSPI_ADDR),
     .QSPI_BUSY(~QSPI_nCS),
-    .QSPI_QIO_MODE(QSPI_QIO_MODE)
+    .QSPI_QIO_MODE(QSPI_QIO_MODE),
+    .QSPI_RDATA(QSPI_RDATA),
+    .QSPI_WDATA(QSPI_WDATA),
+    .XIP_ACTIVE(XIP_ACTIVE)
 );
 
 ahb_qspi_interface #(
@@ -228,10 +238,10 @@ qspi_controller u_qspi_controller(
     .QSPI_ADDR_EN(QSPI_ADDR_EN),
     .QSPI_DUMMY_CYCLES(QSPI_DUMMY_CYCLES),
     .QSPI_N_RW_BYTES(QSPI_N_RW_BYTES),
+    .QSPI_ADDR(QSPI_ADDR),
     .QSPI_QIO_MODE(QSPI_QIO_MODE),
-    .QSPI_ADDR(),
-    .QSPI_WDATA(),
-    .QSPI_RDATA(),
+    .QSPI_WDATA(QSPI_WDATA),
+    .QSPI_RDATA(QSPI_RDATA),
 
     .QSPI_SCLK(QSPI_SCLK),
     .QSPI_nCS(QSPI_nCS),

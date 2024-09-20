@@ -9,4 +9,4 @@ verif/cocotb/transcript
 verif/cocotb/sim_build/
 verif/cocotb/__pycache__/
 
-verif/VIP/sst26wf040b.v
+verif/VIP/SST26VF064B.v
