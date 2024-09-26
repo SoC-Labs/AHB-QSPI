@@ -60,7 +60,7 @@ reg [1:0]           last_HTRANS;
 reg         qspi_ready;
 reg         qspi_started;
 
-assign HREADYOUT = qspi_ready; //(current_state==IDLE)? 1'b1 : qspi_ready;
+assign HREADYOUT = (current_state==IDLE && last_HTRANS==2'b00) ? 1'b1: qspi_ready; //(current_state==IDLE)? 1'b1 : qspi_ready;
 
 always @(posedge HCLK or negedge HRESETn) begin 
     if(~HRESETn) begin 
@@ -83,7 +83,9 @@ end
 always @(*) begin
     next_state = IDLE;
     case(current_state)
-        IDLE:           if(HSELx & HWRITE & ~qspi_ready)
+        IDLE:           if(HTRANS==2'b00)
+                            next_state = IDLE;
+                        else if(HSELx & HWRITE & ~qspi_ready)
                             next_state = WAIT_WRITE;
                         else if(HSELx & ~qspi_ready)
                             next_state = WAIT_READ;

@@ -346,7 +346,7 @@ async def QSPI_READ_TESTS(dut):
     QSPI_CTRL_REG = QSPI_CTRL_REG | (1<<25)
     await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
     
-    n_reads = 64
+    n_reads = 512
     
     start_time = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads):
@@ -367,10 +367,12 @@ async def QSPI_READ_TESTS(dut):
 
     CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x04,4)
     CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
-    while((CACHE_STATUS&(0x3))==0):
+    while((CACHE_STATUS&(0x3))!=2):
+        CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x00,4)
         CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x04,4)
         CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
         await Timer(time=10, units='us')
+        print(CACHE_STATUS)
     print(CACHE_STATUS) 
 
     
@@ -381,7 +383,7 @@ async def QSPI_READ_TESTS(dut):
         data = await tb.data_ahb_master.read(i*4,4)
     end_time_uncached = cocotb.utils.get_sim_time(units='ns')
     dt_uncached = end_time_uncached - start_time_uncached
-        
+    await Timer(time=10, units='us')
     start_time_cached = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads):
         data = await tb.data_ahb_master.read(i*4,4)
@@ -396,11 +398,16 @@ async def QSPI_READ_TESTS(dut):
     await tb.config_ahb_master.write(0x08, 0x0FF)
     await tb.config_ahb_master.write(0x08, 0x1FF)
     tb.log.info("Time taken = %f", dt)
-    BW = n_reads*4*32/(8*dt*1e-3)
-    BW_uncached = n_reads*4*32/(8*dt_uncached*1e-3)
-    BW_cached = n_reads*4*32/(8*dt_cached*1e-3)
+    BW = n_reads*4/(dt*1e-3)
+    BW_uncached = n_reads*4/(dt_uncached*1e-3)
+    BW_cached = n_reads*4/(dt_cached*1e-3)
 
-    tb.log.info("Bandwidth: %f MB/s", BW)
+    tb.log.info("dt APB: %f ns", dt)
+    tb.log.info("dt caching: %f ns", dt_uncached)
+    tb.log.info("dt cached: %f ns", dt_cached)
+
+
+    tb.log.info("Bandwidth APB: %f MB/s", BW)
     tb.log.info("Bandwidth caching: %f MB/s", BW_uncached)
     tb.log.info("Bandwidth cached: %f MB/s", BW_cached)
 
