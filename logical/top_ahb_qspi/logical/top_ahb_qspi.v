@@ -128,14 +128,14 @@ cache_subsystem u_cache_subsystem(
     .HSELS(HSELx),
     .HADDRS(HADDR[21:0]),
     .HBURSTS(HBURST),
-    .HMASTLOCKS(),
+    .HMASTLOCKS(1'b1),
     .HTRANSS(HTRANS),
     .HSIZES(HSIZE),
     .HPROTS(HPROT),
     .HWRITES(HWRITE),
     .HWDATAS(HWDATA),
     .HREADYS(HREADY),
-    .HMASTERS(),
+    .HMASTERS(1'b0),
     .HREADYOUTS(HREADYOUT),
     .HRDATAS(HRDATA),
     .HRESPS(HRESP),
@@ -159,21 +159,96 @@ cache_subsystem u_cache_subsystem(
     .CACHEHIT()
 );
 
-wire [7:0]      QSPI_CMD;
-wire            QSPI_ENABLE;
-wire            QSPI_ENABLE_ACK;
-wire            QSPI_READ;
-wire            QSPI_WRITE;
-wire            QSPI_ADDR_EN;
-wire [3:0]      QSPI_N_RW_BYTES;
+
+wire [7:0]           QSPI_CMD;
+wire                 QSPI_ENABLE;
+wire                 QSPI_READ;
+wire                 QSPI_WRITE;
+wire                 QSPI_ADDR_EN;
+wire [3:0]           QSPI_DUMMY_CYCLES;
+wire [3:0]           QSPI_N_RW_BYTES;
+wire [21:0]          QSPI_ADDR;
+wire [127:0]         QSPI_WDATA;
+wire                 QSPI_ENABLE_ACK;
+wire                 QSPI_BUSY;
+wire [127:0]         QSPI_RDATA;
+
+wire [7:0]           AHB_QSPI_CMD;
+wire                 AHB_QSPI_ENABLE;
+wire                 AHB_QSPI_READ;
+wire                 AHB_QSPI_WRITE;
+wire                 AHB_QSPI_ADDR_EN;
+wire [3:0]           AHB_QSPI_DUMMY_CYCLES;
+wire [3:0]           AHB_QSPI_N_RW_BYTES;
+wire [21:0]          AHB_QSPI_ADDR;
+wire [127:0]         AHB_QSPI_WDATA;
+wire                 AHB_QSPI_ENABLE_ACK;
+wire                 AHB_QSPI_BUSY;
+wire [127:0]         AHB_QSPI_RDATA;
+
+wire [7:0]           APB_QSPI_CMD;
+wire                 APB_QSPI_ENABLE;
+wire                 APB_QSPI_READ;
+wire                 APB_QSPI_WRITE;
+wire                 APB_QSPI_ADDR_EN;
+wire [3:0]           APB_QSPI_DUMMY_CYCLES;
+wire [3:0]           APB_QSPI_N_RW_BYTES;
+wire [21:0]          APB_QSPI_ADDR;
+wire [127:0]         APB_QSPI_WDATA;
+wire                 APB_QSPI_ENABLE_ACK;
+wire                 APB_QSPI_BUSY;
+wire [127:0]         APB_QSPI_RDATA;
+
+// Config from APB
 wire            QSPI_QIO_MODE;
-wire [3:0]      QSPI_DUMMY_CYCLES;
-wire [21:0]     QSPI_ADDR;
-wire [127:0]    QSPI_RDATA;
-wire [127:0]    QSPI_WDATA;
+wire            QSPI_CONT_READ;
+wire [7:0]      QSPI_MODE_CODE;
+wire            QSPI_NO_CMD;
+wire            XIP_ACTIVE;
 
 
-wire XIP_ACTIVE;
+qspi_controller_mux u_qspi_controller_mux(
+    .XIP_ACTIVE(XIP_ACTIVE),
+
+    .AHB_QSPI_CMD(AHB_QSPI_CMD),
+    .AHB_QSPI_ENABLE(AHB_QSPI_ENABLE),
+    .AHB_QSPI_READ(AHB_QSPI_READ),
+    .AHB_QSPI_WRITE(AHB_QSPI_WRITE),
+    .AHB_QSPI_ADDR_EN(AHB_QSPI_ADDR_EN),
+    .AHB_QSPI_DUMMY_CYCLES(AHB_QSPI_DUMMY_CYCLES),
+    .AHB_QSPI_N_RW_BYTES(AHB_QSPI_N_RW_BYTES),
+    .AHB_QSPI_ADDR(AHB_QSPI_ADDR),
+    .AHB_QSPI_WDATA(AHB_QSPI_WDATA),
+    .AHB_QSPI_ENABLE_ACK(AHB_QSPI_ENABLE_ACK),
+    .AHB_QSPI_BUSY(AHB_QSPI_BUSY),
+    .AHB_QSPI_RDATA(AHB_QSPI_RDATA),
+
+    .APB_QSPI_CMD(APB_QSPI_CMD),
+    .APB_QSPI_ENABLE(APB_QSPI_ENABLE),
+    .APB_QSPI_READ(APB_QSPI_READ),
+    .APB_QSPI_WRITE(APB_QSPI_WRITE),
+    .APB_QSPI_ADDR_EN(APB_QSPI_ADDR_EN),
+    .APB_QSPI_DUMMY_CYCLES(APB_QSPI_DUMMY_CYCLES),
+    .APB_QSPI_N_RW_BYTES(APB_QSPI_N_RW_BYTES),
+    .APB_QSPI_ADDR(APB_QSPI_ADDR),
+    .APB_QSPI_WDATA(APB_QSPI_WDATA),
+    .APB_QSPI_ENABLE_ACK(APB_QSPI_ENABLE_ACK),
+    .APB_QSPI_BUSY(APB_QSPI_BUSY),
+    .APB_QSPI_RDATA(APB_QSPI_RDATA),
+
+    .QSPI_CMD(QSPI_CMD),
+    .QSPI_ENABLE(QSPI_ENABLE),
+    .QSPI_READ(QSPI_READ),
+    .QSPI_WRITE(QSPI_WRITE),
+    .QSPI_ADDR_EN(QSPI_ADDR_EN),
+    .QSPI_DUMMY_CYCLES(QSPI_DUMMY_CYCLES),
+    .QSPI_N_RW_BYTES(QSPI_N_RW_BYTES),
+    .QSPI_ADDR(QSPI_ADDR),
+    .QSPI_WDATA(QSPI_WDATA),
+    .QSPI_ENABLE_ACK(QSPI_ENABLE_ACK),
+    .QSPI_BUSY(~QSPI_nCS),
+    .QSPI_RDATA(QSPI_RDATA)
+);
 
 apb_qspi_regs u_apb_qspi_regs(
     .PCLK(PCLK),
@@ -189,20 +264,23 @@ apb_qspi_regs u_apb_qspi_regs(
     .PREADY(qspi_pready),
     .PSLVERR(qspi_pslverr),
 
-    .QSPI_CMD(QSPI_CMD),
-    .QSPI_ENABLE(QSPI_ENABLE),
-    .QSPI_ENABLE_ACK(QSPI_ENABLE_ACK),
-    .QSPI_READ(QSPI_READ),
-    .QSPI_WRITE(QSPI_WRITE),
-    .QSPI_ADDR_EN(QSPI_ADDR_EN),
-    .QSPI_DUMMY_CYCLES(QSPI_DUMMY_CYCLES),
-    .QSPI_N_RW_BYTES(QSPI_N_RW_BYTES),
-    .QSPI_ADDR(QSPI_ADDR),
-    .QSPI_BUSY(~QSPI_nCS),
+    .QSPI_CMD(APB_QSPI_CMD),
+    .QSPI_ENABLE(APB_QSPI_ENABLE),
+    .QSPI_ENABLE_ACK(APB_QSPI_ENABLE_ACK),
+    .QSPI_READ(APB_QSPI_READ),
+    .QSPI_WRITE(APB_QSPI_WRITE),
+    .QSPI_ADDR_EN(APB_QSPI_ADDR_EN),
+    .QSPI_DUMMY_CYCLES(APB_QSPI_DUMMY_CYCLES),
+    .QSPI_N_RW_BYTES(APB_QSPI_N_RW_BYTES),
+    .QSPI_ADDR(APB_QSPI_ADDR),
+    .QSPI_BUSY(APB_QSPI_BUSY),
     .QSPI_QIO_MODE(QSPI_QIO_MODE),
-    .QSPI_RDATA(QSPI_RDATA),
-    .QSPI_WDATA(QSPI_WDATA),
-    .XIP_ACTIVE(XIP_ACTIVE)
+    .QSPI_RDATA(APB_QSPI_RDATA),
+    .QSPI_WDATA(APB_QSPI_WDATA),
+    .XIP_ACTIVE(XIP_ACTIVE),
+    .QSPI_CONT_READ(QSPI_CONT_READ),
+    .QSPI_MODE_CODE(QSPI_MODE_CODE),
+    .QSPI_NO_CMD(QSPI_NO_CMD)
 );
 
 ahb_qspi_interface #(
@@ -222,13 +300,25 @@ ahb_qspi_interface #(
         .HRDATA(flash_HRDATAM),
         .HREADY(flash_HREADYM),
         .HREADYOUT(flash_HREADYOUTM),
-        .HRESP(flash_HRESPM)
+        .HRESP(flash_HRESPM),
+        .AHB_QSPI_CMD(AHB_QSPI_CMD),
+        .AHB_QSPI_ENABLE(AHB_QSPI_ENABLE),
+        .AHB_QSPI_READ(AHB_QSPI_READ),
+        .AHB_QSPI_WRITE(AHB_QSPI_WRITE),
+        .AHB_QSPI_ADDR_EN(AHB_QSPI_ADDR_EN),
+        .AHB_QSPI_DUMMY_CYCLES(AHB_QSPI_DUMMY_CYCLES),
+        .AHB_QSPI_N_RW_BYTES(AHB_QSPI_N_RW_BYTES),
+        .AHB_QSPI_ADDR(AHB_QSPI_ADDR),
+        .AHB_QSPI_WDATA(AHB_QSPI_WDATA),
+        .AHB_QSPI_ENABLE_ACK(AHB_QSPI_ENABLE_ACK),
+        .AHB_QSPI_BUSY(AHB_QSPI_BUSY),
+        .AHB_QSPI_RDATA(AHB_QSPI_RDATA)
 );
 
 qspi_controller u_qspi_controller(
     .HCLK(HCLK),
     .HRESETn(HRESETn),
-    .QSPI_CLK_DIV(8'h02),
+    .QSPI_CLK_DIV(8'h01),
     .QSPI_SPI_MODE(2'b00),
     .QSPI_CMD(QSPI_CMD),
     .QSPI_ENABLE(QSPI_ENABLE),
@@ -242,6 +332,9 @@ qspi_controller u_qspi_controller(
     .QSPI_QIO_MODE(QSPI_QIO_MODE),
     .QSPI_WDATA(QSPI_WDATA),
     .QSPI_RDATA(QSPI_RDATA),
+    .QSPI_CONT_READ(QSPI_CONT_READ),
+    .QSPI_MODE_CODE(QSPI_MODE_CODE),
+    .QSPI_NO_CMD(QSPI_NO_CMD),
 
     .QSPI_SCLK(QSPI_SCLK),
     .QSPI_nCS(QSPI_nCS),

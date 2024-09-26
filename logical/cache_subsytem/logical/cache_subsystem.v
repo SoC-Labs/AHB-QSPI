@@ -80,12 +80,15 @@ wire            RAMTAG1CS;
 wire [10:0]     RAMTAG1WDATA;
 wire [10:0]     RAMTAG1RDATA;
 
+wire            RAMPWRUPACK;
+wire            RAMPWRUPREQ;
+reg             PWR_DELAY;
 
 p_flash_cache_f0 #(
     .AW(22),
     .CW(12),
     .CACHE_WAY(2),
-    .RESET_ALL_REGS(0),
+    .RESET_ALL_REGS(1),
     .GEN_STAT_LOGIC(1),
     .LINEW(4)
     ) u_cache_controller(
@@ -119,8 +122,8 @@ p_flash_cache_f0 #(
         .HRDATAS(HRDATAS),
         .HRESPS(HRESPS),
         // CACHE RAM POWER UP
-        .RAMPWRUPREQ(),
-        .RAMPWRUPACK(),
+        .RAMPWRUPREQ(RAMPWRUPREQ),
+        .RAMPWRUPACK(RAMPWRUPACK),
         // TAG RAM way 0
         .RAMTAG0ADDR(RAMTAG0ADDR),
         .RAMTAG0WE(RAMTAG0WE),
@@ -169,6 +172,14 @@ p_flash_cache_f0 #(
         .CACHEMISS(CACHEMISS),
         .CACHEHIT(CACHEHIT)
 );
+
+always @(posedge HCLK or negedge HRESETn) begin 
+    if(~HRESETn)
+        PWR_DELAY <= 1'b0;
+    else 
+        PWR_DELAY <= RAMPWRUPREQ;
+end
+assign RAMPWRUPACK = PWR_DELAY;
 
 cache_ram #(
     .ADDR_W(8)

@@ -1,0 +1,31 @@
+#-----------------------------------------------------------------------------
+# NanoSoC Lint Design Makefile 
+# A joint work commissioned on behalf of SoC Labs, under Arm Academic Access license.
+#
+# Contributors
+#
+# David Mapstone (d.a.mapstone@soton.ac.uk)
+#
+# Copyright (C) 2021-3, SoC Labs (www.soclabs.org)
+#-----------------------------------------------------------------------------
+
+# Include Lint Checks
+include $(SOCLABS_SOCTOOLS_FLOW_DIR)/resources/hal/makefile.hal_checks
+
+# Lint-related Directories
+LINT_DIR = $(SOCLABS_AHB_QSPI_DIR)/lint/ahb_qspi
+LINT_INFO_DIR = $(SOCLABS_AHB_QSPI_DIR)/hal
+
+# HAL Black Box FIles
+
+# HAL Waivers
+HAL_WAIVE  = -design_info $(LINT_INFO_DIR)/ahb_qspi.waive 
+
+# Top-level Module to Lint
+LINT_TOP ?= top_ahb_qspi
+LINT_FLIST ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI.flist
+
+# Target from Running Verilator Lint Tool
+lint_verilator:
+	@rm -rf $(LINT_DIR) 
+	@mkdir -p $(LINT_DIR)-	@cd $(LINT_DIR); verilator --lint-only -f $(LINT_FLIST) -I$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/ --top-module $(LINT_TOP)

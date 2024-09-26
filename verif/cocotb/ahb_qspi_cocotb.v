@@ -1,4 +1,4 @@
-`timescale 1ns/1ps 
+`timescale 1ns/10ps 
 
 module ahb_qspi_cocotb(
     input  wire                 HCLK,
@@ -10,7 +10,6 @@ module ahb_qspi_cocotb(
     input  wire             config_HWRITE,
     input  wire [2:0]       config_HSIZE,
     input  wire [2:0]       config_HBURST,
-    input  wire [3:0]       config_HPROT,
     input  wire [32-1:0]    config_HWDATA,
     input  wire             config_HSEL,
     output wire [32-1:0]    config_HRDATA,
@@ -23,7 +22,6 @@ module ahb_qspi_cocotb(
     input  wire             data_HWRITE,
     input  wire [2:0]       data_HSIZE,
     input  wire [2:0]       data_HBURST,
-    input  wire [3:0]       data_HPROT,
     input  wire [32-1:0]    data_HWDATA,
     input  wire             data_HSEL,
     output wire [32-1:0]    data_HRDATA,
@@ -37,8 +35,10 @@ begin
    $dumpfile("ahb_qspi.vcd");
    $dumpvars;
 end
-
-
+wire [3:0]       config_HPROT;
+wire [3:0]       data_HPROT;
+assign config_HPROT = 4'b0010;
+assign data_HPROT = 4'b1000;
 wire [15:0]          PADDR;
 wire [2:0]           PPROT;
 wire                 PSEL;

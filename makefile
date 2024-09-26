@@ -27,5 +27,5 @@ get_flash_model:
 
 #Include flows
 include ./flows/makefile.simulate
-
+include ./flows/makefile.lint
 export BP210_DIR

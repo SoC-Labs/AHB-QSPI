@@ -27,13 +27,18 @@ module apb_qspi_regs(
     output wire [21:0]          QSPI_ADDR,
     input  wire [127:0]         QSPI_RDATA,
     output wire [127:0]         QSPI_WDATA,
-    output wire                 XIP_ACTIVE
+    output wire                 XIP_ACTIVE,
+    output wire                 QSPI_CONT_READ,
+    output wire [7:0]           QSPI_MODE_CODE,
+    output wire                 QSPI_NO_CMD
 );   
 // Registers
 // reg0 Control 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
 //      QSPI_QIO_MODE[0]                                                            |               |--> QSPI_QIO_MODE [0]
 //     XIP_ACTIVE [8]                                                               |------------------> XIP_ACTIVE [8]
-//
+//  QSPI_MODE_CODE[23:16]
+//  QSPI_CONT_READ[24]
+//  QSPI_NO_CMD[25]
 
 // reg1 Status
 
@@ -64,6 +69,9 @@ reg [31:0] reg11;
 
 assign QSPI_QIO_MODE = reg0[0];
 assign XIP_ACTIVE = reg0[8];
+assign QSPI_MODE_CODE = reg0[23:16];
+assign QSPI_CONT_READ = reg0[24];
+assign QSPI_NO_CMD = reg0[25];
 
 assign QSPI_CMD = reg2[7:0];
 assign QSPI_ENABLE = reg2[8];
@@ -116,10 +124,10 @@ always @(PCLK, PADDR) begin
             10'h001: PRDATA = reg1;
             10'h002: PRDATA = reg2;
             10'h003: PRDATA = reg3;
-            10'h004: PRDATA = QSPI_RDATA[31:0];
-            10'h005: PRDATA = QSPI_RDATA[63:32];
-            10'h006: PRDATA = QSPI_RDATA[95:64];
-            10'h007: PRDATA = QSPI_RDATA[127:96];
+            10'h004: PRDATA = {QSPI_RDATA[7:0],QSPI_RDATA[15:8],QSPI_RDATA[23:16],QSPI_RDATA[31:24]};
+            10'h005: PRDATA = {QSPI_RDATA[39:32], QSPI_RDATA[47:40], QSPI_RDATA[55:48], QSPI_RDATA[63:56]};
+            10'h006: PRDATA = {QSPI_RDATA[71:64], QSPI_RDATA[79:72], QSPI_RDATA[87:80], QSPI_RDATA[95:88]};
+            10'h007: PRDATA = {QSPI_RDATA[103:96], QSPI_RDATA[111:104], QSPI_RDATA[119:112], QSPI_RDATA[127:120]};
             10'h008: PRDATA = reg8;
             10'h009: PRDATA = reg9;
             10'h00A: PRDATA = reg10;

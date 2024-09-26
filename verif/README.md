@@ -20,10 +20,10 @@ Configuration
 Read
 
 - [ ] (0x03) Read Memory
-- [ ] (0x0B) High speed Read
-- [ ] (0x6B) SQOR: SPI Quad Ouptut Read
+- [x] (0x0B) High speed Read
+- [ ] (0x6B) SQOR: SPI Quad Output Read
 - [ ] (0xEB) SQIOR: SPI Quad I/O Read
-- [ ] (0x3B) SDOR: SPI Dual Ouptut Read
+- [ ] (0x3B) SDOR: SPI Dual Output Read
 - [ ] (0xBB) SDIOR: SPI Dual I/O Read
 - [ ] (0xC0) SB: Set Burst Length
 - [ ] (0x0C) RBSQI: SQI Read Burst with Wrap
@@ -42,7 +42,7 @@ Write
 - [ ] (0x20) SE: Erase 4 KBytes of memory array
 - [ ] (0xD8) BE: Erase 64, 32, or 8 KBytes of memory array
 - [ ] (0xC7) CE: Full chip erase
-- [ ] (0x02) PP: Page program
+- [x] (0x02) PP: Page program
 - [ ] (0x32) SPI Quad page program
 - [ ] (0xB0) WRSU: Suspend program/erase
 - [ ] (0x30) WRRE: Resume Program/erase
