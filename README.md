@@ -26,3 +26,9 @@ The APB is mapped between the QSPI controller and Flash Cache configuration regi
 ## Simulation
 The AHB QSPI includes a cocoTB simulation environment. This can be run using the `make run_cocotb` command
 
+## Statistics
+Read bandwidth with 4 KB cache for 512x 32 bit reads, and system clock of 200 MHz + SPI clock 100 MHz:
+
+- Using APB: 5.8 MB/s
+- Using AHB(uncached, prefetch enabled): 32 MB/s
+- Using AHB(cached): 400 MB/s
