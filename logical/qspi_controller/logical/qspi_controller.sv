@@ -60,7 +60,7 @@ always @(posedge HCLK or negedge HRESETn) begin
     end
 end
 
-enum {IDLE, OP, ADDR, MODE, DUMMY, DATA_O, DATA_I} current_state, next_state;
+enum {IDLE, NO_FETCH, OP, ADDR, MODE, DUMMY, DATA_O, DATA_I} current_state, next_state;
 
 reg [2:0]   op_counter;
 reg [4:0]   addr_counter;
@@ -72,7 +72,8 @@ reg [7:0]   op_code;
 reg [23:0]  addr_code;
 reg [7:0]   qspi_mode_reg;
 reg [3:0]   QSPI_IO_o_reg;
-reg [127:0]   data_in_reg;
+reg [127:0] data_in_reg;
+reg [21:0]  last_QSPI_ADDR;
 
 reg [127:0]   QSPI_WDATA_reg;
 
@@ -92,12 +93,20 @@ always @(*) begin
             if(QSPI_ENABLE==1'b1 && QSPI_NO_CMD==1'b0) begin
                 next_state = OP;
             end else if(QSPI_ENABLE==1'b1 && QSPI_NO_CMD==1'b1) begin
-                next_state = ADDR;
+                if(last_QSPI_ADDR==QSPI_ADDR)
+                    next_state = NO_FETCH;
+                else
+                    next_state = ADDR;
             end else begin
                 next_state = IDLE;
                 QSPI_ENABLE_ACK = 1'b0;
             end 
             //op_counter=3'h0; 
+        end
+        NO_FETCH: begin 
+            QSPI_ENABLE_ACK = 1'b1;
+            if(QSPI_ENABLE==1'b0)
+                next_state = IDLE;
         end
         OP: begin
             QSPI_ENABLE_ACK = 1'b1;
@@ -132,6 +141,7 @@ always @(*) begin
             QSPI_ENABLE_ACK = 1'b1;
             if(QSPI_QIO_MODE==1'b1 & addr_counter==5'h05) begin
                 QSPI_ENABLE_ACK = 1'b0;
+                last_QSPI_ADDR = QSPI_ADDR;
                 if(QSPI_CONT_READ)
                     next_state = MODE;
                 else if(QSPI_DUMMY_CYCLES>4'h0)
