@@ -2,9 +2,9 @@
 
 $(SOCLABS_AHB_QSPI_DIR)/logical/top_ahb_qspi/logical/top_ahb_qspi.v
 $(SOCLABS_AHB_QSPI_DIR)/logical/apb_qspi_regs/logical/apb_qspi_regs.v
-$(SOCLABS_AHB_QSPI_DIR)/logical/ahb_qspi_interface/logical/ahb_qspi_interface.v
+$(SOCLABS_AHB_QSPI_DIR)/logical/ahb_qspi_interface/logical/ahb_qspi_interface.sv
 
-$(SOCLABS_AHB_QSPI_DIR)/logical/qspi_controller/logical/qspi_controller.v
+$(SOCLABS_AHB_QSPI_DIR)/logical/qspi_controller/logical/qspi_controller.sv
 $(SOCLABS_AHB_QSPI_DIR)/logical/qspi_controller/logical/qspi_controller_mux.v
 
 $(SOCLABS_AHB_QSPI_DIR)/logical/cache_subsytem/logical/cache_subsystem.v

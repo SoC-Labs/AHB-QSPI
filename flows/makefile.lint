@@ -10,7 +10,6 @@
 #-----------------------------------------------------------------------------
 
 # Include Lint Checks
-include $(SOCLABS_SOCTOOLS_FLOW_DIR)/resources/hal/makefile.hal_checks
 
 # Lint-related Directories
 LINT_DIR = $(SOCLABS_AHB_QSPI_DIR)/lint/ahb_qspi

@@ -1,4 +1,24 @@
-
+//-----------------------------------------------------------------------------
+// AHB QSPI Top level
+// A joint work commissioned on behalf of SoC Labs, under Arm Academic Access license.
+//
+// Contributors
+//
+// Daniel Newbrook (d.newbrook@soton.ac.uk)
+// 
+// Copyright � 2021-4, SoC Labs (www.soclabs.org)
+//-----------------------------------------------------------------------------
+// Purpose:
+//   
+//  
+//-----------------------------------------------------------------------------
+// Modules instantiated:
+//  cmsdk_apb_slave_mux (u_cmsdk_apb_slave_mux)
+//  cache_subsystem     (u_cache_subsystem)
+//  qspi_controller_mux (u_qspi_controller_mux)
+//  apb_qspi_regs       (u_apb_qspi_regs)
+//  ahb_qspi_interface  (u_ahb_qspi_interface)
+//  qspi_controller     (u_qspi_controller)
 
 module top_ahb_qspi #(
     parameter ADDR_W = 32,
@@ -128,7 +148,7 @@ cache_subsystem u_cache_subsystem(
     .HSELS(HSELx),
     .HADDRS(HADDR[21:0]),
     .HBURSTS(HBURST),
-    .HMASTLOCKS(1'b1),
+    .HMASTLOCKS(1'b0),
     .HTRANSS(HTRANS),
     .HSIZES(HSIZE),
     .HPROTS(HPROT),
