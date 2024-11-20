@@ -153,7 +153,7 @@ always @(*) begin
                 else
                     next_state = IDLE;
             end 
-            else if(QSPI_QIO_MODE==1'b0 & addr_counter==5'h21) begin
+            else if(QSPI_QIO_MODE==1'b0 & addr_counter==5'h15) begin
                 QSPI_ENABLE_ACK = 1'b0;
                 if(QSPI_DUMMY_CYCLES>4'h0)
                     next_state = DUMMY;
