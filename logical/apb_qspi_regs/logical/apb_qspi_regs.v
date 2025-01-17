@@ -132,6 +132,7 @@ always @(PCLK, PADDR) begin
             10'h009: PRDATA = reg9;
             10'h00A: PRDATA = reg10;
             10'h00B: PRDATA = reg11;
+            default: PRDATA = 32'hDEADCAFE;
         endcase
     end
 end

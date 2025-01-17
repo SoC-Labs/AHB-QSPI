@@ -326,45 +326,29 @@ always @(posedge QSPI_SCLK_i) begin
 end
 
 // RDATA latch
-always @(posedge QSPI_nCS or negedge HRESETn) begin
-    if(~HRESETn)
-        QSPI_RDATA <= 128'd0;
-    else begin
-        if(QSPI_N_RW_BYTES==4'h0)
-            QSPI_RDATA <= {{120{1'b0}}, data_in_reg[7:0 ]};
-        else if(QSPI_N_RW_BYTES==4'h1)
-            QSPI_RDATA <= {{112{1'b0}}, data_in_reg[15:0]};
-        else if(QSPI_N_RW_BYTES==4'h2)
-            QSPI_RDATA <= {{104{1'b0}}, data_in_reg[23:0]};
-        else if(QSPI_N_RW_BYTES==4'h3)
-            QSPI_RDATA <= {{96{1'b0}},  data_in_reg[31:0]};
-        else if(QSPI_N_RW_BYTES==4'h4)
-            QSPI_RDATA <= {{88{1'b0}},  data_in_reg[31:0], data_in_reg[39:32]};
-        else if(QSPI_N_RW_BYTES==4'h5)
-            QSPI_RDATA <= {{80{1'b0}},  data_in_reg[31:0], data_in_reg[47:32]};
-        else if(QSPI_N_RW_BYTES==4'h6)
-            QSPI_RDATA <= {{72{1'b0}},  data_in_reg[31:0], data_in_reg[55:32]};
-        else if(QSPI_N_RW_BYTES==4'h7)
-            QSPI_RDATA <= {{64{1'b0}},  data_in_reg[31:0], data_in_reg[63:32]};
-        else if(QSPI_N_RW_BYTES==4'h8)
-            QSPI_RDATA <= {{56{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[71:64]};
-        else if(QSPI_N_RW_BYTES==4'h9)
-            QSPI_RDATA <= {{48{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[79:64]};
-        else if(QSPI_N_RW_BYTES==4'hA)
-            QSPI_RDATA <= {{40{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[87:64]};
-        else if(QSPI_N_RW_BYTES==4'hB)
-            QSPI_RDATA <= {{32{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64]};
-        else if(QSPI_N_RW_BYTES==4'hC)
-            QSPI_RDATA <= {{24{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[103:96]};
-        else if(QSPI_N_RW_BYTES==4'hD)
-            QSPI_RDATA <= {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
-        else if(QSPI_N_RW_BYTES==4'hE)
-            QSPI_RDATA <= {{8{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
-        else if(QSPI_N_RW_BYTES==4'hF)
-            QSPI_RDATA <=  {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
-        
+always @(*) begin
+    if(~HRESETn) begin 
+        QSPI_RDATA = 128'd0;
+    end else if(QSPI_nCS) begin
+        case(QSPI_N_RW_BYTES)
+            4'h0:   QSPI_RDATA = {{120{1'b0}}, data_in_reg[7:0 ]};
+            4'h1:   QSPI_RDATA = {{112{1'b0}}, data_in_reg[15:0]};
+            4'h2:   QSPI_RDATA = {{104{1'b0}}, data_in_reg[23:0]};
+            4'h3:   QSPI_RDATA = {{96{1'b0}},  data_in_reg[31:0]};
+            4'h4:   QSPI_RDATA = {{88{1'b0}},  data_in_reg[31:0], data_in_reg[39:32]};
+            4'h5:   QSPI_RDATA = {{80{1'b0}},  data_in_reg[31:0], data_in_reg[47:32]};
+            4'h6:   QSPI_RDATA = {{72{1'b0}},  data_in_reg[31:0], data_in_reg[55:32]};
+            4'h7:   QSPI_RDATA = {{64{1'b0}},  data_in_reg[31:0], data_in_reg[63:32]};
+            4'h8:   QSPI_RDATA = {{56{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[71:64]};
+            4'h9:   QSPI_RDATA = {{48{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[79:64]};
+            4'hA:   QSPI_RDATA = {{40{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[87:64]};
+            4'hB:   QSPI_RDATA = {{32{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64]};
+            4'hC:   QSPI_RDATA = {{24{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[103:96]};
+            4'hD:   QSPI_RDATA = {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
+            4'hE:   QSPI_RDATA = {{8{1'b0}},   data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
+            4'hF:   QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
+        endcase            
     end
-
 end
 
 assign QSPI_nCS = ((QSPI_ENABLE==1'b1) ||(current_state!=IDLE) || (QSPI_SCLK_e==1'b1))?1'b0:1'b1;

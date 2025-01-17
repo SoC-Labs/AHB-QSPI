@@ -26,7 +26,7 @@ module ahb_qspi_interface #(
     output wire                 AHB_QSPI_WRITE,
     output wire                 AHB_QSPI_ADDR_EN,
     output wire [3:0]           AHB_QSPI_DUMMY_CYCLES,
-    output reg [3:0]            AHB_QSPI_N_RW_BYTES,
+    output wire [3:0]           AHB_QSPI_N_RW_BYTES,
     output reg  [21:0]          AHB_QSPI_ADDR,
     output wire [127:0]         AHB_QSPI_WDATA,
 
@@ -44,6 +44,7 @@ assign AHB_QSPI_DUMMY_CYCLES = 4'h4;
 assign AHB_QSPI_READ=1'b1;
 assign AHB_QSPI_WRITE=1'b0;
 assign AHB_QSPI_WDATA = HWDATA;
+assign AHB_QSPI_N_RW_BYTES = 4'hF;
 
 
 wire [31:0] AHB_QSPI_RDATA_W0 = {AHB_QSPI_RDATA[71:64],AHB_QSPI_RDATA[79:72],AHB_QSPI_RDATA[87:80],AHB_QSPI_RDATA[95:88]}; //AHB_QSPI_RDATA[95:64];
@@ -96,26 +97,9 @@ always @(*) begin
         IDLE:           if(HTRANS==2'b00)
                             next_state = IDLE;
                         else if(HSELx & HWRITE & ~qspi_ready) begin
-                            case(HSIZE)
-                                3'b000: AHB_QSPI_N_RW_BYTES = 4'hF;
-                                3'b001: AHB_QSPI_N_RW_BYTES = 4'hF;
-                                3'b010: AHB_QSPI_N_RW_BYTES = 4'hF;
-                                3'b011: AHB_QSPI_N_RW_BYTES = 4'hF;
-                                3'b100: AHB_QSPI_N_RW_BYTES = 4'hF;
-                                default: AHB_QSPI_N_RW_BYTES = 4'hF;
-                            endcase
-
                             next_state = WAIT_WRITE;
                         end
                         else if(HSELx & ~qspi_ready) begin
-                            case(HSIZE)
-                                3'b000: AHB_QSPI_N_RW_BYTES = 4'hF;
-                                3'b001: AHB_QSPI_N_RW_BYTES = 4'hF;
-                                3'b010: AHB_QSPI_N_RW_BYTES = 4'hF;
-                                3'b011: AHB_QSPI_N_RW_BYTES = 4'hF;
-                                3'b100: AHB_QSPI_N_RW_BYTES = 4'hF;
-                                default: AHB_QSPI_N_RW_BYTES = 4'hF;
-                            endcase
                             next_state = WAIT_READ;
                         end
         WAIT_WRITE:     if(qspi_ready)
