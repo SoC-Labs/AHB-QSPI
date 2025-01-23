@@ -33,6 +33,11 @@ MODULE   = ahb_qspi_tests
 
 VERILOG_SOURCES += $(SOCLABS_AHB_QSPI_DIR)/verif/cocotb/ahb_qspi_cocotb.v
 
+ifeq ($(GATE_SIMS),yes)
+	EXTRA_ARGS += +define+ARM_UD_MODEL
+	EXTRA_ARGS += +define+GATE_SIMS
+endif
+
 ifeq ($(SIM), icarus)
 	PLUSARGS += -fst
 
@@ -53,6 +58,8 @@ else ifeq ($(SIM), verilator)
 	endif
 else ifeq ($(SIM), questa)
 	COMPILE_ARGS += +acc
+else ifeq ($(SIM), vcs)
+	COMPILE_ARGS += -kdb +neg_tchk
 endif
 include $(SOCLABS_AHB_QSPI_DIR)/simulate/sim/cocotb/makefile.flist
 include $(shell cocotb-config --makefiles)/Makefile.sim

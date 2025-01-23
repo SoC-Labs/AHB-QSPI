@@ -128,6 +128,12 @@ top_ahb_qspi u_top_ahb_qspi(
     .QSPI_IO_e(QSPI_IO_e)
 );
 
+`ifdef GATE_SIMS
+initial begin
+    $sdf_annotate("/home/dwn1c21/SoC-Labs/ahb_qspi/imp/ASIC/top_ahb_qspi.sdf", u_top_ahb_qspi);
+end
+`endif 
+
 assign QSPI_IO[0] = QSPI_IO_e[0] ? QSPI_IO_o[0] : 1'bz;
 assign QSPI_IO[1] = QSPI_IO_e[1] ? QSPI_IO_o[1] : 1'bz;
 assign QSPI_IO[2] = QSPI_IO_e[2] ? QSPI_IO_o[2] : 1'bz;
@@ -143,5 +149,10 @@ sst26vf064b u_sst26vf064b(
     .SIO(QSPI_IO),
     .CEb(QSPI_nCS)
 );
+defparam u_sst26vf064b.I0.Tbe = 1_000; 
+defparam u_sst26vf064b.I0.Tse = 1_000; 
+defparam u_sst26vf064b.I0.Tsce = 1_000;
+defparam u_sst26vf064b.I0.Tpp = 1_000; 
+defparam u_sst26vf064b.I0.Tws = 1000;   
 
 endmodule 

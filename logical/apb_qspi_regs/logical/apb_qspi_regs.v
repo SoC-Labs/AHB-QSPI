@@ -34,11 +34,11 @@ module apb_qspi_regs(
 );   
 // Registers
 // reg0 Control 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
-//      QSPI_QIO_MODE[0]                                                            |               |--> QSPI_QIO_MODE [0]
-//     XIP_ACTIVE [8]                                                               |------------------> XIP_ACTIVE [8]
-//  QSPI_MODE_CODE[23:16]
-//  QSPI_CONT_READ[24]
-//  QSPI_NO_CMD[25]
+//      QSPI_QIO_MODE[0]           |  |  |                    |                     |               |--> QSPI_QIO_MODE [0]
+//     XIP_ACTIVE [8]              |  |  |                    |                     |------------------> XIP_ACTIVE [8]
+//  QSPI_MODE_CODE[23:16]          |  |  |<------------------>|----------------------------------------> QSPI_MODE_CODE[23:16] 
+//  QSPI_CONT_READ[24]             |  |----------------------------------------------------------------> QSPI_CONT_READ[24] 
+//  QSPI_NO_CMD[25]                |-------------------------------------------------------------------> QSPI_NO_CMD[25]
 
 // reg1 Status
 

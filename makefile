@@ -4,8 +4,9 @@ include $(SOCLABS_AHB_QSPI_DIR)/make.cfg
 # - Commonly Overloaded Variables
 #-------------------------------------
 # Simulator type (mti/vcs/xm)
-SIMULATOR   = mti
-
+SIMULATOR   = vcs
+GATE_SIMS  ?= no
+export GATE_SIMS
 #-------------------------------------
 # - Directory Setups
 #-------------------------------------
@@ -16,6 +17,8 @@ SIM_DIR ?= $(SIM_TOP_DIR)
 
 ifeq ($(ASIC),yes)
 	DESIGN_VC ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_ASIC.flist
+else ifeq ($(GATE_SIMS),yes)
+	DESIGN_VC ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_SIM_GATES.flist
 else
 	DESIGN_VC ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_SIM.flist
 endif
@@ -28,4 +31,5 @@ get_flash_model:
 #Include flows
 include ./flows/makefile.simulate
 include ./flows/makefile.lint
+include ./flows/makefile.asic
 export BP210_DIR

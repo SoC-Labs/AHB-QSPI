@@ -8,5 +8,19 @@ verif/cocotb/ahb_qspi.vcd
 verif/cocotb/transcript
 verif/cocotb/sim_build/
 verif/cocotb/__pycache__/
+verif/cocotb/verdiLog
+verif/cocotb/novas*
+verif/cocotb/vsim.wlf
+verif/cocotb/wlft6jORYn
+verif/cocotb/inter.fsdb
 
 verif/VIP/SST26VF064B.v
+
+asic/TSMC28nm/*.mr
+asic/TSMC28nm/*pvl
+asic/TSMC28nm/*.syn
+asic/TSMC28nm/command.log
+asic/TSMC28nm/default.svf
+asic/TSMC28nm/*.log
+
+imp

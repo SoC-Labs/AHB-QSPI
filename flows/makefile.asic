@@ -1,0 +1,13 @@
+# Location to build ASIC files
+IMP_ASIC_DIR := $(SOCLABS_AHB_QSPI_DIR)/imp/ASIC/
+
+
+
+TCL_ASIC_FLIST_DIR        := $(IMP_ASIC_DIR)/flist
+DC_OUTPUT_FILELIST := $(TCL_ASIC_FLIST_DIR)/dc_flist.tcl
+
+flist_synopsys: 
+	@mkdir -p $(TCL_ASIC_FLIST_DIR)
+	@(cd $(TCL_ASIC_FLIST_DIR); \
+    $(SOCLABS_SOCTOOLS_FLOW_DIR)/bin/filelist_compile.py -t -s -a -f $(DESIGN_VC) -o $(DC_OUTPUT_FILELIST) -i $(FLIST_INCLUDES) -r $(IMP_NANOSOC_ASIC_DIR)/src;)
+
