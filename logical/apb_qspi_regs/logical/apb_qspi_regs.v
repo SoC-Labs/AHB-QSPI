@@ -31,21 +31,21 @@ module apb_qspi_regs(
     output wire                 QSPI_CONT_READ,
     output wire [7:0]           QSPI_MODE_CODE,
     output wire                 QSPI_NO_CMD
-);   
+);
 // Registers
 // reg0 Control 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
 //      QSPI_QIO_MODE[0]           |  |  |                    |                     |               |--> QSPI_QIO_MODE [0]
 //     XIP_ACTIVE [8]              |  |  |                    |                     |------------------> XIP_ACTIVE [8]
-//  QSPI_MODE_CODE[23:16]          |  |  |<------------------>|----------------------------------------> QSPI_MODE_CODE[23:16] 
-//  QSPI_CONT_READ[24]             |  |----------------------------------------------------------------> QSPI_CONT_READ[24] 
+//  QSPI_MODE_CODE[23:16]          |  |  |<------------------>|----------------------------------------> QSPI_MODE_CODE[23:16]
+//  QSPI_CONT_READ[24]             |  |----------------------------------------------------------------> QSPI_CONT_READ[24]
 //  QSPI_NO_CMD[25]                |-------------------------------------------------------------------> QSPI_NO_CMD[25]
 
 // reg1 Status
 
 // reg2 SPI Commands 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
 //     QSPI_CMD [7:0]                                  |  |        |  |        |  |  | | | |----> QSPI_CMD [7:0]
-//     QSPI_ENABLE [8]                                 |  |        |  |        |  |  | | |---> QSPI_ENABLE [8]   
-//     QSPI_READ [9]                                   |  |        |  |        |  |  | |-------> QSPI_READ [9] 
+//     QSPI_ENABLE [8]                                 |  |        |  |        |  |  | | |---> QSPI_ENABLE [8]
+//     QSPI_READ [9]                                   |  |        |  |        |  |  | |-------> QSPI_READ [9]
 //     QSPI_WRITE [10]                                 |  |        |  |        |  |  |--------> QSPI_WRITE [10]
 //     QSPI_ADDR_EN[11]                                |  |        |  |        |  |---------> QSPI_ADDR_EN [11]
 //     QSPI_DUMMY_CYCLES[15:12]                        |  |        |  |<------>|-------> QSPI_DUMMY_CYCLES [15:12]
@@ -110,7 +110,7 @@ always @(posedge PCLK or negedge PRESETn) begin
                 10'h00A: reg10 = PWDATA;
                 10'h00B: reg11 = PWDATA;
             endcase
-        end 
+        end
         if(QSPI_ENABLE_ACK)
             reg2[8]=1'b0;
         reg1[0] = QSPI_BUSY;
@@ -118,8 +118,8 @@ always @(posedge PCLK or negedge PRESETn) begin
 end
 
 always @(PCLK, PADDR) begin
-    if(PCLK) begin 
-        case(PADDR) 
+    if(PCLK) begin
+        case(PADDR)
             10'h000: PRDATA = reg0;
             10'h001: PRDATA = reg1;
             10'h002: PRDATA = reg2;

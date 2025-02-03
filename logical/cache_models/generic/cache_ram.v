@@ -23,7 +23,9 @@ module cache_ram #(
 wire    cs_ram0_word0;
 assign  cs_ram0_word0   = CLD_CS[0] & (CLD_WE | CLD_RD[0]);
 
-p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32), .MEMORY_DEPTH(2**(ADDR_W)), .ADDR_WIDTH(ADDR_W)) data_ram_0_word_0_i (
+p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32),
+    .MEMORY_DEPTH(2**(ADDR_W)),
+    .ADDR_WIDTH(ADDR_W)) data_ram_0_word_0_i (
     .CLK    (CLK),
     .A      (CLD_ADDR),
     .CEN    (~cs_ram0_word0),
@@ -38,7 +40,9 @@ p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32), .MEMORY_DEPTH(2**(ADDR_W)), .ADDR_WID
 wire    cs_ram0_word1;
 assign  cs_ram0_word1   = CLD_CS[1] & (CLD_WE | CLD_RD[1]);
 
-p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32), .MEMORY_DEPTH(2**(ADDR_W)), .ADDR_WIDTH(ADDR_W)) data_ram_0_word_1_i (
+p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32),
+    .MEMORY_DEPTH(2**(ADDR_W)),
+    .ADDR_WIDTH(ADDR_W)) data_ram_0_word_1_i (
     .CLK    (CLK),
     .A      (CLD_ADDR),
     .CEN    (~cs_ram0_word1),
@@ -53,7 +57,9 @@ p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32), .MEMORY_DEPTH(2**(ADDR_W)), .ADDR_WID
 wire    cs_ram0_word2;
 assign  cs_ram0_word2   = CLD_CS[2] & (CLD_WE | CLD_RD[2]);
 
-p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32), .MEMORY_DEPTH(2**(ADDR_W)), .ADDR_WIDTH(ADDR_W)) data_ram_0_word_2_i (
+p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32),
+    .MEMORY_DEPTH(2**(ADDR_W)),
+    .ADDR_WIDTH(ADDR_W)) data_ram_0_word_2_i (
     .CLK    (CLK),
     .A      (CLD_ADDR),
     .CEN    (~cs_ram0_word2),
@@ -68,7 +74,9 @@ p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32), .MEMORY_DEPTH(2**(ADDR_W)), .ADDR_WID
 wire    cs_ram0_word3;
 assign  cs_ram0_word3   = CLD_CS[3] & (CLD_WE | CLD_RD[3]);
 
-p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32), .MEMORY_DEPTH(2**(ADDR_W)), .ADDR_WIDTH(ADDR_W)) data_ram_0_word_3_i (
+p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32),
+    .MEMORY_DEPTH(2**(ADDR_W)),
+    .ADDR_WIDTH(ADDR_W)) data_ram_0_word_3_i (
     .CLK    (CLK),
     .A      (CLD_ADDR),
     .CEN    (~cs_ram0_word3),
@@ -83,7 +91,9 @@ p_flash_cache_f0_sp_ram #(.DATA_WIDTH(32), .MEMORY_DEPTH(2**(ADDR_W)), .ADDR_WID
 wire    cs_tag0;
 assign  cs_tag0         = TAG_CS & (TAG_WE | TAG_RD);
 
-p_flash_cache_f0_sp_ram #(.DATA_WIDTH(11), .MEMORY_DEPTH(2**(ADDR_W)), .ADDR_WIDTH(ADDR_W)) tag_ram_0_i (
+p_flash_cache_f0_sp_ram #(.DATA_WIDTH(11),
+    .MEMORY_DEPTH(2**(ADDR_W)),
+    .ADDR_WIDTH(ADDR_W)) tag_ram_0_i (
     .CLK    (CLK),
     .A      (TAG_ADDR),
     .CEN    (~cs_tag0),

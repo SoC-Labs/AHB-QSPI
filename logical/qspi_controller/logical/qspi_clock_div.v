@@ -15,17 +15,17 @@ always @(posedge HCLK or negedge HRESETn) begin
     if(~HRESETn) begin
         QSPI_CLK_DIV_COUNTER<=8'h00;
         QSPI_SCLK_reg <= 1'b0;
-    end else begin 
-        if(QSPI_CLK_DIV==8'h01) begin 
+    end else begin
+        if(QSPI_CLK_DIV==8'h01) begin
             QSPI_SCLK_reg <= ~QSPI_SCLK_reg;
-        end else if(QSPI_CLK_DIV!=8'h00) begin 
-            if(QSPI_CLK_DIV_COUNTER==QSPI_CLK_DIV-1'b1) begin 
+        end else if(QSPI_CLK_DIV!=8'h00) begin
+            if(QSPI_CLK_DIV_COUNTER==QSPI_CLK_DIV-1'b1) begin
                 QSPI_CLK_DIV_COUNTER <= 8'h00;
-            end else begin 
+            end else begin
                 QSPI_SCLK_reg <= ~QSPI_SCLK_reg;
                 QSPI_CLK_DIV_COUNTER <= QSPI_CLK_DIV_COUNTER + 1;
             end
-        end else begin 
+        end else begin
             QSPI_SCLK_reg <= QSPI_SPI_MODE[1];
         end
     end

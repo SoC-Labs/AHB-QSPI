@@ -1,7 +1,7 @@
 
 module ahb_qspi_interface #(
     parameter ADDR_W = 32,
-    parameter DATA_W = 32    
+    parameter DATA_W = 32
     )(
     input  wire                 HCLK,
     input  wire                 HRESETn,
@@ -64,14 +64,14 @@ reg                 last_HWRITE;
 reg [1:0]           last_HTRANS;
 reg [2:0]           last_HSIZE;
 
-// 
+//
 reg         qspi_ready;
 reg         qspi_started;
 
 assign HREADYOUT = (current_state==IDLE && last_HTRANS==2'b00) ? 1'b1: qspi_ready; //(current_state==IDLE)? 1'b1 : qspi_ready;
 
-always @(posedge HCLK or negedge HRESETn) begin 
-    if(~HRESETn) begin 
+always @(posedge HCLK or negedge HRESETn) begin
+    if(~HRESETn) begin
         last_HSEL   <= 1'b0;
         last_HADDR  <= {ADDR_W{1'b0}};
         last_HWRITE <= 1'b0;
@@ -79,7 +79,7 @@ always @(posedge HCLK or negedge HRESETn) begin
         last_HSIZE  <= 3'h0;
 
         current_state <= IDLE;
-    end else begin 
+    end else begin
         last_HSEL   <= HSELx;
         last_HADDR  <= HADDR;
         last_HWRITE <= HWRITE;
@@ -90,7 +90,7 @@ always @(posedge HCLK or negedge HRESETn) begin
     end
 end
 
-always @(*) begin
+always_comb begin
     next_state = IDLE;
 
     case(current_state)
@@ -104,26 +104,27 @@ always @(*) begin
                         end
         WAIT_WRITE:     if(qspi_ready)
                             next_state = WRITE;
-                        else 
+                        else
                             next_state = WAIT_WRITE;
         WAIT_READ:      if(qspi_ready)
                             next_state = READ;
-                        else 
+                        else
                             next_state = WAIT_READ;
         READ:           next_state = IDLE;
         WRITE:          next_state = IDLE;
+        default:        next_state = IDLE;
     endcase
 end
 
-always @(posedge HCLK or negedge HRESETn) begin 
+always @(posedge HCLK or negedge HRESETn) begin
     if(~HRESETn) begin
         AHB_QSPI_ENABLE <= 1'b0;
         qspi_ready <= 1'b0;
         qspi_started <= 1'b0;
         AHB_QSPI_ADDR <= 22'd0;
     end else begin
-        if(current_state == WAIT_READ) begin 
-            if(AHB_QSPI_BUSY!=1'b1) begin 
+        if(current_state == WAIT_READ) begin
+            if(AHB_QSPI_BUSY!=1'b1) begin
                 if(qspi_started==1'b0) begin
                     AHB_QSPI_ENABLE <= 1'b1;
                     qspi_started <= 1'b1;
@@ -131,7 +132,7 @@ always @(posedge HCLK or negedge HRESETn) begin
             end
             if(AHB_QSPI_ENABLE_ACK)
                 AHB_QSPI_ENABLE <= 1'b0;
-            if(qspi_started==1'b1) begin 
+            if(qspi_started==1'b1) begin
                 if(AHB_QSPI_BUSY==1'b0) begin
                     HRDATA <= AHB_QSPI_RDATA_i;
                     qspi_ready <= 1'b1;
@@ -146,4 +147,4 @@ always @(posedge HCLK or negedge HRESETn) begin
 
 end
 
-endmodule 
+endmodule

@@ -34,7 +34,7 @@ MODULE   = ahb_qspi_tests
 VERILOG_SOURCES += $(SOCLABS_AHB_QSPI_DIR)/verif/cocotb/ahb_qspi_cocotb.v
 
 ifeq ($(GATE_SIMS),yes)
-	EXTRA_ARGS += +define+ARM_UD_MODEL
+# EXTRA_ARGS += +define+ARM_UD_MODEL
 	EXTRA_ARGS += +define+GATE_SIMS
 endif
 

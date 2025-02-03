@@ -5,12 +5,12 @@
 // Contributors
 //
 // Daniel Newbrook (d.newbrook@soton.ac.uk)
-// 
-// Copyright � 2021-4, SoC Labs (www.soclabs.org)
+//
+// Copyright � 2021-5, SoC Labs (www.soclabs.org)
 //-----------------------------------------------------------------------------
 // Purpose:
-//   
-//  
+//
+//
 //-----------------------------------------------------------------------------
 // Modules instantiated:
 //  cmsdk_apb_slave_mux (u_cmsdk_apb_slave_mux)
@@ -52,7 +52,7 @@ module top_ahb_qspi #(
     input  wire [3:0]           PSTRB,
     output wire [31:0]          PRDATA,
     output wire                 PREADY,
-    output wire                 PSLVERR,   
+    output wire                 PSLVERR,
 
     // QSPI Signals
     output wire                 QSPI_SCLK,
@@ -74,7 +74,7 @@ wire            cache_pready;
 wire            cache_pslverr;
 
 
-  // AHB Outputs 
+// AHB Outputs
 wire            flash_HSELM;        // Device select
 wire [21:0]     flash_HADDRM;       // Address
 wire [2:0]      flash_HBURSTM;      // Burst Type - Not used (tied to 0)!

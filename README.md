@@ -1,4 +1,4 @@
-# AHB QSPI with XiP
+# AHB QSPI for XiP
 Basic QSPI controller with AHB and APB interfaces, uses Arm Corelink AHB Flash Cache controller for the XiP Cache. AHB from cache controller and APB interface are mux'd to QSPI controller so access can to external memory can be from either.
 
 ## Prerequisites 
@@ -38,6 +38,7 @@ Read bandwidth with 4 KB cache for 512x 32 bit reads, and system clock of 200 MH
 - Add programmable op codes for AHB interface
 - Improve writing method over APB? (see below)
 - Add interrupts for QSPI finish
+- Add programmable address length
 
 ## Writing over APB
 Currently the method for writing over APB to the flash is to write up to 4x 32 bit words to the APB registers and then tell the QSPI controller to write. However as there is a long latency after writing over QSPI for the flash to finish, this is not optimal. 
@@ -46,4 +47,11 @@ The flash device we are targeting is a SST26VF064B device which allows up to 256
 
 1. Just simply add an extra 240 bytes of registers to the APB controller. This is the simplest to do but I think that this will inflate the overall area of the IP by too much, however this makes the software side fairly simple. (i.e. write 256 bytes to APB-> send command to QSPI controller-> wait for QSPI transaction to finish-> poll QSPI status until write is complete)
 2. Add write fifo. This will be a lot smaller in terms of area. But will have to keep track of how many bytes get written over QSPI to limit to 256. This requires a bit of an overhaul in how the write transaction works but it means we can fully utilise the page program command. Software then becomes a little more complicated (i.e. write N bytes to APB-> send command to QSPI controller-> check if FIFO not full and send more data-> repeat last step 256/N times-> QSPI checks if FIFO is empty whilst the happens and stops transaction when empty-> poll QSPI status until write is complete). 
+
+## Project status
+Behaviourial this IP is 'mostly' verified. The verification has been performed against a model of the SST26VF064B flash memory. I have so far verified the most important QSPI commands and the usage of the AHB interface to the QSPI controller. However further work should be performed to verify this IP against other memory models if possible. Also some extension to the IP should be made to support different flash sizes (i.e. change the number of address bits) as well as some optimisations for writing data (see above)
+
+Gate level simulations seem to match the behavioural. I do get some timing violations if I use the Arm standard cell timings
+
+FPGA implementation is ongoing, I would like to first test against the same flash model that I have used for behavioural verification, but I currently don't have this. The only chip I have utilises DDR which I don't want to support at this stage of the project. 
 

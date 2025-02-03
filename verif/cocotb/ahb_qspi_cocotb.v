@@ -1,4 +1,4 @@
-`timescale 1ns/10ps 
+`timescale 1ns/10ps
 
 module ahb_qspi_cocotb(
     input  wire                 HCLK,
@@ -48,7 +48,7 @@ wire [31:0]          PWDATA;
 wire [3:0]           PSTRB;
 wire [31:0]          PRDATA;
 wire                 PREADY;
-wire                 PSLVERR;   
+wire                 PSLVERR;
 
 cmsdk_ahb_to_apb #(
     .ADDRWIDTH(16),
@@ -110,7 +110,7 @@ top_ahb_qspi u_top_ahb_qspi(
     .HREADY(data_HREADY),
     .HREADYOUT(data_HREADY),
     .HRESP(data_HRESP),
-    
+
     .PADDR(PADDR),
     .PPROT(PPROT),
     .PSEL(PSEL),
@@ -120,7 +120,7 @@ top_ahb_qspi u_top_ahb_qspi(
     .PSTRB(PSTRB),
     .PRDATA(PRDATA),
     .PREADY(PREADY),
-    .PSLVERR(PSLVERR), 
+    .PSLVERR(PSLVERR),
     .QSPI_SCLK(QSPI_SCLK),
     .QSPI_nCS(QSPI_nCS),
     .QSPI_IO_o(QSPI_IO_o),
@@ -132,7 +132,7 @@ top_ahb_qspi u_top_ahb_qspi(
 initial begin
     $sdf_annotate("/home/dwn1c21/SoC-Labs/ahb_qspi/imp/ASIC/top_ahb_qspi.sdf", u_top_ahb_qspi);
 end
-`endif 
+`endif
 
 assign QSPI_IO[0] = QSPI_IO_e[0] ? QSPI_IO_o[0] : 1'bz;
 assign QSPI_IO[1] = QSPI_IO_e[1] ? QSPI_IO_o[1] : 1'bz;
@@ -149,10 +149,10 @@ sst26vf064b u_sst26vf064b(
     .SIO(QSPI_IO),
     .CEb(QSPI_nCS)
 );
-defparam u_sst26vf064b.I0.Tbe = 1_000; 
-defparam u_sst26vf064b.I0.Tse = 1_000; 
+defparam u_sst26vf064b.I0.Tbe = 1_000;
+defparam u_sst26vf064b.I0.Tse = 1_000;
 defparam u_sst26vf064b.I0.Tsce = 1_000;
-defparam u_sst26vf064b.I0.Tpp = 1_000; 
-defparam u_sst26vf064b.I0.Tws = 1000;   
+defparam u_sst26vf064b.I0.Tpp = 1_000;
+defparam u_sst26vf064b.I0.Tws = 1000;
 
-endmodule 
+endmodule

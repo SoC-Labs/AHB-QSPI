@@ -1,0 +1,208 @@
+\documentclass{report}
+\usepackage{hyperref}
+\usepackage{tcolorbox,float}
+\usepackage{listings}
+
+\makeatletter
+\newfloat{info@box}{tbp}{loi}[section]% 1: Name of float environment. 2: Default placement (top, bottom, ...). 3: File extension if written to an aux-file (like toc, lof, lot, loa, ...). 4: Numbering within <section/subsection/...>.
+\makeatother
+\floatname{info@box}{Infobox}% Adapt caption.
+\newenvironment{infobox}[1][]{% Create new environment using info@box and tcolorbox
+   \begin{info@box}%
+      \begin{tcolorbox}[colback=red!15!white,%                    background color
+            colframe=red!75!black,%                               frame color
+            title=Additional information\ifstrempty{#1}{}{: #1}.% title
+         ]%
+}{%
+      \end{tcolorbox}%
+   \end{info@box}%
+}
+
+\title{SoCLabs XiP AHB QSPI Configuration and User Manual}
+\author{Daniel Newbrook, \href{http://www.soclabs.org}{SoC Labs}}
+\begin{document}
+\maketitle
+\tableofcontents
+\clearpage
+\chapter{Introduction}
+In SoC designs it is often quite valuable to have external non-volatile memory. Typically this will be 
+where instruction code can be stored, and ideally we don't want to have to program this memory space after 
+every power cycle. 
+
+QSPI flash is fairly inexpensive and the protocol is fairly simple to implement. Whilst it isn't the fastest
+protocol that you could use, it also doesn't require any real effort in the analog domain unlike for example SATA.
+
+Excecute in place (XiP) is the method of making an external flash look like a memory mapped region to the processor.
+Meaning the processor can directly run instructions from this address space. We add a small cache between the 
+QSPI controller and the bus to reduce access time for repeat accesses. 
+
+The design here uses an AHB interface for the main XiP interface, and an APB interface for access to internal 
+registers of this IP, as well as to send commands over the QSPI interface.
+
+\section{IP}
+The SoCLabs AHB QSPI relies on IP's from certain vendors. In order to build you will need the following IP.
+\subsection{Arm(R)}
+Arm IP should be downloaded from Arm and placed into the recommended IP directories.
+\begin{itemize}
+    \item Corstone-101
+    \item CG092 (flash cache)
+\end{itemize}
+
+\section{Integrating this IP}
+There are 2 steps to integrating this IP in an SoC 
+\begin{enumerate}
+    \item Include the IP in the file list
+    \item Instantiate the IP in the design
+\end{enumerate}
+
+For step 1. you make an envionment variable at your top level project pointing to the ahb qspi directory called 
+SOCLABS\_AHB\_QSPI\_DIR (this will help with path references). You should then include the ahb\_QSPI\_SIM.flist to your 
+behavioural flist, and ahb\_QSPI\_ASIC.flist to your asic flist. 
+
+For step 2. you need an APB and AHB port to connect to, and then to bring out the QSPI wires to the top of your design. 
+I think connecting these to simple tristate pads should be fine.
+
+\chapter{Programmers Manual}
+
+\section{Address Map}
+
+The APB interface can access a number of registers. Outlined below are only the ones relating to the developed IP here,
+for the CG092 register please see documentation from Arm.
+
+\begin{table}[!h]
+    \begin{center}
+    \caption{Register Address Map}
+    \label{address-map}
+    \begin{tabular}{||c | c ||}
+        \hline
+        Register & Address \\ 
+        \hline\hline
+        Control Reg & 0x0000 \\
+        \hline
+        Status Reg & 0x0004 \\
+        \hline
+        SPI Commands & 0x0008 \\
+        \hline
+        SPI Address & 0x000C \\
+        \hline
+        Read Data 0 & 0x0010 \\
+        \hline
+        Read Data 1 & 0x0014 \\
+        \hline
+        Read Data 2 & 0x0018 \\
+        \hline
+        Read Data 3 & 0x001C \\
+        \hline
+        Write Data 0 & 0x0020 \\
+        \hline
+        Write Data 1 & 0x0024 \\
+        \hline
+        Write Data 2 & 0x0028 \\
+        \hline
+        Write Data 3 & 0x002C \\
+        \hline
+        CG092 Cache control & 0x1000-0x1FFF \\
+        \hline
+    \end{tabular}
+\end{center}
+\end{table}
+
+\begin{table}[!h]
+    \begin{center}
+    \caption{Control Register Bits}
+    \label{address-map}
+    \begin{tabular}{||c | c ||}
+        \hline
+        Bits & Function \\ 
+        \hline\hline
+        0 & QSPI Quad IO Mode \\
+        \hline 
+        8 & XiP Active \\
+        \hline
+        16-23 & QSPI Mode Code \\
+        \hline
+        24 & Continous Read Active \\
+        \hline 
+        25 & No CMD active \\
+        \hline
+    \end{tabular}
+\end{center}
+\end{table}
+
+\begin{table}[!h]
+    \begin{center}
+    \caption{Status Register Bits}
+    \label{address-map}
+    \begin{tabular}{||c | c ||}
+        \hline
+        Bits & Function \\ 
+        \hline\hline
+        0 & QSPI Busy \\
+        \hline 
+    \end{tabular}
+\end{center}
+\end{table}
+
+\begin{table}[!h]
+    \begin{center}
+    \caption{SPI Commands Register Bits}
+    \label{address-map}
+    \begin{tabular}{||c | c ||}
+        \hline
+        Bits & Function \\ 
+        \hline\hline
+        0-7 & QSPI Command \\
+        \hline 
+        8 & QSPI Enable \\
+        \hline
+        9 & QSPI Read Enable \\
+        \hline
+        10 & QSPI Write Enable \\
+        \hline 
+        11 & QSPI Address enable \\
+        \hline
+        12-15 & Number Dummy cycles (N-1) \\
+        \hline
+        16-19 & Number R/W Bytes (N-1) \\
+        \hline
+    \end{tabular}
+\end{center}
+\end{table}
+
+\begin{table}[!h]
+    \begin{center}
+    \caption{QSPI Address Register Bits}
+    \label{address-map}
+    \begin{tabular}{||c | c ||}
+        \hline
+        Bits & Function \\ 
+        \hline\hline
+        0-21 & QSPI Address \\
+        \hline 
+    \end{tabular}
+\end{center}
+\end{table}
+
+\section{Setting XiP Mode}
+Typical flow for entering XiP
+\begin{enumerate}
+    \item Reset the QSPI flash
+    \item Enable QSPI Mode
+    \item Set Continous Read mode 
+    \item Set XiP/AHB Mode
+    \item Configure Cache 
+\end{enumerate}
+
+\section{Write to Flash}
+Typical flow for writing to flash 
+\begin{enumerate}
+    \item Reset the QSPI Flash
+    \item Enable QSPI mode
+    \item Clear write protection
+    \item Set write enable 
+    \item Write to APB registers
+    \item Write to flash
+    \item Poll flash status until complete
+\end{enumerate}
+
+\end{document}

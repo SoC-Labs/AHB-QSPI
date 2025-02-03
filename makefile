@@ -23,6 +23,11 @@ else
 	DESIGN_VC ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_SIM.flist
 endif
 
+documentation:
+	pdflatex --output-directory=./docs/tex/ ./docs/tex/ahb_qspi.tex
+	pdflatex --output-directory=./docs/tex/ ./docs/tex/ahb_qspi.tex
+	mv ./docs/tex/ahb_qspi.pdf ./docs/ahb_qspi.pdf
+
 get_flash_model:
 	@cd $(SOCLABS_AHB_QSPI_DIR)/verif/VIP; wget https://ww1.microchip.com/downloads/en/DeviceDoc/SST26VF064B.zip 
 	@cd $(SOCLABS_AHB_QSPI_DIR)/verif/VIP; unzip SST26VF064B.zip

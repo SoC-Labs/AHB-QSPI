@@ -356,7 +356,7 @@ async def QSPI_TESTS(dut):
 @cocotb.test()
 async def QSPI_READ_TESTS(dut):  
     n_reads = 64
-
+    base_addr = 0x400
 
     tb = TB(dut)
     await tb.cycle_reset()
@@ -380,17 +380,17 @@ async def QSPI_READ_TESTS(dut):
     await SPI_WRITE_ENABLE(dut, tb)
     tb.log.info("Clear Protection and enable Write")
     await SPI_CLR_PROTECTION(dut, tb)
-    await SPI_WRITE_ENABLE(dut, tb)
-    SPI_STAT = await QPI_READ_STAT_REG(dut, tb)
-    WEL = SPI_STAT & (1<<25)
-    assert WEL != 0
     
     tb.log.info("Page program 512x 16-bytes")
     data = [0x13243546, 0x97867564, 0x89ABCDEF, 0x01234567]
     for i in range(0,n_reads):
-        addr = i*16
-        await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+        addr = i*16 + base_addr
         await SPI_WRITE_ENABLE(dut, tb)
+        SPI_STAT = await QPI_READ_STAT_REG(dut, tb)
+        WEL = SPI_STAT & (1<<25)
+        assert WEL != 0
+        await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+        await SPI_WRITE_DISABLE(dut,tb)
         tb.log.info("Programmed %d words", i)
     
     await SPI_WRITE_DISABLE(dut,tb)
@@ -407,7 +407,7 @@ async def QSPI_READ_TESTS(dut):
     tb.log.info("Read %d x 16-bytes over APB in continous read mode",n_reads)
     start_time = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads):
-        addr = i*16
+        addr = i*16 + base_addr
         rDATA = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=True)
         assert rDATA==data
         tb.log.info("Read %d words", i)
@@ -444,7 +444,7 @@ async def QSPI_READ_TESTS(dut):
     tb.log.info("Read %d x 16-bytes over AHB (uncached)",n_reads)
     start_time_uncached = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads*4):
-        data = await tb.data_ahb_master.read(i*4,4)
+        data = await tb.data_ahb_master.read(i*4 + base_addr,4)
     end_time_uncached = cocotb.utils.get_sim_time(units='ns')
     dt_uncached = end_time_uncached - start_time_uncached
     await Timer(time=10, units='us')
@@ -452,7 +452,7 @@ async def QSPI_READ_TESTS(dut):
     tb.log.info("Read 512x 16-bytes over AHB (cached)")
     start_time_cached = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads*4):
-        data = await tb.data_ahb_master.read(i*4,4)
+        data = await tb.data_ahb_master.read(i*4+ base_addr,4)
     end_time_cached = cocotb.utils.get_sim_time(units='ns')
     dt_cached = end_time_cached - start_time_cached
 

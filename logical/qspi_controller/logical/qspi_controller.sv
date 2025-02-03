@@ -4,8 +4,8 @@ module qspi_controller (
     input  wire         HRESETn,
 
     input  wire [7:0]   QSPI_CLK_DIV,
-    input  wire [1:0]   QSPI_SPI_MODE, // {CPOL, CPHA} 
-    
+    input  wire [1:0]   QSPI_SPI_MODE, // {CPOL, CPHA}
+
     input  wire [7:0]   QSPI_CMD,
     input  wire         QSPI_ENABLE,
     output reg          QSPI_ENABLE_ACK,
@@ -45,7 +45,8 @@ qspi_clock_div u_qspi_clock_div(
 
 assign QSPI_SCLK = (QSPI_SCLK_e==1'b1) ? QSPI_SCLK_i : QSPI_SPI_MODE[1];
 
-enum {IDLE, NO_FETCH, OP, ADDR, MODE, DUMMY, DATA_O, DATA_I} current_state, next_state;
+typedef enum {IDLE, NO_FETCH, OP, ADDR, MODE, DUMMY, DATA_O, DATA_I} fsm_state_e;
+fsm_state_e current_state, next_state;
 
 reg [2:0]   op_counter;
 reg [4:0]   addr_counter;
@@ -65,14 +66,14 @@ reg [127:0]   QSPI_WDATA_reg;
 assign QSPI_IO_o = QSPI_IO_o_reg;
 
 always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
-    if(~HRESETn) begin 
+    if(~HRESETn) begin
         current_state <= IDLE;
-    end else begin 
+    end else begin
         current_state <= next_state;
     end
-end 
+end
 
-always @(*) begin 
+always_comb begin
     case(current_state)
         IDLE: begin
             if(QSPI_ENABLE==1'b1 && QSPI_NO_CMD==1'b0) begin
@@ -85,10 +86,10 @@ always @(*) begin
             end else begin
                 next_state = IDLE;
                 QSPI_ENABLE_ACK = 1'b0;
-            end 
-            //op_counter=3'h0; 
+            end
+            //op_counter=3'h0;
         end
-        NO_FETCH: begin 
+        NO_FETCH: begin
             QSPI_ENABLE_ACK = 1'b1;
             if(QSPI_ENABLE==1'b0)
                 next_state = IDLE;
@@ -121,10 +122,10 @@ always @(*) begin
                     next_state = DATA_O;
                 else
                     next_state = IDLE;
-            end else begin 
+            end else begin
                 next_state = OP;
             end
-        end     
+        end
         ADDR: begin
             QSPI_ENABLE_ACK = 1'b1;
             if(QSPI_QIO_MODE==1'b1 & addr_counter==5'h05) begin
@@ -140,7 +141,7 @@ always @(*) begin
                     next_state = DATA_O;
                 else
                     next_state = IDLE;
-            end 
+            end
             else if(QSPI_QIO_MODE==1'b0 & addr_counter==5'h15) begin
                 QSPI_ENABLE_ACK = 1'b0;
                 if(QSPI_DUMMY_CYCLES!=4'h0)
@@ -151,12 +152,12 @@ always @(*) begin
                     next_state = DATA_O;
                 else
                     next_state = IDLE;
-            end else begin 
+            end else begin
                 next_state = ADDR;
             end
-        end 
-        MODE: begin 
-            if(QSPI_QIO_MODE==1'b1 & mode_counter == 1'b0) begin 
+        end
+        MODE: begin
+            if(QSPI_QIO_MODE==1'b1 & mode_counter == 1'b0) begin
                 if(QSPI_DUMMY_CYCLES!=4'h0)
                     next_state = DUMMY;
                 else if(QSPI_READ)
@@ -165,7 +166,7 @@ always @(*) begin
                     next_state = DATA_O;
                 else
                     next_state = IDLE;
-            end 
+            end
             else if(QSPI_QIO_MODE==1'b0) begin
                 next_state = IDLE;
             end
@@ -181,57 +182,58 @@ always @(*) begin
             end else begin
                 next_state = DUMMY;
             end
-        end 
+        end
         DATA_O: begin
-            if(byte_counter==5'h1F) begin 
+            if(byte_counter==5'h1F) begin
                 next_state = DATA_O;
             end else begin
-                if(QSPI_QIO_MODE==1'b0) begin 
-                    if(byte_counter==QSPI_N_RW_BYTES) begin 
+                if(QSPI_QIO_MODE==1'b0) begin
+                    if(byte_counter==QSPI_N_RW_BYTES) begin
                         if(data_counter == 3'h7)
                             next_state = IDLE;
-                        else 
+                        else
                             next_state = DATA_O;
-                    end else begin 
+                    end else begin
                         next_state = DATA_O;
-                    end 
-                end else begin 
+                    end
+                end else begin
                     if(byte_counter==QSPI_N_RW_BYTES) begin
                         if(data_counter==3'h0)
                             next_state = IDLE;
                         else
                             next_state = DATA_O;
-                    end else begin 
+                    end else begin
                         next_state = DATA_O;
                     end
                 end
             end
-        end 
-        DATA_I: begin 
+        end
+        DATA_I: begin
             next_state = DATA_I;
-            if(QSPI_QIO_MODE==1'b0) begin 
+            if(QSPI_QIO_MODE==1'b0) begin
                 if((byte_counter[3:0]==QSPI_N_RW_BYTES)) begin
                     if(data_counter==3'h7)
                         next_state = IDLE;
-                    else 
+                    else
                         next_state = DATA_I;
                 end
             end else begin
                 if((byte_counter==QSPI_N_RW_BYTES+1)) begin
                     if(data_counter==3'h0)
                         next_state = IDLE;
-                    else 
+                    else
                         next_state = DATA_I;
                 end
             end
         end
+        default: next_state = IDLE;
     endcase
 end
 
 reg QSPI_IO_e_int;
 
 always @(negedge QSPI_SCLK_i) begin
-    if(current_state==OP) begin 
+    if(current_state==OP) begin
         data_in_reg <= 128'd0;
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
@@ -248,10 +250,10 @@ always @(negedge QSPI_SCLK_i) begin
     end else if(current_state == DATA_O) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
-        if(QSPI_QIO_MODE==1'b1) begin 
+        if(QSPI_QIO_MODE==1'b1) begin
             QSPI_IO_o_reg <= QSPI_WDATA_reg[3:0];
             QSPI_WDATA_reg <= {4'h0, QSPI_WDATA_reg[127:4]};
-        end else begin 
+        end else begin
             QSPI_IO_o_reg[0] <= QSPI_WDATA_reg[0];
             QSPI_WDATA_reg <= {1'b0, QSPI_WDATA_reg[127:1]};
         end
@@ -266,17 +268,17 @@ always @(negedge QSPI_SCLK_i) begin
             QSPI_IO_o_reg[3:0]<={3'h7, addr_code[23]};
             addr_code[23:0] <= {addr_code[22:0], 1'b0};
         end
-    end else if(current_state == DUMMY) begin 
+    end else if(current_state == DUMMY) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
-    end else if(current_state == MODE) begin 
+    end else if(current_state == MODE) begin
         QSPI_IO_e_int <=1'b1;
         QSPI_SCLK_e <= 1'b1;
-        if(QSPI_QIO_MODE==1'b1) begin 
+        if(QSPI_QIO_MODE==1'b1) begin
             QSPI_IO_o_reg <= qspi_mode_reg[7:4];
             qspi_mode_reg <= {qspi_mode_reg[3:0], 4'b0};
         end
-    end else begin 
+    end else begin
         op_code <= QSPI_CMD;
         addr_code <= {2'b00,QSPI_ADDR};
         qspi_mode_reg <= QSPI_MODE_CODE;
@@ -285,73 +287,73 @@ always @(negedge QSPI_SCLK_i) begin
         QSPI_IO_e_int <= 1'b1;
     end
     if(current_state == DATA_I) begin
-        if(QSPI_QIO_MODE==1'b1) begin 
+        if(QSPI_QIO_MODE==1'b1) begin
             if(byte_counter!=QSPI_N_RW_BYTES+1)
                 data_in_reg <= {data_in_reg[123:0], QSPI_IO_i};
-        end else begin 
+        end else begin
             if(byte_counter!=QSPI_N_RW_BYTES+1)
                 data_in_reg <= {data_in_reg[126:0], QSPI_IO_i[1]};
         end
-    end  
-        
+    end
 
-    if(current_state != DATA_O) begin 
+
+    if(current_state != DATA_O) begin
         QSPI_WDATA_reg <= QSPI_WDATA;
     end
 
 end
-always @(posedge QSPI_SCLK_i or negedge HRESETn) begin 
-    if(~HRESETn) begin 
+always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
+    if(~HRESETn) begin
         op_counter <= 3'h0;
         data_counter <= 3'h7;
         byte_counter <= 5'h1F;
         dummy_counter <= 4'h0;
         addr_counter <= 5'h00;
         mode_counter <= 1'b1;
-    end else begin 
-        if(current_state==OP) begin 
+    end else begin
+        if(current_state==OP) begin
             op_counter<=op_counter+1;
-        end else begin 
+        end else begin
             op_counter <= 3'h0;
         end
 
         if(current_state==DATA_I || current_state ==DATA_O) begin
             data_counter <= data_counter + 1;
-            if(QSPI_QIO_MODE==1'b0 && data_counter == 3'h7) begin 
+            if(QSPI_QIO_MODE==1'b0 && data_counter == 3'h7) begin
                 byte_counter <= byte_counter+1;
                 data_counter <= 3'h0;
             end else if (QSPI_QIO_MODE==1'b1 && data_counter >= 3'h1) begin
                 byte_counter <= byte_counter+1;
                 data_counter <= 3'h0;
             end
-        end else begin 
+        end else begin
             data_counter <= 3'h7;
             byte_counter <= 5'h1F;
         end
 
-        if(current_state == DUMMY) begin 
+        if(current_state == DUMMY) begin
             dummy_counter <= dummy_counter + 1;
-        end else begin 
+        end else begin
             dummy_counter <= 4'h0;
         end
 
-        if(current_state == ADDR) begin 
+        if(current_state == ADDR) begin
             addr_counter <= addr_counter + 1;
-        end else begin 
+        end else begin
             addr_counter <= 5'h00;
         end
 
-        if(current_state == MODE) begin 
+        if(current_state == MODE) begin
             mode_counter <= mode_counter + 1;
-        end else begin 
+        end else begin
             mode_counter <= 1'b1;
         end
     end
 end
 
 // RDATA latch
-always @(*) begin
-    if(~HRESETn) begin 
+always_comb begin
+    if(~HRESETn) begin
         QSPI_RDATA = 128'd0;
     end else if(QSPI_nCS) begin
         case(QSPI_N_RW_BYTES)
@@ -371,7 +373,8 @@ always @(*) begin
             4'hD:   QSPI_RDATA = {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
             4'hE:   QSPI_RDATA = {{8{1'b0}},   data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
             4'hF:   QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
-        endcase            
+            default: QSPI_RDATA = 128'd0;
+        endcase
     end
 end
 

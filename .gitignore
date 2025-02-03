@@ -22,5 +22,11 @@ asic/TSMC28nm/*.syn
 asic/TSMC28nm/command.log
 asic/TSMC28nm/default.svf
 asic/TSMC28nm/*.log
+asic/TSMC28nm/alib-52
 
+docs/tex/*.aux
+docs/tex/*.log
+docs/tex/*.out
+docs/tex/*.toc
+ 
 imp

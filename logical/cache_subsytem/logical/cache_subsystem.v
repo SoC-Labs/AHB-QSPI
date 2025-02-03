@@ -2,8 +2,8 @@ module cache_subsystem(
     input  wire             HCLK,
     input  wire             HRESETn,
 
-    // APB 
-    input  wire             PCLKG,       
+    // APB
+    input  wire             PCLKG,
     input  wire [11:0]      PADDR,
     input  wire [31:0]      PWDATA,
     input  wire             PWRITE,
@@ -29,9 +29,9 @@ module cache_subsystem(
     input  wire             HMASTERS,     // When 1 indicate a debug access
     output wire             HREADYOUTS,   // Device ready
     output wire [31:0]      HRDATAS,      // Read data output
-    output wire             HRESPS,  
-  
-    // AHB Manager 
+    output wire             HRESPS,
+
+    // AHB Manager
     output wire             HSELM,        // Device select
     output wire [21:0]      HADDRM,       // Address
     output wire [2:0]       HBURSTM,      // Burst Type - Not used (tied to 0)!
@@ -173,10 +173,10 @@ p_flash_cache_f0 #(
         .CACHEHIT(CACHEHIT)
 );
 
-always @(posedge HCLK or negedge HRESETn) begin 
+always @(posedge HCLK or negedge HRESETn) begin
     if(~HRESETn)
         PWR_DELAY <= 1'b0;
-    else 
+    else
         PWR_DELAY <= RAMPWRUPREQ;
 end
 assign RAMPWRUPACK = PWR_DELAY;
