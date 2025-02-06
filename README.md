@@ -38,7 +38,7 @@ Read bandwidth with 4 KB cache for 512x 32 bit reads, and system clock of 200 MH
 - Add programmable op codes for AHB interface
 - Improve writing method over APB? (see below)
 - Add interrupts for QSPI finish
-- Add programmable address length
+- Add programmable address length (currently this is set to the maximum of the CG092 flash cache. If we want to increase this then we need a new cache)
 
 ## Writing over APB
 Currently the method for writing over APB to the flash is to write up to 4x 32 bit words to the APB registers and then tell the QSPI controller to write. However as there is a long latency after writing over QSPI for the flash to finish, this is not optimal. 

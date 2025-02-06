@@ -212,13 +212,13 @@ always_comb begin
             next_state = DATA_I;
             if(QSPI_QIO_MODE==1'b0) begin
                 if((byte_counter[3:0]==QSPI_N_RW_BYTES)) begin
-                    if(data_counter==3'h7)
+                    if(data_counter==3'h6)
                         next_state = IDLE;
                     else
                         next_state = DATA_I;
                 end
             end else begin
-                if((byte_counter==QSPI_N_RW_BYTES+1)) begin
+                if((byte_counter==QSPI_N_RW_BYTES)) begin
                     if(data_counter==3'h0)
                         next_state = IDLE;
                     else
@@ -234,7 +234,6 @@ reg QSPI_IO_e_int;
 
 always @(negedge QSPI_SCLK_i) begin
     if(current_state==OP) begin
-        data_in_reg <= 128'd0;
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
         if(QSPI_QIO_MODE==1'b1) begin
@@ -269,7 +268,7 @@ always @(negedge QSPI_SCLK_i) begin
             addr_code[23:0] <= {addr_code[22:0], 1'b0};
         end
     end else if(current_state == DUMMY) begin
-        QSPI_IO_e_int <= 1'b1;
+        QSPI_IO_e_int <= 1'b0;
         QSPI_SCLK_e <= 1'b1;
     end else if(current_state == MODE) begin
         QSPI_IO_e_int <=1'b1;
@@ -286,15 +285,6 @@ always @(negedge QSPI_SCLK_i) begin
         QSPI_IO_o_reg<=4'hF;
         QSPI_IO_e_int <= 1'b1;
     end
-    if(current_state == DATA_I) begin
-        if(QSPI_QIO_MODE==1'b1) begin
-            if(byte_counter!=QSPI_N_RW_BYTES+1)
-                data_in_reg <= {data_in_reg[123:0], QSPI_IO_i};
-        end else begin
-            if(byte_counter!=QSPI_N_RW_BYTES+1)
-                data_in_reg <= {data_in_reg[126:0], QSPI_IO_i[1]};
-        end
-    end
 
 
     if(current_state != DATA_O) begin
@@ -310,8 +300,10 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
         dummy_counter <= 4'h0;
         addr_counter <= 5'h00;
         mode_counter <= 1'b1;
+        data_in_reg <= 128'd0;
     end else begin
         if(current_state==OP) begin
+            data_in_reg <= 128'd0;
             op_counter<=op_counter+1;
         end else begin
             op_counter <= 3'h0;
@@ -348,6 +340,17 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
         end else begin
             mode_counter <= 1'b1;
         end
+
+        if(current_state == DATA_I) begin
+            if(QSPI_QIO_MODE==1'b1) begin
+                if(byte_counter!=QSPI_N_RW_BYTES+1)
+                    data_in_reg <= {data_in_reg[123:0], QSPI_IO_i};
+            end else begin
+                if(byte_counter!=QSPI_N_RW_BYTES+1)
+                    data_in_reg <= {data_in_reg[126:0], QSPI_IO_i[1]};
+            end
+        end
+
     end
 end
 

@@ -193,18 +193,13 @@ set_property -dict {PACKAGE_PIN W19 IOSTANDARD LVCMOS33} [get_ports {QSPI_IO_0[3
 
 #set_property -dict { PACKAGE_PIN J15   IOSTANDARD LVCMOS33 } [get_ports { crypto_sda }]; #IO_25_35 Sch=crypto_sda
 
+create_generated_clock -name QSPI_SCLK -source [get_pins {ahb_qspi_i/processing_system7_0/inst/PS7_i/FCLKCLK[0]}] -divide_by 2 [get_pins ahb_qspi_i/AXI_QSPI_0/inst/ahb_qspi_fpga_wrapper_0/inst/u_top_ahb_qspi/u_qspi_controller/u_qspi_clock_div/QSPI_SCLK_i]
+create_generated_clock -name QSPI_CLK_o -source [get_pins ahb_qspi_i/AXI_QSPI_0/inst/ahb_qspi_fpga_wrapper_0/inst/u_top_ahb_qspi/u_qspi_controller/u_qspi_clock_div/QSPI_SCLK_i] -divide_by 1 [get_ports QSPI_SCLK_0]
 
-set_input_delay -clock [get_clocks clk_fpga_0] -min -add_delay 2.000 [get_ports {QSPI_IO_0[*]}]
-set_input_delay -clock [get_clocks clk_fpga_0] -max -add_delay 5.000 [get_ports {QSPI_IO_0[*]}]
+set_input_delay -clock [get_clocks QSPI_SCLK] -min 0  [get_ports {QSPI_IO_0[*]}]
+set_input_delay -clock [get_clocks QSPI_SCLK] -max 20 [get_ports {QSPI_IO_0[*]}]
+
+set_output_delay -clock [get_clocks QSPI_CLK_o] -min 0 [get_ports {QSPI_IO_0[*]}]
+set_output_delay -clock [get_clocks QSPI_CLK_o] -max 20 [get_ports {QSPI_IO_0[*]}]
 
 
-
-
-create_generated_clock -name ahb_qspi_i/AXI_QSPI_0/inst/ahb_qspi_fpga_wrapper_0/inst/u_top_ahb_qspi/u_ahb_qspi_interface/AHB_QSPI_ENABLE -source [get_pins {ahb_qspi_i/processing_system7_0/inst/PS7_i/FCLKCLK[0]}] -divide_by 1 [get_pins ahb_qspi_i/AXI_QSPI_0/inst/ahb_qspi_fpga_wrapper_0/inst/u_top_ahb_qspi/u_ahb_qspi_interface/AHB_QSPI_ENABLE_reg/Q]
-create_generated_clock -name ahb_qspi_i/AXI_QSPI_0/inst/ahb_qspi_fpga_wrapper_0/inst/u_top_ahb_qspi/u_apb_qspi_regs/APB_QSPI_ENABLE -source [get_pins {ahb_qspi_i/processing_system7_0/inst/PS7_i/FCLKCLK[0]}] -divide_by 1 [get_pins {ahb_qspi_i/AXI_QSPI_0/inst/ahb_qspi_fpga_wrapper_0/inst/u_top_ahb_qspi/u_apb_qspi_regs/reg2_reg[8]/Q}]
-create_generated_clock -name ahb_qspi_i/AXI_QSPI_0/inst/ahb_qspi_fpga_wrapper_0/inst/u_top_ahb_qspi/u_qspi_controller/QSPI_SCLK_e -source [get_pins {ahb_qspi_i/processing_system7_0/inst/PS7_i/FCLKCLK[0]}] -divide_by 1 [get_pins ahb_qspi_i/AXI_QSPI_0/inst/ahb_qspi_fpga_wrapper_0/inst/u_top_ahb_qspi/u_qspi_controller/QSPI_SCLK_e_reg/Q]
-set_clock_groups -logically_exclusive -group [get_clocks -include_generated_clocks ahb_qspi_i/AXI_QSPI_0/inst/ahb_qspi_fpga_wrapper_0/inst/u_top_ahb_qspi/u_apb_qspi_regs/APB_QSPI_ENABLE] -group [get_clocks -include_generated_clocks ahb_qspi_i/AXI_QSPI_0/inst/ahb_qspi_fpga_wrapper_0/inst/u_top_ahb_qspi/u_ahb_qspi_interface/AHB_QSPI_ENABLE]
-set_property C_CLK_INPUT_FREQ_HZ 300000000 [get_debug_cores dbg_hub]
-set_property C_ENABLE_CLK_DIVIDER false [get_debug_cores dbg_hub]
-set_property C_USER_SCAN_CHAIN 1 [get_debug_cores dbg_hub]
-connect_debug_port dbg_hub/clk [get_nets clk]
