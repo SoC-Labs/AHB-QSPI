@@ -29,6 +29,7 @@ documentation:
 	mv ./docs/tex/ahb_qspi.pdf ./docs/ahb_qspi.pdf
 
 get_flash_model:
+	@mkdir -p $(SOCLABS_AHB_QSPI_DIR)/verif/VIP
 	@cd $(SOCLABS_AHB_QSPI_DIR)/verif/VIP; wget https://ww1.microchip.com/downloads/en/DeviceDoc/SST26VF064B.zip 
 	@cd $(SOCLABS_AHB_QSPI_DIR)/verif/VIP; unzip SST26VF064B.zip
 	@cd $(SOCLABS_AHB_QSPI_DIR)/verif/VIP; rm SST26VF064B.zip

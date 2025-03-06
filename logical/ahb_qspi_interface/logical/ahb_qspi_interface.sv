@@ -20,12 +20,12 @@ module ahb_qspi_interface #(
     output wire                 HREADYOUT,
     output wire                 HRESP,
 
-    output wire [7:0]           AHB_QSPI_CMD,
+    input  wire                 XIP_ACTIVE,
+
     output reg                  AHB_QSPI_ENABLE,
     output wire                 AHB_QSPI_READ,
     output wire                 AHB_QSPI_WRITE,
     output wire                 AHB_QSPI_ADDR_EN,
-    output wire [3:0]           AHB_QSPI_DUMMY_CYCLES,
     output wire [3:0]           AHB_QSPI_N_RW_BYTES,
     output reg  [21:0]          AHB_QSPI_ADDR,
     output wire [127:0]         AHB_QSPI_WDATA,
@@ -37,10 +37,7 @@ module ahb_qspi_interface #(
 
 );
 
-assign HRESP = 1'b0;
-assign AHB_QSPI_CMD = 8'h0B;
 assign AHB_QSPI_ADDR_EN = 1'b1;
-assign AHB_QSPI_DUMMY_CYCLES = 4'h4;
 assign AHB_QSPI_READ=1'b1;
 assign AHB_QSPI_WRITE=1'b0;
 assign AHB_QSPI_WDATA = HWDATA;
@@ -55,7 +52,7 @@ wire [31:0] AHB_QSPI_RDATA_W3 = {AHB_QSPI_RDATA[103:96],AHB_QSPI_RDATA[111:104],
 wire [127:0] AHB_QSPI_RDATA_i = {AHB_QSPI_RDATA_W3,AHB_QSPI_RDATA_W0, AHB_QSPI_RDATA_W1, AHB_QSPI_RDATA_W2};
 
 // AHB FSM
-enum {IDLE, WAIT_READ, WAIT_WRITE, WRITE, READ} current_state, next_state;
+enum {IDLE, WAIT_READ, ERR} current_state, next_state;
 
 // AHB lite last regs
 reg                 last_HSEL;
@@ -68,7 +65,8 @@ reg [2:0]           last_HSIZE;
 reg         qspi_ready;
 reg         qspi_started;
 
-assign HREADYOUT = (current_state==IDLE && last_HTRANS==2'b00) ? 1'b1: qspi_ready; //(current_state==IDLE)? 1'b1 : qspi_ready;
+assign HREADYOUT = ((current_state==IDLE && last_HTRANS==2'b00)||(current_state==ERR)) ? 1'b1: qspi_ready; //(current_state==IDLE)? 1'b1 : qspi_ready;
+assign HRESP = (current_state == ERR) ? 1'b1 : 1'b0;
 
 always @(posedge HCLK or negedge HRESETn) begin
     if(~HRESETn) begin
@@ -96,22 +94,17 @@ always_comb begin
     case(current_state)
         IDLE:           if(HTRANS==2'b00)
                             next_state = IDLE;
-                        else if(HSELx & HWRITE & ~qspi_ready) begin
-                            next_state = WAIT_WRITE;
-                        end
-                        else if(HSELx & ~qspi_ready) begin
+                        else if(HSELx && HTRANS==2'b10 && ~XIP_ACTIVE)
+                            next_state = ERR;
+                        else if(HSELx & HWRITE)
+                            next_state = ERR;
+                        else if(HSELx && HTRANS==2'b10)
                             next_state = WAIT_READ;
-                        end
-        WAIT_WRITE:     if(qspi_ready)
-                            next_state = WRITE;
-                        else
-                            next_state = WAIT_WRITE;
+        ERR:            next_state = IDLE;
         WAIT_READ:      if(qspi_ready)
-                            next_state = READ;
+                            next_state = IDLE;
                         else
                             next_state = WAIT_READ;
-        READ:           next_state = IDLE;
-        WRITE:          next_state = IDLE;
         default:        next_state = IDLE;
     endcase
 end
@@ -138,7 +131,7 @@ always @(posedge HCLK or negedge HRESETn) begin
                     qspi_ready <= 1'b1;
                 end
             end
-        end else begin 
+        end else begin
             qspi_started <= 1'b0;
             qspi_ready <=1'b0;
             AHB_QSPI_ADDR <= {HADDR[ADDR_W-1:4],4'b0000};

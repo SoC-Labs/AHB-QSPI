@@ -30,7 +30,13 @@ module apb_qspi_regs(
     output wire                 XIP_ACTIVE,
     output wire                 QSPI_CONT_READ,
     output wire [7:0]           QSPI_MODE_CODE,
-    output wire                 QSPI_NO_CMD
+    output wire                 QSPI_NO_CMD,
+
+    output wire [7:0]           QSPI_CLK_DIV,
+
+    // AHB Control Signals
+    output wire [7:0]           AHB_QSPI_CMD,
+    output wire [3:0]           AHB_QSPI_DUMMY_CYCLES
 );
 // Registers
 // reg0 Control 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
@@ -55,6 +61,25 @@ module apb_qspi_regs(
 //     QSPI_ADDR [21:0]                             |<-------------------------------------------------->|-> QSPI_ADDR [21:0]
 
 
+// reg12 AHB SPI setup 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+// reg12 SPI Commands 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+//     AHN_QSPI_CMD [7:0]                              |  |        |  |        |  |  | | | |----> QSPI_CMD [7:0]
+//     AHB_QSPI_DUMMY_CYCLES[15:12]                    |  |        |  |<------>|-------> QSPI_DUMMY_CYCLES [15:12]
+
+// reg13 QSPI_clk_div [7:0]
+
+localparam [7:0] PIDR0 = 8'h59;
+localparam [7:0] PIDR1 = 8'h16;
+localparam [7:0] PIDR2 = 8'h15;
+localparam [7:0] PIDR3 = 8'h00;
+localparam [7:0] PIDR4 = 8'h00;
+localparam [7:0] PIDR5 = 8'h00;
+localparam [7:0] PIDR6 = 8'h00;
+localparam [7:0] PIDR7 = 8'h00;
+localparam [7:0] CIDR0 = 8'h50;
+localparam [7:0] CIDR1 = 8'h51;
+localparam [7:0] CIDR2 = 8'h4C;
+localparam [7:0] CIDR3 = 8'h53;
 
 reg [31:0] reg0;
 reg [31:0] reg1;
@@ -65,6 +90,8 @@ reg [31:0] reg8;
 reg [31:0] reg9;
 reg [31:0] reg10;
 reg [31:0] reg11;
+reg [31:0] reg12;
+reg [7:0]  reg13;
 
 
 assign QSPI_QIO_MODE = reg0[0];
@@ -88,6 +115,11 @@ assign QSPI_WDATA[63:32] =  {reg9[27:24],reg9[31:28],reg9[19:16],reg9[23:20],reg
 assign QSPI_WDATA[95:64] =  {reg10[27:24],reg10[31:28],reg10[19:16],reg10[23:20],reg10[11:8],reg10[15:12],reg10[3:0],reg10[7:4]};
 assign QSPI_WDATA[127:96] = {reg11[27:24],reg11[31:28],reg11[19:16],reg11[23:20],reg11[11:8],reg11[15:12],reg11[3:0],reg11[7:4]};
 
+assign AHB_QSPI_CMD = reg12[7:0];
+assign AHB_QSPI_DUMMY_CYCLES = reg12[15:12];
+
+assign QSPI_CLK_DIV = reg13;
+
 always @(posedge PCLK or negedge PRESETn) begin
     if(~PRESETn) begin
         reg0 = 32'd0;
@@ -98,6 +130,8 @@ always @(posedge PCLK or negedge PRESETn) begin
         reg9 = 32'd0;
         reg10 = 32'd0;
         reg11 = 32'd0;
+        reg12 = 32'd0;
+        reg13 = 8'h01;
     end else begin
         if(PSEL & PENABLE & PWRITE) begin
             case(PADDR)
@@ -109,6 +143,8 @@ always @(posedge PCLK or negedge PRESETn) begin
                 10'h009: reg9 = PWDATA;
                 10'h00A: reg10 = PWDATA;
                 10'h00B: reg11 = PWDATA;
+                10'h00C: reg12 = PWDATA;
+                10'h00D: reg13 = PWDATA[7:0];
             endcase
         end
         if(QSPI_ENABLE_ACK)
@@ -117,7 +153,7 @@ always @(posedge PCLK or negedge PRESETn) begin
     end
 end
 
-always @(PCLK, PADDR) begin
+always @(PCLK, PADDR, QSPI_RDATA, reg0, reg1, reg2, reg3, reg8, reg9, reg10, reg11, reg12) begin
     if(PCLK) begin
         case(PADDR)
             10'h000: PRDATA = reg0;
@@ -132,6 +168,20 @@ always @(PCLK, PADDR) begin
             10'h009: PRDATA = reg9;
             10'h00A: PRDATA = reg10;
             10'h00B: PRDATA = reg11;
+            10'h00C: PRDATA = reg12;
+            10'h00D: PRDATA = {24'd0, reg13};
+            10'h3F4: PRDATA = {24'd0, PIDR4};
+            10'h3F5: PRDATA = {24'd0, PIDR5};
+            10'h3F6: PRDATA = {24'd0, PIDR6};
+            10'h3F7: PRDATA = {24'd0, PIDR7};
+            10'h3F8: PRDATA = {24'd0, PIDR0};
+            10'h3F9: PRDATA = {24'd0, PIDR1};
+            10'h3FA: PRDATA = {24'd0, PIDR2};
+            10'h3FB: PRDATA = {24'd0, PIDR3};
+            10'h3FC: PRDATA = {24'd0, CIDR0};
+            10'h3FD: PRDATA = {24'd0, CIDR1};
+            10'h3FE: PRDATA = {24'd0, CIDR2};
+            10'h3FF: PRDATA = {24'd0, CIDR3};
             default: PRDATA = 32'hDEADCAFE;
         endcase
     end

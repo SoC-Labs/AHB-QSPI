@@ -3,7 +3,8 @@ module qspi_controller (
     input  wire         HCLK,
     input  wire         HRESETn,
 
-    input  wire [7:0]   QSPI_CLK_DIV,
+    input  wire         QSPI_SCLK_i,
+
     input  wire [1:0]   QSPI_SPI_MODE, // {CPOL, CPHA}
 
     input  wire [7:0]   QSPI_CMD,
@@ -31,17 +32,7 @@ module qspi_controller (
 
 );
 
-wire    QSPI_SCLK_i;
 reg     QSPI_SCLK_e;
-
-qspi_clock_div u_qspi_clock_div(
-    .HCLK(HCLK),
-    .HRESETn(HRESETn),
-    .QSPI_CLK_DIV(QSPI_CLK_DIV),
-    .QSPI_SPI_MODE(QSPI_SPI_MODE),
-    .QSPI_SCLK_i(QSPI_SCLK_i)
-);
-
 
 assign QSPI_SCLK = (QSPI_SCLK_e==1'b1) ? QSPI_SCLK_i : QSPI_SPI_MODE[1];
 
@@ -169,6 +160,8 @@ always_comb begin
             end
             else if(QSPI_QIO_MODE==1'b0) begin
                 next_state = IDLE;
+            end else begin 
+                next_state = MODE;
             end
         end
         DUMMY: begin

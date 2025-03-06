@@ -38,7 +38,7 @@ Identification
 Write
 
 - [x] (0x06) Write Enable
-- [ ] (0x04) Write Disable
+- [x] (0x04) Write Disable
 - [ ] (0x20) SE: Erase 4 KBytes of memory array
 - [ ] (0xD8) BE: Erase 64, 32, or 8 KBytes of memory array
 - [ ] (0xC7) CE: Full chip erase

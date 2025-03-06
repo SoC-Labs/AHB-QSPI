@@ -216,15 +216,12 @@ async def QSPI_READ_TESTS(dut):
         CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x04,4)
         CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
         await Timer(time=10, units='us')
-        print(CACHE_STATUS)
-    print(CACHE_STATUS) 
-
-    
     
     tb.log.info("Read %d x 16-bytes over AHB (uncached)",n_reads)
     start_time_uncached = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads*4):
-        data = await tb.data_ahb_master.read(i*4 + base_addr,4)
+        rdata = await tb.data_ahb_master.read(i*4 + base_addr,4)
+        assert int(rdata[0]['data'],16)==data[i%4]
     end_time_uncached = cocotb.utils.get_sim_time(units='ns')
     dt_uncached = end_time_uncached - start_time_uncached
     await Timer(time=10, units='us')
@@ -232,7 +229,8 @@ async def QSPI_READ_TESTS(dut):
     tb.log.info("Read 512x 16-bytes over AHB (cached)")
     start_time_cached = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads*4):
-        data = await tb.data_ahb_master.read(i*4+ base_addr,4)
+        rdata = await tb.data_ahb_master.read(i*4+ base_addr,4)
+        assert int(rdata[0]['data'],16)==data[i%4]
     end_time_cached = cocotb.utils.get_sim_time(units='ns')
     dt_cached = end_time_cached - start_time_cached
 
@@ -267,3 +265,16 @@ async def CACHE_CONFIG(dut):
     assert int(data[0]['data'],16) == 0x40
     data = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x20,4)
     print(data)
+
+@cocotb.test()
+async def AHB_BAD_BEHAVIOUR(dut):
+    tb = TB(dut)
+    await tb.cycle_reset()
+
+    tb.log.info("Try write over AHB, expect ERROR")
+    resp = await tb.data_ahb_master.write(0x000,0xCAFECAFE)
+    tb.log.info(resp[0]['resp'])
+
+    tb.log.info("Try read over AHB when in APB mode, expect ERROR")
+    data = await tb.data_ahb_master.read(0x100,4)
+    tb.log.info(data[0]['resp'])
