@@ -52,6 +52,16 @@ reg [3:0]   QSPI_IO_o_reg;
 reg [127:0] data_in_reg;
 reg [21:0]  last_QSPI_ADDR;
 
+reg QSPI_enable_sync;
+
+always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
+    if(~HRESETn)begin
+        QSPI_enable_sync <= 1'b0;
+    end else begin 
+        QSPI_enable_sync <= QSPI_ENABLE;
+    end 
+end
+
 reg [127:0]   QSPI_WDATA_reg;
 
 assign QSPI_IO_o = QSPI_IO_o_reg;
@@ -67,9 +77,9 @@ end
 always_comb begin
     case(current_state)
         IDLE: begin
-            if(QSPI_ENABLE==1'b1 && QSPI_NO_CMD==1'b0) begin
+            if(QSPI_enable_sync==1'b1 && QSPI_NO_CMD==1'b0) begin
                 next_state = OP;
-            end else if(QSPI_ENABLE==1'b1 && QSPI_NO_CMD==1'b1) begin
+            end else if(QSPI_enable_sync==1'b1 && QSPI_NO_CMD==1'b1) begin
                 if(last_QSPI_ADDR==QSPI_ADDR)
                     next_state = NO_FETCH;
                 else
@@ -82,7 +92,7 @@ always_comb begin
         end
         NO_FETCH: begin
             QSPI_ENABLE_ACK = 1'b1;
-            if(QSPI_ENABLE==1'b0)
+            if(QSPI_enable_sync==1'b0)
                 next_state = IDLE;
         end
         OP: begin
@@ -374,7 +384,7 @@ always_comb begin
     end
 end
 
-assign QSPI_nCS = ((QSPI_ENABLE==1'b1) ||(current_state!=IDLE) || (QSPI_SCLK_e==1'b1))?1'b0:1'b1;
+assign QSPI_nCS = ((QSPI_enable_sync==1'b1) ||(current_state!=IDLE) || (QSPI_SCLK_e==1'b1))?1'b0:1'b1;
 //assign QSPI_SCLK_e = (current_state!=IDLE)?1'b1:1'b0;w
 
 assign QSPI_IO_e[3] = (QSPI_QIO_MODE==1'b1)?QSPI_IO_e_int:1'b1;

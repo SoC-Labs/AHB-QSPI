@@ -120,11 +120,12 @@ always @(posedge HCLK or negedge HRESETn) begin
             if(AHB_QSPI_BUSY!=1'b1) begin
                 if(qspi_started==1'b0) begin
                     AHB_QSPI_ENABLE <= 1'b1;
-                    qspi_started <= 1'b1;
                 end
             end
-            if(AHB_QSPI_ENABLE_ACK)
+            if(AHB_QSPI_ENABLE_ACK) begin
                 AHB_QSPI_ENABLE <= 1'b0;
+                qspi_started <= 1'b1;
+            end
             if(qspi_started==1'b1) begin
                 if(AHB_QSPI_BUSY==1'b0) begin
                     HRDATA <= AHB_QSPI_RDATA_i;
@@ -132,6 +133,7 @@ always @(posedge HCLK or negedge HRESETn) begin
                 end
             end
         end else begin
+            AHB_QSPI_ENABLE <= 1'b0;
             qspi_started <= 1'b0;
             qspi_ready <=1'b0;
             AHB_QSPI_ADDR <= {HADDR[ADDR_W-1:4],4'b0000};

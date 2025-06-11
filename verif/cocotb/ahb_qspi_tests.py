@@ -27,8 +27,8 @@ class TB:
         self.log.setLevel(logging.DEBUG)
         self.dut.HRESETn.setimmediatevalue(0)
         cocotb.start_soon(Clock(dut.HCLK, 10, units="ns").start())
-        self.config_ahb_master = AHBLiteMaster(AHBBus.from_prefix(dut,"config", optional_signals = {"hsel":"HSEL", "hready_in":"HREADY_IN", "hburst":"HBURST"}), dut.HCLK, dut.HRESETn)
-        self.data_ahb_master = AHBLiteMaster(AHBBus.from_prefix(dut,"data", optional_signals = {"hsel":"HSEL", "hready_in":"HREADY_IN", "hburst":"HBURST"}), dut.HCLK, dut.HRESETn)
+        self.config_ahb_master = AHBLiteMaster(AHBBus.from_prefix(dut,"config", optional_signals = {"hsel":"HSEL", "hready_in":"HREADY_IN", "hburst":"HBURST"}), dut.HCLK, dut.HRESETn, 500)
+        self.data_ahb_master = AHBLiteMaster(AHBBus.from_prefix(dut,"data", optional_signals = {"hsel":"HSEL", "hready_in":"HREADY_IN", "hburst":"HBURST"}), dut.HCLK, dut.HRESETn, 500)
 
     async def cycle_reset(self):
         await ClockCycles(self.dut.HCLK,1)
@@ -228,7 +228,6 @@ async def QSPI_READ_TESTS(dut):
     tb.log.info("Read %d x 16-bytes over AHB (uncached)",n_reads)
     start_time_uncached = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads*4):
-        tb.log.info("Read %d ",i)
         rdata = await tb.data_ahb_master.read(i*4 + base_addr,4)
         assert int(rdata[0]['data'],16)==data[i%4]
     end_time_uncached = cocotb.utils.get_sim_time(units='ns')
@@ -243,6 +242,32 @@ async def QSPI_READ_TESTS(dut):
     end_time_cached = cocotb.utils.get_sim_time(units='ns')
     dt_cached = end_time_cached - start_time_cached
 
+    await tb.config_ahb_master.write(0x34, 0x05)
+    tb.log.info("Clock divider changed")
+
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x0)
+    tb.log.info("Disable Cache")
+    CACHE_CONFIG_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR,4)
+    CACHE_CONFIG = int(CACHE_CONFIG_tmp[0]['data'],16)
+    assert CACHE_CONFIG == 0x0
+
+    CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x04,4)
+    CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
+    while((CACHE_STATUS&(0x3))!=0):
+        CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x00,4)
+        CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x04,4)
+        CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
+        await Timer(time=10, units='us')
+
+
+    tb.log.info("Read 512x 16-bytes over AHB (uncached)")
+    start_time_slow = cocotb.utils.get_sim_time(units='ns')
+    for i in range(0,n_reads*4):
+        rdata = await tb.data_ahb_master.read(i*4+ base_addr,4)
+        assert int(rdata[0]['data'],16)==data[i%4]
+    end_time_slow = cocotb.utils.get_sim_time(units='ns')
+    dt_slow = end_time_slow - start_time_slow
+
 
     await tb.config_ahb_master.write(0x00, 0x01)
 
@@ -254,15 +279,18 @@ async def QSPI_READ_TESTS(dut):
     BW = n_reads*4/(dt*1e-3)
     BW_uncached = n_reads*4/(dt_uncached*1e-3)
     BW_cached = n_reads*4/(dt_cached*1e-3)
-
+    BW_slow = n_reads*4/(dt_slow*1e-3)
+    
     tb.log.info("dt APB: %f ns", dt)
     tb.log.info("dt caching: %f ns", dt_uncached)
     tb.log.info("dt cached: %f ns", dt_cached)
+    tb.log.info("dt slow: %f ns", dt_slow)
 
 
     tb.log.info("Bandwidth APB: %f MB/s", BW)
     tb.log.info("Bandwidth caching: %f MB/s", BW_uncached)
     tb.log.info("Bandwidth cached: %f MB/s", BW_cached)
+    tb.log.info("Bandwidth slow: %f MB/s", BW_slow)
 
 
 @cocotb.test()

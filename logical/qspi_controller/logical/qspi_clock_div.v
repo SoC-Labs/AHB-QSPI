@@ -21,8 +21,8 @@ always @(posedge HCLK or negedge HRESETn) begin
         end else if(QSPI_CLK_DIV!=8'h00) begin
             if(QSPI_CLK_DIV_COUNTER==QSPI_CLK_DIV-1'b1) begin
                 QSPI_CLK_DIV_COUNTER <= 8'h00;
-            end else begin
                 QSPI_SCLK_reg <= ~QSPI_SCLK_reg;
+            end else begin
                 QSPI_CLK_DIV_COUNTER <= QSPI_CLK_DIV_COUNTER + 1;
             end
         end else begin
