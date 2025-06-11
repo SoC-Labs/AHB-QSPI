@@ -50,6 +50,8 @@ wire [31:0]          PRDATA;
 wire                 PREADY;
 wire                 PSLVERR;
 
+wire                IRQ_QSPI_FINISHED;
+
 cmsdk_ahb_to_apb #(
     .ADDRWIDTH(16),
     .REGISTER_RDATA(1),
@@ -88,11 +90,9 @@ cmsdk_ahb_to_apb #(
 
 wire QSPI_SCLK;
 wire QSPI_nCS;
-wire [3:0] QSPI_IO_o;
-wire [3:0] QSPI_IO_i;
-wire [3:0] QSPI_IO_e;
 wire [3:0] QSPI_IO;
-top_ahb_qspi u_top_ahb_qspi(
+
+ahb_qspi_pads u_ahb_qspi_pads(
     .HCLK(HCLK),
     .HRESETn(HRESETn),
     .PCLK(HCLK),
@@ -121,28 +121,21 @@ top_ahb_qspi u_top_ahb_qspi(
     .PRDATA(PRDATA),
     .PREADY(PREADY),
     .PSLVERR(PSLVERR),
+
     .QSPI_SCLK(QSPI_SCLK),
     .QSPI_nCS(QSPI_nCS),
-    .QSPI_IO_o(QSPI_IO_o),
-    .QSPI_IO_i(QSPI_IO_i),
-    .QSPI_IO_e(QSPI_IO_e)
+    .QSPI_IO(QSPI_IO),
+
+    .IRQ_QSPI_FINISHED(IRQ_QSPI_FINISHED)
+
 );
 
 `ifdef GATE_SIMS
 initial begin
-    $sdf_annotate("/home/dwn1c21/SoC-Labs/ahb_qspi/imp/ASIC/top_ahb_qspi.sdf", u_top_ahb_qspi);
+    $sdf_annotate("/home/dwn1c21/SoC-Labs/ahb_qspi/imp/ASIC/top_ahb_qspi.sdf", u_ahb_qspi_pads);
 end
 `endif
 
-assign QSPI_IO[0] = QSPI_IO_e[0] ? QSPI_IO_o[0] : 1'bz;
-assign QSPI_IO[1] = QSPI_IO_e[1] ? QSPI_IO_o[1] : 1'bz;
-assign QSPI_IO[2] = QSPI_IO_e[2] ? QSPI_IO_o[2] : 1'bz;
-assign QSPI_IO[3] = QSPI_IO_e[3] ? QSPI_IO_o[3] : 1'bz;
-
-assign QSPI_IO_i[0] = QSPI_IO[0];
-assign QSPI_IO_i[1] = QSPI_IO[1];
-assign QSPI_IO_i[2] = QSPI_IO[2];
-assign QSPI_IO_i[3] = QSPI_IO[3];
 
 sst26vf064b u_sst26vf064b(
     .SCK(QSPI_SCLK),

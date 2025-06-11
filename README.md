@@ -23,6 +23,9 @@ The APB is mapped between the QSPI controller and Flash Cache configuration regi
 - 0x0000-0x0FFF : QSPI controller
 - 0x1000-0x1FFF : Flash Cache
 
+## Interrupts
+Only 1 interrupt currently for when QSPI has finished a transfer. To clear interrupt write a 1 to 8th bit of status register.
+
 ## Simulation
 The AHB QSPI includes a cocoTB simulation environment. This can be run using the `make run_cocotb` command
 
@@ -37,7 +40,6 @@ Read bandwidth with 4 KB cache for 512x 32 bit reads, and system clock of 200 MH
 - Add programmable clock divider for QSPI
 - Add programmable op codes for AHB interface
 - Improve writing method over APB? (see below)
-- Add interrupts for QSPI finish
 - Add programmable address length (currently this is set to the maximum of the CG092 flash cache. If we want to increase this then we need a new cache)
 
 ## Writing over APB

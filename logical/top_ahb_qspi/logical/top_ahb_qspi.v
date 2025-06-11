@@ -59,7 +59,9 @@ module top_ahb_qspi #(
     output wire                 QSPI_nCS,
     output wire [3:0]           QSPI_IO_o,
     input  wire [3:0]           QSPI_IO_i,
-    output wire [3:0]           QSPI_IO_e
+    output wire [3:0]           QSPI_IO_e,
+
+    output wire                 IRQ_QSPI_FINISHED
 );
 
 
@@ -363,6 +365,8 @@ apb_qspi_regs u_apb_qspi_regs(
     .QSPI_CONT_READ(QSPI_CONT_READ),
     .QSPI_MODE_CODE(QSPI_MODE_CODE),
     .QSPI_NO_CMD(QSPI_NO_CMD),
+    
+    .IRQ_QSPI_FINISHED(IRQ_QSPI_FINISHED),
 
     .QSPI_CLK_DIV(QSPI_CLK_DIV),
     .AHB_QSPI_CMD(AHB_QSPI_CMD),

@@ -34,6 +34,8 @@ module apb_qspi_regs(
 
     output wire [7:0]           QSPI_CLK_DIV,
 
+    output wire                 IRQ_QSPI_FINISHED,
+
     // AHB Control Signals
     output wire [7:0]           AHB_QSPI_CMD,
     output wire [3:0]           AHB_QSPI_DUMMY_CYCLES
@@ -46,7 +48,9 @@ module apb_qspi_regs(
 //  QSPI_CONT_READ[24]             |  |----------------------------------------------------------------> QSPI_CONT_READ[24]
 //  QSPI_NO_CMD[25]                |-------------------------------------------------------------------> QSPI_NO_CMD[25]
 
-// reg1 Status
+// reg1 Status 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+// QSPI_BUSY                                                                       |               |--> QSPI_BUSY
+// IRQ_CLR                                                                         |------------------> IRQ_CLR
 
 // reg2 SPI Commands 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
 //     QSPI_CMD [7:0]                                  |  |        |  |        |  |  | | | |----> QSPI_CMD [7:0]
@@ -67,6 +71,11 @@ module apb_qspi_regs(
 //     AHB_QSPI_DUMMY_CYCLES[15:12]                    |  |        |  |<------>|-------> QSPI_DUMMY_CYCLES [15:12]
 
 // reg13 QSPI_clk_div [7:0]
+
+reg qspi_finished;
+reg qspi_busy_last;
+assign IRQ_QSPI_FINISHED = qspi_finished;
+
 
 localparam [7:0] PIDR0 = 8'h59;
 localparam [7:0] PIDR1 = 8'h16;
@@ -149,6 +158,8 @@ always @(posedge PCLK or negedge PRESETn) begin
         end
         if(QSPI_ENABLE_ACK)
             reg2[8]=1'b0;
+        if(reg1[8] & (~qspi_finished))
+            reg1[8]=1'b0;
         reg1[0] = QSPI_BUSY;
     end
 end
@@ -189,5 +200,21 @@ end
 
 assign PREADY =  1'b1; //(PSEL & PENABLE & PWRITE) | (PSEL & ~PWRITE);
 assign PSLVERR = 1'b0;
+
+//Interrupt generation
+always @(posedge PCLK or negedge PRESETn) begin
+    if(~PRESETn) begin
+        qspi_finished <= 1'b0;
+        qspi_busy_last <= 1'b0;
+    end else begin
+        qspi_busy_last <= QSPI_BUSY;
+
+        if(qspi_busy_last&(~QSPI_BUSY)) begin
+            qspi_finished <= 1'b1;
+        end else if((reg1[8])) begin
+            qspi_finished <= 1'b0;
+        end
+    end
+end
 
 endmodule

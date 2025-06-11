@@ -13,10 +13,22 @@ from cocotbext.ahb import AHBLiteMaster, AHBBus
 
 ID = 0x4326BF00
 
+async def wait_for_irq(dut, tb):
+    tb.log.info("Wait for IRQ")
+    while(dut.IRQ_QSPI_FINISHED.value==0):
+        await ClockCycles(dut.HCLK,1)
+    await tb.config_ahb_master.write(0x04,0x00000100)
+    await ClockCycles(dut.HCLK,2)
+    assert dut.IRQ_QSPI_FINISHED.value==0
+    data = await tb.config_ahb_master.read(0x04,4)
+    assert int(data[0]['data'],16)==0
+
 async def SPI_RESET(dut,tb):
     await tb.config_ahb_master.write(0x08, 0x00000066)
     await tb.config_ahb_master.write(0x08, 0x00000166)
 
+    await wait_for_irq(dut,tb)
+    
     data = await tb.config_ahb_master.read(0x04,4)
     while(int(data[0]['data'],16)&1):
         await ClockCycles(dut.HCLK,2)

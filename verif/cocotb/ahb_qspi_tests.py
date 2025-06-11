@@ -202,12 +202,20 @@ async def QSPI_READ_TESTS(dut):
     QSPI_CTRL_REG = QSPI_CTRL_REG | (1<<8)
     await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
 
+    QSPI_AHB_CMD_REG = (4<<12) + 0x0B
+    await tb.config_ahb_master.write(0x30, QSPI_AHB_CMD_REG)
+
+
     tb.log.info("Configure Cache")
     CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x04,4)
     CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
     assert CACHE_STATUS==0  
     
-    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x21)
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
+
+    CACHE_CONFIG_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR,4)
+    CACHE_CONFIG = int(CACHE_CONFIG_tmp[0]['data'],16)
+    assert CACHE_CONFIG == 0x1
 
     CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x04,4)
     CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
@@ -220,6 +228,7 @@ async def QSPI_READ_TESTS(dut):
     tb.log.info("Read %d x 16-bytes over AHB (uncached)",n_reads)
     start_time_uncached = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads*4):
+        tb.log.info("Read %d ",i)
         rdata = await tb.data_ahb_master.read(i*4 + base_addr,4)
         assert int(rdata[0]['data'],16)==data[i%4]
     end_time_uncached = cocotb.utils.get_sim_time(units='ns')

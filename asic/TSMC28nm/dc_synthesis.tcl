@@ -18,5 +18,3 @@ compile_ultra
 
 write -format verilog -hierarchy -output $env(SOCLABS_AHB_QSPI_DIR)/imp/ASIC/top_ahb_qspi_gates.v
 write_sdf -version 2.1 $env(SOCLABS_AHB_QSPI_DIR)/imp/ASIC/top_ahb_qspi.sdf
-
-exit
