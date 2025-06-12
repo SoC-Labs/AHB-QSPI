@@ -4,12 +4,10 @@ module apb_qspi_regs(
     input  wire                 PCLK,
     input  wire                 PRESETn,
     input  wire [11:2]          PADDR,
-    input  wire [2:0]           PPROT,
     input  wire                 PSEL,
     input  wire                 PENABLE,
     input  wire                 PWRITE,
     input  wire [31:0]          PWDATA,
-    input  wire [3:0]           PSTRB,
     output reg [31:0]           PRDATA,
     output wire                 PREADY,
     output wire                 PSLVERR,
@@ -32,7 +30,7 @@ module apb_qspi_regs(
     output wire [7:0]           QSPI_MODE_CODE,
     output wire                 QSPI_NO_CMD,
 
-    output wire [7:0]           QSPI_CLK_DIV,
+    output wire [4:0]           QSPI_CLK_DIV,
 
     output wire                 IRQ_QSPI_FINISHED,
 
@@ -67,24 +65,24 @@ module apb_qspi_regs(
 
 // reg12 AHB SPI setup 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
 // reg12 SPI Commands 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
-//     AHN_QSPI_CMD [7:0]                              |  |        |  |        |  |  | | | |----> QSPI_CMD [7:0]
+//     AHB_QSPI_CMD [7:0]                              |  |        |  |        |  |  | | | |----> QSPI_CMD [7:0]
 //     AHB_QSPI_DUMMY_CYCLES[15:12]                    |  |        |  |<------>|-------> QSPI_DUMMY_CYCLES [15:12]
 
-// reg13 QSPI_clk_div [7:0]
+// reg13 QSPI_clk_div [4:0]
 
 reg qspi_finished;
 reg qspi_busy_last;
 assign IRQ_QSPI_FINISHED = qspi_finished;
 
 
-localparam [7:0] PIDR0 = 8'h59;
-localparam [7:0] PIDR1 = 8'h16;
-localparam [7:0] PIDR2 = 8'h15;
-localparam [7:0] PIDR3 = 8'h00;
-localparam [7:0] PIDR4 = 8'h00;
-localparam [7:0] PIDR5 = 8'h00;
-localparam [7:0] PIDR6 = 8'h00;
-localparam [7:0] PIDR7 = 8'h00;
+localparam [7:0] PIDR0 = 8'h59; //0xFE0
+localparam [7:0] PIDR1 = 8'h16; //0xFE4
+localparam [7:0] PIDR2 = 8'h15; //0xFE8
+localparam [7:0] PIDR3 = 8'h00; //0xFEC
+localparam [7:0] PIDR4 = 8'h00; //0xFD0
+localparam [7:0] PIDR5 = 8'h00; //0xFD4
+localparam [7:0] PIDR6 = 8'h00; //0xFD8
+localparam [7:0] PIDR7 = 8'h00; //0xFDC
 localparam [7:0] CIDR0 = 8'h50;
 localparam [7:0] CIDR1 = 8'h51;
 localparam [7:0] CIDR2 = 8'h4C;
@@ -100,7 +98,7 @@ reg [31:0] reg9;
 reg [31:0] reg10;
 reg [31:0] reg11;
 reg [31:0] reg12;
-reg [7:0]  reg13;
+reg [4:0]  reg13;
 
 
 assign QSPI_QIO_MODE = reg0[0];
@@ -140,12 +138,12 @@ always @(posedge PCLK or negedge PRESETn) begin
         reg10 = 32'd0;
         reg11 = 32'd0;
         reg12 = 32'd0;
-        reg13 = 8'h01;
+        reg13 = 5'h01;
     end else begin
         if(PSEL & PENABLE & PWRITE) begin
             case(PADDR)
                 10'h000: reg0 = PWDATA;
-                10'h001: reg1 = PWDATA;
+                10'h001: reg1[31:1] = PWDATA[31:1];
                 10'h002: reg2 = PWDATA;
                 10'h003: reg3 = PWDATA;
                 10'h008: reg8 = PWDATA;
@@ -153,7 +151,7 @@ always @(posedge PCLK or negedge PRESETn) begin
                 10'h00A: reg10 = PWDATA;
                 10'h00B: reg11 = PWDATA;
                 10'h00C: reg12 = PWDATA;
-                10'h00D: reg13 = PWDATA[7:0];
+                10'h00D: reg13 = PWDATA[4:0];
             endcase
         end
         if(QSPI_ENABLE_ACK)
@@ -180,7 +178,7 @@ always @(PCLK, PADDR, QSPI_RDATA, reg0, reg1, reg2, reg3, reg8, reg9, reg10, reg
             10'h00A: PRDATA = reg10;
             10'h00B: PRDATA = reg11;
             10'h00C: PRDATA = reg12;
-            10'h00D: PRDATA = {24'd0, reg13};
+            10'h00D: PRDATA = {27'd0, reg13};
             10'h3F4: PRDATA = {24'd0, PIDR4};
             10'h3F5: PRDATA = {24'd0, PIDR5};
             10'h3F6: PRDATA = {24'd0, PIDR6};

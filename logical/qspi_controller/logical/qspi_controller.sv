@@ -74,6 +74,7 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     end
 end
 
+// FSM:Next state decision tree
 always_comb begin
     case(current_state)
         IDLE: begin
@@ -98,6 +99,7 @@ always_comb begin
         OP: begin
             QSPI_ENABLE_ACK = 1'b1;
             next_state = OP;
+            // Next state decision from OP if in QPI mode
             if(QSPI_QIO_MODE==1'b1 & op_counter==3'h1) begin
                 QSPI_ENABLE_ACK = 1'b0;
                 if(QSPI_ADDR_EN)
@@ -111,6 +113,7 @@ always_comb begin
                 else
                     next_state = IDLE;
             end
+            // Next state decision from OP if in SPI mode
             else if(QSPI_QIO_MODE==1'b0 & op_counter==3'h7) begin
                 QSPI_ENABLE_ACK = 1'b0;
                 if(QSPI_ADDR_EN)
@@ -129,6 +132,7 @@ always_comb begin
         end
         ADDR: begin
             QSPI_ENABLE_ACK = 1'b1;
+            // Next state decision from ADDR if in QPI mode
             if(QSPI_QIO_MODE==1'b1 & addr_counter==5'h05) begin
                 QSPI_ENABLE_ACK = 1'b0;
                 last_QSPI_ADDR = QSPI_ADDR;
@@ -143,7 +147,8 @@ always_comb begin
                 else
                     next_state = IDLE;
             end
-            else if(QSPI_QIO_MODE==1'b0 & addr_counter==5'h15) begin
+            // Next state decision from ADDR if in SPI mode
+            else if(QSPI_QIO_MODE==1'b0 & addr_counter==5'h17) begin
                 QSPI_ENABLE_ACK = 1'b0;
                 if(QSPI_DUMMY_CYCLES!=4'h0)
                     next_state = DUMMY;
@@ -158,6 +163,7 @@ always_comb begin
             end
         end
         MODE: begin
+            // Next state decision from MODE if in QPI mode
             if(QSPI_QIO_MODE==1'b1 & mode_counter == 1'b0) begin
                 if(QSPI_DUMMY_CYCLES!=4'h0)
                     next_state = DUMMY;
@@ -168,6 +174,7 @@ always_comb begin
                 else
                     next_state = IDLE;
             end
+            // Next state decision from MODE if in SPI mode
             else if(QSPI_QIO_MODE==1'b0) begin
                 next_state = IDLE;
             end else begin 
@@ -175,6 +182,7 @@ always_comb begin
             end
         end
         DUMMY: begin
+            // Next state decision from DUMMY
             if(dummy_counter >= (QSPI_DUMMY_CYCLES - 1)) begin
                 if(QSPI_WRITE)
                     next_state = DATA_O;
@@ -190,6 +198,7 @@ always_comb begin
             if(byte_counter==5'h1F) begin
                 next_state = DATA_O;
             end else begin
+                // Next state decision from DATA_O if in QPI mode
                 if(QSPI_QIO_MODE==1'b0) begin
                     if(byte_counter==QSPI_N_RW_BYTES) begin
                         if(data_counter == 3'h7)
@@ -199,7 +208,9 @@ always_comb begin
                     end else begin
                         next_state = DATA_O;
                     end
-                end else begin
+                end 
+                // Next state decision from DATA_O if in SPI mode
+                else begin
                     if(byte_counter==QSPI_N_RW_BYTES) begin
                         if(data_counter==3'h0)
                             next_state = IDLE;
@@ -213,6 +224,7 @@ always_comb begin
         end
         DATA_I: begin
             next_state = DATA_I;
+            // Next state decision from DATA_I if in QPI mode
             if(QSPI_QIO_MODE==1'b0) begin
                 if((byte_counter[3:0]==QSPI_N_RW_BYTES)) begin
                     if(data_counter==3'h6)
@@ -220,7 +232,9 @@ always_comb begin
                     else
                         next_state = DATA_I;
                 end
-            end else begin
+            end 
+            // Next state decision from DATA_I if in SPI mode
+            else begin
                 if((byte_counter==QSPI_N_RW_BYTES)) begin
                     if(data_counter==3'h0)
                         next_state = IDLE;

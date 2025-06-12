@@ -38,6 +38,17 @@ COCOTB_SCRATCH_DIR := $(COCOTB_DIR)/scratch
 # Filelist for Cocotb 
 MAKEFILE_FILELIST     := $(COCOTB_DIR)/makefile.flist
 
+# Generate flist for VCS
+flist_vfiles_nanosoc:
+	@mkdir -p $(COCOTB_DIR)
+	@cd $(COCOTB_DIR); python $(SOCLABS_SOCTOOLS_FLOW_DIR)/bin/filelist_compile.py -f $(DESIGN_VC) -a -i $(FLIST_INCLUDES) -v -o tbench.vc
+
+# Analyze RTL for coverage report
+vcs_coverage_analyze:
+	@cd $(COCOTB_DIR); vlogan -sverilog -timescale=1ns/10ps -f tbench.vc
+
+vcs_coverage_report:
+	@cd $(COCOTB_DIR); urg -dir ./scratch/simv.vdb -elfile $(COCOTB_TEST_DIR)/coverage_exclude.el; verdi -cov -covdir ./scratch/simv.vdb -elfile $(COCOTB_TEST_DIR)/coverage_exclude.el
 
 # Generate Make filelist from flists
 flist_makefile_nanosoc: 

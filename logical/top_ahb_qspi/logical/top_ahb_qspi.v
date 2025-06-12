@@ -288,7 +288,7 @@ wire [7:0]      QSPI_MODE_CODE;
 wire            QSPI_NO_CMD;
 wire            XIP_ACTIVE;
 
-wire [7:0]      QSPI_CLK_DIV;
+wire [4:0]      QSPI_CLK_DIV;
 
 
 qspi_controller_mux u_qspi_controller_mux(
@@ -338,12 +338,10 @@ apb_qspi_regs u_apb_qspi_regs(
     .PCLK(PCLK),
     .PRESETn(PRESETn),
     .PADDR(PADDR[11:2]),
-    .PPROT(PPROT),
     .PSEL(qspi_psel),
     .PENABLE(PENABLE),
     .PWRITE(PWRITE),
     .PWDATA(PWDATA),
-    .PSTRB(PSTRB),
     .PRDATA(qspi_prdata),
     .PREADY(qspi_pready),
     .PSLVERR(qspi_pslverr),
@@ -410,7 +408,6 @@ qspi_clock_div u_qspi_clock_div(
     .HCLK(HCLK),
     .HRESETn(HRESETn),
     .QSPI_CLK_DIV(QSPI_CLK_DIV),
-    .QSPI_SPI_MODE(2'b00),
     .QSPI_SCLK_i(QSPI_SCLK_i)
 );
 

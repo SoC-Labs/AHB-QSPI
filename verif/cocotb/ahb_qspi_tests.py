@@ -27,8 +27,8 @@ class TB:
         self.log.setLevel(logging.DEBUG)
         self.dut.HRESETn.setimmediatevalue(0)
         cocotb.start_soon(Clock(dut.HCLK, 10, units="ns").start())
-        self.config_ahb_master = AHBLiteMaster(AHBBus.from_prefix(dut,"config", optional_signals = {"hsel":"HSEL", "hready_in":"HREADY_IN", "hburst":"HBURST"}), dut.HCLK, dut.HRESETn, 500)
-        self.data_ahb_master = AHBLiteMaster(AHBBus.from_prefix(dut,"data", optional_signals = {"hsel":"HSEL", "hready_in":"HREADY_IN", "hburst":"HBURST"}), dut.HCLK, dut.HRESETn, 500)
+        self.config_ahb_master = AHBLiteMaster(AHBBus.from_prefix(dut,"config", optional_signals = {"hsel":"HSEL", "hready_in":"HREADY_IN", "hburst":"HBURST"}), dut.HCLK, dut.HRESETn, 5000)
+        self.data_ahb_master = AHBLiteMaster(AHBBus.from_prefix(dut,"data", optional_signals = {"hsel":"HSEL", "hready_in":"HREADY_IN", "hburst":"HBURST"}), dut.HCLK, dut.HRESETn, 5000)
 
     async def cycle_reset(self):
         await ClockCycles(self.dut.HCLK,1)
@@ -45,11 +45,56 @@ async def CACHE_READ(dut,tb):
     data = await tb.data_ahb_master.read(0x00,4)
     return int(data[0]['data'],16)   
 
+@cocotb.test()
+async def APB_reg_tests(dut):
+    tb = TB(dut)
+    await tb.cycle_reset()
+    
+    tb.log.info("Read ID of QSPI Core")
+    PIDR=[0x00, 0x00, 0x00, 0x00, 0x59, 0x16, 0x15, 0x00]
+    for i in range(0,8):
+        PIDr_temp = await tb.config_ahb_master.read(0xFD0 + i*4,4)
+        tb.log.info("PIDR %d = %x",i,int(PIDr_temp[0]['data'],16))
+        assert int(PIDr_temp[0]['data'],16) == PIDR[i]
+    CIDR=[0x50, 0x51, 0x4C, 0x53]
+    for i in range(0,4):
+        CIDR_temp = await tb.config_ahb_master.read(0xFF0 + i*4,4)
+        tb.log.info("CIDR %d = %x",i,int(CIDR_temp[0]['data'],16))
+        assert int(CIDR_temp[0]['data'],16) == CIDR[i]
+
+    tb.log.info("Test REG12")
+    await tb.config_ahb_master.write(0x30,0xFFFFFFFF)
+    reg12 = await tb.config_ahb_master.read(0x30,4)
+    assert int(reg12[0]['data'],16) == 0xFFFFFFFF
+
+    tb.log.info("Test REG0")
+    await tb.config_ahb_master.write(0x00,0xFFFFFFFF)
+    reg0 = await tb.config_ahb_master.read(0x00,4)
+    assert int(reg0[0]['data'],16) == 0xFFFFFFFF
+
+    tb.log.info("Test REG1")
+    await tb.config_ahb_master.write(0x04,0xFFFFFFFF)
+    reg1 = await tb.config_ahb_master.read(0x04,4)
+    reg1 =int(reg1[0]['data'],16)
+    reg1 = reg1 | 1
+    reg1 = reg1 | (1<<8)
+    assert reg1 == 0xFFFFFFFF
+
+    tb.log.info("Test REG2")
+    await tb.config_ahb_master.write(0x08,0xFFFFFFFF)
+    reg2 = await tb.config_ahb_master.read(0x08,4)
+    assert int(reg2[0]['data'],16) == 0xFFFFFFFF
+
+    tb.log.info("Test REG3")
+    await tb.config_ahb_master.write(0x0C,0xFFFFFFFF)
+    reg3 = await tb.config_ahb_master.read(0x0C,4)
+    assert int(reg3[0]['data'],16) == 0xFFFFFFFF
+
 
 @cocotb.test()
 async def QSPI_TESTS(dut):  
     tb = TB(dut)
-    await tb.cycle_reset()
+    await tb.cycle_reset()    
     
     tb.log.info("Reset SPI")
     await SPI_RESET(dut, tb)
@@ -125,10 +170,78 @@ async def QSPI_TESTS(dut):
     await SPI_WRITE_DISABLE(dut,tb)
     rdata = await QPI_READ_WORDS(dut, tb, addr=0x300, n_words=4)
     assert rdata == data
+    
+    for i in range(1,16):
+        tb.log.info("Read %d bytes",i)
+        rdata = await QPI_READ_BYTES(dut,tb,addr=0x300,n_bytes=i)
+
+    tb.log.info("SPI write STATUS register")
+    await SPI_WRITE_STATUS(dut, tb)
+
+    # Test untested transitions in QPI
+    tb.log.info("Test MODE to DATA_I transition")
+    await SPI_MODE_TO_DATA(dut,tb,write=0,read=1)
+
+    tb.log.info("Test MODE to DATA_O transition")
+    await SPI_MODE_TO_DATA(dut,tb,write=1,read=0)
+
+    tb.log.info("Test DUMMY to DATA_O transition")
+    await SPI_DUMMY_TO_DATAO(dut,tb)
+
+    tb.log.info("Test address to IDLE transition")
+    await SPI_ADDR_TO_IDLE(dut, tb, addr=0xFFFFFF)
+
+    tb.log.info("Test DUMMY to IDLE transition")
+    await SPI_DUMMY_TO_IDLE(dut, tb)
+    
+    tb.log.info("Test MODE to IDLE transition")
+    await SPI_MODE_TO_IDLE(dut, tb)
 
     tb.log.info("Exit QPI MODE")
     await LEAVE_QPI_MODE(dut, tb)
-    await tb.config_ahb_master.write(0x00,0x1)
+    await tb.config_ahb_master.write(0x00,0x0)
+    
+    tb.log.info("Read 16x bytes (SPI)")
+    rdata = await SPI_READ_WORDS(dut, tb, addr=0x300, n_words=4)
+    assert rdata == data
+    
+    await tb.config_ahb_master.write(0x34, 0x02)
+    tb.log.info("Clock divider changed")
+
+    tb.log.info("Read 16x bytes (SPI) Slow")
+    rdata = await SPI_READ_WORDS_SLOW(dut, tb, addr=0x300, n_words=4)
+    assert rdata == data
+    
+    tb.log.info("SPI write STATUS register")
+    await SPI_WRITE_STATUS(dut, tb)
+
+    # Test untested transitions in SPI
+    tb.log.info("Test MODE to DATA_I transition")
+    await SPI_MODE_TO_DATA(dut,tb,write=0,read=1)
+
+    tb.log.info("Test MODE to DATA_O transition")
+    await SPI_MODE_TO_DATA(dut,tb,write=1,read=0)
+
+    tb.log.info("Test DUMMY to DATA_O transition")
+    await SPI_DUMMY_TO_DATAO(dut,tb)
+
+    tb.log.info("Test address to IDLE transition")
+    await SPI_ADDR_TO_IDLE(dut, tb, addr=0xFFFFFF)
+
+    tb.log.info("Test DUMMY to IDLE transition")
+    await SPI_DUMMY_TO_IDLE(dut, tb)
+    
+    tb.log.info("Test MODE to IDLE transition")
+    await SPI_MODE_TO_IDLE(dut, tb)
+
+
+
+    await tb.config_ahb_master.write(0x34, 0x1F)
+    tb.log.info("Clock divider changed")
+
+    tb.log.info("Read 16x bytes (SPI) Very Slow")
+    rdata = await SPI_READ_WORDS_SLOW(dut, tb, addr=0x300, n_words=4)
+    assert rdata == data
 
     
 
@@ -153,6 +266,9 @@ async def QSPI_READ_TESTS(dut):
     await SET_QPI_MODE(dut, tb)
     await tb.config_ahb_master.write(0x00,0x1)
     
+    await tb.config_ahb_master.write(0x34, 0x00)
+    tb.log.info("Clock divider changed CLK=100MHz")
+
     tb.log.info("Reading JEDIC in QPI mode")
     rID = await QPI_READ_JEDIC(dut, tb)
     assert rID == ID
@@ -162,14 +278,15 @@ async def QSPI_READ_TESTS(dut):
     await SPI_CLR_PROTECTION(dut, tb)
     
     tb.log.info("Page program 512x 16-bytes")
-    data = [0x13243546, 0x97867564, 0x89ABCDEF, 0x01234567]
+    data = random.randint(4294967295, size=4*n_reads)
+    data = data.tolist()
     for i in range(0,n_reads):
         addr = i*16 + base_addr
         await SPI_WRITE_ENABLE(dut, tb)
         SPI_STAT = await QPI_READ_STAT_REG(dut, tb)
         WEL = SPI_STAT & (1<<25)
         assert WEL != 0
-        await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+        await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data[(i*4):(i*4+4)], n_words=4)
         await SPI_WRITE_DISABLE(dut,tb)
         tb.log.info("Programmed %d words", i)
     
@@ -189,7 +306,7 @@ async def QSPI_READ_TESTS(dut):
     for i in range(0,n_reads):
         addr = i*16 + base_addr
         rDATA = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=True)
-        assert rDATA==data
+        assert rDATA==data[(i*4):(i*4+4)]
         tb.log.info("Read %d words", i)
 
     end_time = cocotb.utils.get_sim_time(units='ns')
@@ -225,22 +342,27 @@ async def QSPI_READ_TESTS(dut):
         CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
         await Timer(time=10, units='us')
     
-    tb.log.info("Read %d x 16-bytes over AHB (uncached)",n_reads)
+    tb.log.info("Read %d x bytes over AHB (uncached)",n_reads*16)
     start_time_uncached = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads*4):
         rdata = await tb.data_ahb_master.read(i*4 + base_addr,4)
-        assert int(rdata[0]['data'],16)==data[i%4]
+        assert int(rdata[0]['data'],16)==data[i]
     end_time_uncached = cocotb.utils.get_sim_time(units='ns')
     dt_uncached = end_time_uncached - start_time_uncached
     await Timer(time=10, units='us')
+    rdata = await tb.data_ahb_master.read(base_addr,4)
     
-    tb.log.info("Read 512x 16-bytes over AHB (cached)")
+    tb.log.info("Read %d x bytes over AHB (cached)",n_reads*16)
     start_time_cached = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads*4):
-        rdata = await tb.data_ahb_master.read(i*4+ base_addr,4)
-        assert int(rdata[0]['data'],16)==data[i%4]
+        rdata = await tb.data_ahb_master.read(i*4 + base_addr,4)
+        assert int(rdata[0]['data'],16)==data[i]
     end_time_cached = cocotb.utils.get_sim_time(units='ns')
     dt_cached = end_time_cached - start_time_cached
+
+    tb.log.info("Read over AHB full address range (cached)")
+    for i in range(0, 0xFFFFFF, 0x1000):
+        rdata = await tb.data_ahb_master.read(i, 4)
 
     await tb.config_ahb_master.write(0x34, 0x05)
     tb.log.info("Clock divider changed")
@@ -259,15 +381,19 @@ async def QSPI_READ_TESTS(dut):
         CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
         await Timer(time=10, units='us')
 
+    rdata = await tb.data_ahb_master.read(base_addr,4)
 
     tb.log.info("Read 512x 16-bytes over AHB (uncached)")
     start_time_slow = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads*4):
         rdata = await tb.data_ahb_master.read(i*4+ base_addr,4)
-        assert int(rdata[0]['data'],16)==data[i%4]
+        assert int(rdata[0]['data'],16)==data[i]
     end_time_slow = cocotb.utils.get_sim_time(units='ns')
     dt_slow = end_time_slow - start_time_slow
 
+    tb.log.info("Try write over AHB, expect ERROR")
+    resp = await tb.data_ahb_master.write(0x000,0xFFFFFFFF)
+    tb.log.info(resp[0]['resp'])
 
     await tb.config_ahb_master.write(0x00, 0x01)
 

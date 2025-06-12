@@ -13,7 +13,9 @@ verif/cocotb/novas*
 verif/cocotb/vsim.wlf
 verif/cocotb/wlft6jORYn
 verif/cocotb/inter.fsdb
-
+verif/cocotb/vdCovLog
+verif/cocotb/cm.log
+verdiLog
 verif/VIP/SST26VF064B.v
 
 asic/TSMC28nm/*.mr

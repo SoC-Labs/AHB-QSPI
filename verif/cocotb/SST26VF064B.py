@@ -208,7 +208,313 @@ async def QPI_READ_WORDS(dut,tb, addr =0, n_words=1, cont_read = False):
         rData_temp = await tb.config_ahb_master.read(apb_r_addrs[i],4)
         rData.append(int(rData_temp[0]['data'],16))
     return rData
+
+async def QPI_READ_BYTES(dut,tb, addr =0, n_bytes=1, cont_read = False):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, addr)
+
+    if(cont_read==True):
+        QSPI_CTRL_REG = await tb.config_ahb_master.read(0x00,4)
+        QSPI_CTRL_REG = int(QSPI_CTRL_REG[0]['data'],16)
+        QSPI_CTRL_REG = QSPI_CTRL_REG | ((0xA0<<16) + (1<<24))
+        await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
+        QSPI_DUMMY_CYCLES = 4
+    else:
+        QSPI_DUMMY_CYCLES = 6
+
+
+    QSPI_CMD  = 0x0B
+    QSPI_READ = 1
+    QSPI_WRITE = 0
+    QSPI_ADDR_EN = 1
+    QSPI_N_RW_BYTES = n_bytes - 1
     
+    QSPI_INSTR = QSPI_CMD
+    QSPI_INSTR += QSPI_READ<<9
+    QSPI_INSTR += QSPI_WRITE<<10
+    QSPI_INSTR += QSPI_ADDR_EN<<11
+    QSPI_INSTR += QSPI_DUMMY_CYCLES<<12
+    QSPI_INSTR += QSPI_N_RW_BYTES << 16
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    QSPI_INSTR = QSPI_INSTR ^ (1<<8)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+        
+    rData = []
+    for i in range(0,n_bytes):
+        rData_temp = await tb.config_ahb_master.read(0x10+i,1)
+        rData.append(int(rData_temp[0]['data'],16))
+    return rData
+
+async def SPI_READ_WORDS(dut,tb, addr =0, n_words=1):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, addr)
+
+    QSPI_DUMMY_CYCLES = 8
+
+
+    QSPI_CMD  = 0x0B
+    QSPI_READ = 1
+    QSPI_WRITE = 0
+    QSPI_ADDR_EN = 1
+    QSPI_N_RW_BYTES = n_words*4 - 1
+    
+    QSPI_INSTR = QSPI_CMD
+    QSPI_INSTR += QSPI_READ<<9
+    QSPI_INSTR += QSPI_WRITE<<10
+    QSPI_INSTR += QSPI_ADDR_EN<<11
+    QSPI_INSTR += QSPI_DUMMY_CYCLES<<12
+    QSPI_INSTR += QSPI_N_RW_BYTES << 16
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    QSPI_INSTR = QSPI_INSTR ^ (1<<8)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+        
+    apb_r_addrs=[0x10, 0x14, 0x18, 0x1C]
+    rData = []
+    for i in range(0,n_words):
+        rData_temp = await tb.config_ahb_master.read(apb_r_addrs[i],4)
+        rData.append(int(rData_temp[0]['data'],16))
+    return rData
+
+async def SPI_READ_WORDS_SLOW(dut,tb, addr =0, n_words=1):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, addr)
+
+    QSPI_DUMMY_CYCLES = 0
+
+
+    QSPI_CMD  = 0x03
+    QSPI_READ = 1
+    QSPI_WRITE = 0
+    QSPI_ADDR_EN = 1
+    QSPI_N_RW_BYTES = n_words*4 - 1
+    
+    QSPI_INSTR = QSPI_CMD
+    QSPI_INSTR += QSPI_READ<<9
+    QSPI_INSTR += QSPI_WRITE<<10
+    QSPI_INSTR += QSPI_ADDR_EN<<11
+    QSPI_INSTR += QSPI_DUMMY_CYCLES<<12
+    QSPI_INSTR += QSPI_N_RW_BYTES << 16
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    QSPI_INSTR = QSPI_INSTR ^ (1<<8)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1==0):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+        
+    apb_r_addrs=[0x10, 0x14, 0x18, 0x1C]
+    rData = []
+    for i in range(0,n_words):
+        rData_temp = await tb.config_ahb_master.read(apb_r_addrs[i],4)
+        rData.append(int(rData_temp[0]['data'],16))
+    return rData
+
+async def SPI_ADDR_TO_IDLE(dut,tb, addr =0, n_words=1):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, addr)
+
+    QSPI_DUMMY_CYCLES = 0
+
+
+    QSPI_CMD  = 0x03
+    QSPI_READ = 0
+    QSPI_WRITE = 0
+    QSPI_ADDR_EN = 1
+    QSPI_N_RW_BYTES = n_words*4 - 1
+    
+    QSPI_INSTR = QSPI_CMD
+    QSPI_INSTR += QSPI_READ<<9
+    QSPI_INSTR += QSPI_WRITE<<10
+    QSPI_INSTR += QSPI_ADDR_EN<<11
+    QSPI_INSTR += QSPI_DUMMY_CYCLES<<12
+    QSPI_INSTR += QSPI_N_RW_BYTES << 16
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    QSPI_INSTR = QSPI_INSTR ^ (1<<8)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+    return
+
+async def SPI_DUMMY_TO_IDLE(dut,tb, addr =0, n_words=1):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, addr)
+
+    QSPI_DUMMY_CYCLES = 4
+
+
+    QSPI_CMD  = 0x03
+    QSPI_READ = 0
+    QSPI_WRITE = 0
+    QSPI_ADDR_EN = 1
+    QSPI_N_RW_BYTES = n_words*4 - 1
+    
+    QSPI_INSTR = QSPI_CMD
+    QSPI_INSTR += QSPI_READ<<9
+    QSPI_INSTR += QSPI_WRITE<<10
+    QSPI_INSTR += QSPI_ADDR_EN<<11
+    QSPI_INSTR += QSPI_DUMMY_CYCLES<<12
+    QSPI_INSTR += QSPI_N_RW_BYTES << 16
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    QSPI_INSTR = QSPI_INSTR ^ (1<<8)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+    return
+
+async def SPI_DUMMY_TO_DATAO(dut,tb, addr =0, n_words=1):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, addr)
+
+    QSPI_DUMMY_CYCLES = 4
+
+
+    QSPI_CMD  = 0x03
+    QSPI_READ = 0
+    QSPI_WRITE = 1
+    QSPI_ADDR_EN = 1
+    QSPI_N_RW_BYTES = n_words*4 - 1
+    
+    QSPI_INSTR = QSPI_CMD
+    QSPI_INSTR += QSPI_READ<<9
+    QSPI_INSTR += QSPI_WRITE<<10
+    QSPI_INSTR += QSPI_ADDR_EN<<11
+    QSPI_INSTR += QSPI_DUMMY_CYCLES<<12
+    QSPI_INSTR += QSPI_N_RW_BYTES << 16
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    QSPI_INSTR = QSPI_INSTR ^ (1<<8)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+    return
+
+
+async def SPI_WRITE_STATUS(dut,tb):
+
+    QSPI_DUMMY_CYCLES = 0
+
+
+    QSPI_CMD  = 0x01
+    QSPI_READ = 0
+    QSPI_WRITE = 1
+    QSPI_ADDR_EN = 0
+    QSPI_N_RW_BYTES = 1
+    
+    QSPI_INSTR = QSPI_CMD
+    QSPI_INSTR += QSPI_READ<<9
+    QSPI_INSTR += QSPI_WRITE<<10
+    QSPI_INSTR += QSPI_ADDR_EN<<11
+    QSPI_INSTR += QSPI_DUMMY_CYCLES<<12
+    QSPI_INSTR += QSPI_N_RW_BYTES << 16
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    QSPI_INSTR = QSPI_INSTR ^ (1<<8)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+    return
+
+async def SPI_MODE_TO_IDLE(dut,tb, addr =0, n_words=1):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, addr)
+
+    QSPI_DUMMY_CYCLES = 0
+    QSPI_CTRL_REG = await tb.config_ahb_master.read(0x00,4)
+    QSPI_CTRL_REG = int(QSPI_CTRL_REG[0]['data'],16)
+    QSPI_CTRL_REG = QSPI_CTRL_REG | ((0xA0<<16) + (1<<24))
+    await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
+
+
+    QSPI_CMD  = 0x03
+    QSPI_READ = 0
+    QSPI_WRITE = 0
+    QSPI_ADDR_EN = 1
+    QSPI_N_RW_BYTES = n_words*4 - 1
+    
+    QSPI_INSTR = QSPI_CMD
+    QSPI_INSTR += QSPI_READ<<9
+    QSPI_INSTR += QSPI_WRITE<<10
+    QSPI_INSTR += QSPI_ADDR_EN<<11
+    QSPI_INSTR += QSPI_DUMMY_CYCLES<<12
+    QSPI_INSTR += QSPI_N_RW_BYTES << 16
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    QSPI_INSTR = QSPI_INSTR ^ (1<<8)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+    return
+
+async def SPI_MODE_TO_DATA(dut,tb, addr =0, write=1, read=0):
+    # Write Adress
+    await tb.config_ahb_master.write(0x0C, addr)
+
+    QSPI_DUMMY_CYCLES = 0
+    QSPI_CTRL_REG = await tb.config_ahb_master.read(0x00,4)
+    QSPI_CTRL_REG = int(QSPI_CTRL_REG[0]['data'],16)
+    QSPI_CTRL_REG = QSPI_CTRL_REG | ((0xA0<<16) + (1<<24))
+    await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
+
+
+    QSPI_CMD  = 0x03
+    QSPI_READ = read
+    QSPI_WRITE = write
+    QSPI_ADDR_EN = 1
+    QSPI_N_RW_BYTES = 3
+    
+    QSPI_INSTR = QSPI_CMD
+    QSPI_INSTR += QSPI_READ<<9
+    QSPI_INSTR += QSPI_WRITE<<10
+    QSPI_INSTR += QSPI_ADDR_EN<<11
+    QSPI_INSTR += QSPI_DUMMY_CYCLES<<12
+    QSPI_INSTR += QSPI_N_RW_BYTES << 16
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    QSPI_INSTR = QSPI_INSTR ^ (1<<8)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    
+    data = await tb.config_ahb_master.read(0x04,4)
+    while(int(data[0]['data'],16)&1):
+        await ClockCycles(dut.HCLK,10)
+        data = await tb.config_ahb_master.read(0x04,4)
+    return
+
 async def QPI_PAGE_PROGRAM(dut, tb, addr = 0, words=0, n_words = 1):
     # Write Adress
     await tb.config_ahb_master.write(0x0C, addr)

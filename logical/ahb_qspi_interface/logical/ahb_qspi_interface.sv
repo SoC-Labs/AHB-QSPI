@@ -65,7 +65,7 @@ reg [2:0]           last_HSIZE;
 reg         qspi_ready;
 reg         qspi_started;
 
-assign HREADYOUT = ((current_state==IDLE && last_HTRANS==2'b00)||(current_state==ERR)) ? 1'b1: qspi_ready; //(current_state==IDLE)? 1'b1 : qspi_ready;
+assign HREADYOUT = ((current_state==IDLE && last_HTRANS[1]==1'b0)||(current_state==ERR)) ? 1'b1: qspi_ready; //(current_state==IDLE)? 1'b1 : qspi_ready;
 assign HRESP = (current_state == ERR) ? 1'b1 : 1'b0;
 
 always @(posedge HCLK or negedge HRESETn) begin
@@ -92,14 +92,18 @@ always_comb begin
     next_state = IDLE;
 
     case(current_state)
-        IDLE:           if(HTRANS==2'b00)
+        IDLE:           if(HTRANS[1]==1'b0)
                             next_state = IDLE;
-                        else if(HSELx && HTRANS==2'b10 && ~XIP_ACTIVE)
-                            next_state = ERR;
-                        else if(HSELx & HWRITE)
-                            next_state = ERR;
-                        else if(HSELx && HTRANS==2'b10)
-                            next_state = WAIT_READ;
+                        else if(HSELx) begin
+                            if(~XIP_ACTIVE)
+                                next_state = ERR;
+                            else if(HSELx & HWRITE)
+                                next_state = ERR;
+                            else 
+                                next_state = WAIT_READ;
+                        end 
+                        else
+                            next_state = IDLE;
         ERR:            next_state = IDLE;
         WAIT_READ:      if(qspi_ready)
                             next_state = IDLE;

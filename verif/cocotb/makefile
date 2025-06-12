@@ -59,7 +59,8 @@ else ifeq ($(SIM), verilator)
 else ifeq ($(SIM), questa)
 	COMPILE_ARGS += +acc
 else ifeq ($(SIM), vcs)
-	COMPILE_ARGS += -kdb +neg_tchk
+	COMPILE_ARGS += -kdb +neg_tchk -cm line+tgl+fsm+branch+cond
+	SIM_CMD_SUFFIX += -cm line+tgl+fsm+branch+cond
 endif
 include $(SOCLABS_AHB_QSPI_DIR)/simulate/sim/cocotb/makefile.flist
 include $(shell cocotb-config --makefiles)/Makefile.sim
