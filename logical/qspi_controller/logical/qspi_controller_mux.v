@@ -1,4 +1,5 @@
 module qspi_controller_mux(
+    input  wire                 QSPI_SCLK,
     input  wire                 XIP_ACTIVE,
 
     input  wire [7:0]           AHB_QSPI_CMD,
@@ -46,6 +47,9 @@ module qspi_controller_mux(
 
 );
 
+reg AHB_QSPI_BUSY_del;
+reg AHB_QSPI_BUSY_del1;
+reg AHB_QSPI_BUSY_del2;
 
 assign QSPI_CMD = (XIP_ACTIVE==1'b1)? AHB_QSPI_CMD : APB_QSPI_CMD;
 assign QSPI_ENABLE = (XIP_ACTIVE==1'b1)? AHB_QSPI_ENABLE: APB_QSPI_ENABLE;
@@ -58,11 +62,19 @@ assign QSPI_ADDR = (XIP_ACTIVE==1'b1)? AHB_QSPI_ADDR : APB_QSPI_ADDR;
 assign QSPI_WDATA = (XIP_ACTIVE==1'b1)? AHB_QSPI_WDATA : APB_QSPI_WDATA;
 
 assign AHB_QSPI_ENABLE_ACK = (XIP_ACTIVE==1'b1) ? QSPI_ENABLE_ACK : 1'b0;
-assign AHB_QSPI_BUSY = (XIP_ACTIVE==1'b1) ? QSPI_BUSY : 1'b1;
 assign AHB_QSPI_RDATA = (XIP_ACTIVE==1'b1) ?  QSPI_RDATA : 128'd0;
 
 assign APB_QSPI_ENABLE_ACK = (XIP_ACTIVE==1'b0) ? QSPI_ENABLE_ACK : 1'b0;
 assign APB_QSPI_BUSY = (XIP_ACTIVE==1'b0) ? QSPI_BUSY : 1'b1;
 assign APB_QSPI_RDATA = (XIP_ACTIVE==1'b0) ?  QSPI_RDATA : 128'd0;
 
+wire AHB_QSPI_BUSY_in = (XIP_ACTIVE==1'b1) ? QSPI_BUSY : 1'b1;
+// AHB_QSPI_BUSY must be delayed to introduce a delay between qspi transaction
+// otherwise timing violations occure on the chip select (nCS)
+always @(posedge QSPI_SCLK) begin
+    AHB_QSPI_BUSY_del <= AHB_QSPI_BUSY_in;
+    AHB_QSPI_BUSY_del1 <= AHB_QSPI_BUSY_del;
+    AHB_QSPI_BUSY_del2 <= AHB_QSPI_BUSY_del1;
+end
+assign AHB_QSPI_BUSY = (AHB_QSPI_BUSY_in | AHB_QSPI_BUSY_del | AHB_QSPI_BUSY_del1 | AHB_QSPI_BUSY_del2);
 endmodule

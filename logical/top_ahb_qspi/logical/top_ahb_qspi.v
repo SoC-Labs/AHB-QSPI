@@ -292,6 +292,7 @@ wire [4:0]      QSPI_CLK_DIV;
 
 
 qspi_controller_mux u_qspi_controller_mux(
+    .QSPI_SCLK(QSPI_SCLK_i),
     .XIP_ACTIVE(XIP_ACTIVE),
 
     .AHB_QSPI_CMD(AHB_QSPI_CMD),
