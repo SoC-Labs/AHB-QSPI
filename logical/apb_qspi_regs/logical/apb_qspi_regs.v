@@ -162,7 +162,7 @@ always @(posedge PCLK or negedge PRESETn) begin
     end
 end
 
-always @(PCLK, PADDR, QSPI_RDATA, reg0, reg1, reg2, reg3, reg8, reg9, reg10, reg11, reg12) begin
+always @(PCLK, PADDR, QSPI_RDATA, reg0, reg1, reg2, reg3, reg8, reg9, reg10, reg11, reg12, reg13) begin
     if(PCLK) begin
         case(PADDR)
             10'h000: PRDATA = reg0;
