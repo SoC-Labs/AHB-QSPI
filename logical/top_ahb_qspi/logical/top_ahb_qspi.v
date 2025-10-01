@@ -290,6 +290,8 @@ wire            XIP_ACTIVE;
 
 wire [4:0]      QSPI_CLK_DIV;
 
+wire QSPI_SCLK_i;
+
 
 qspi_controller_mux u_qspi_controller_mux(
     .QSPI_SCLK(QSPI_SCLK_i),
@@ -403,7 +405,6 @@ ahb_qspi_interface #(
         .AHB_QSPI_RDATA(AHB_QSPI_RDATA)
 );
 
-wire QSPI_SCLK_i;
 
 qspi_clock_div u_qspi_clock_div(
     .HCLK(HCLK),
