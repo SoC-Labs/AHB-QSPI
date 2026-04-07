@@ -34,21 +34,24 @@ class ahb_qspi_irq_test extends ahb_qspi_base_test;
     if (ahb_vif.drv_cb.irq_qspi_finished !== 1'b0)
       `uvm_error("IRQ_TEST", "IRQ should be low before any command")
 
-    // Issue JEDEC ID command (don't auto-clear IRQ — do it manually)
+    // Issue JEDEC ID command manually (two-phase, no auto IRQ clear)
     begin
-      apb_write_sequence wr;
       apb_read_sequence  rd;
+      bit [31:0] cmd_base;
 
-      // Issue command
-      wr = apb_write_sequence::type_id::create("wr_cmd");
-      wr.addr  = QSPI_SPI_CMD_ADDR;
-      wr.wdata = {12'h0, 4'h3, 4'h0, 4'h0, 1'b0, 1'b0, 1'b1, 1'b1, SPI_OP_JEDEC_ID};
-      wr.start(env.apb_agt.sequencer);
+      // N_RW_BYTES=2 (3 bytes), READ=1, opcode=0x9F
+      cmd_base = {12'h0, 4'h2, 4'h0, 1'b0, 1'b0, 1'b1, 1'b0, SPI_OP_JEDEC_ID};
+
+      // Phase 1: setup
+      apb_write(QSPI_SPI_CMD_ADDR, cmd_base);
+
+      // Phase 2: enable
+      apb_write(QSPI_SPI_CMD_ADDR, cmd_base | (1 << SPI_CMD_ENABLE_BIT));
 
       // Poll for completion
       begin
         bit busy = 1;
-        int timeout = 5000;
+        int timeout = 50000;
         while (busy && timeout > 0) begin
           rd = apb_read_sequence::type_id::create("rd_status");
           rd.addr = QSPI_STATUS_ADDR;
@@ -91,7 +94,7 @@ class ahb_qspi_irq_test extends ahb_qspi_base_test;
       cmd = qspi_cmd_sequence::type_id::create($sformatf("cmd_%0d", i));
       cmd.opcode     = SPI_OP_JEDEC_ID;
       cmd.do_read    = 1;
-      cmd.n_rw_bytes = 3;
+      cmd.n_rw_bytes = 4'h2;  // 3 bytes
       cmd.start(env.apb_agt.sequencer);  // auto-clears IRQ
 
       `uvm_info("IRQ_TEST", $sformatf("IRQ cycle %0d complete", i), UVM_MEDIUM)

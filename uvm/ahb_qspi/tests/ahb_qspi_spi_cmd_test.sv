@@ -29,14 +29,15 @@ class ahb_qspi_spi_cmd_test extends ahb_qspi_base_test;
 
     // ---------------------------------------------------------------
     `uvm_info("SPI_TEST", "=== JEDEC ID Test ===", UVM_LOW)
+    // N_RW_BYTES=2 means 3 bytes (encoding: N → N+1 bytes)
     // ---------------------------------------------------------------
     cmd = qspi_cmd_sequence::type_id::create("jedec");
     cmd.opcode     = SPI_OP_JEDEC_ID;
     cmd.do_read    = 1;
-    cmd.n_rw_bytes = 3;
+    cmd.n_rw_bytes = 4'h2;  // 3 bytes
     cmd.start(env.apb_agt.sequencer);
 
-    env.scoreboard.check_reg_value("JEDEC MFG ID", cmd.rdata[0], {24'h0, FLASH_MFG_ID}, 32'h000000FF);
+    env.scoreboard.check_reg_value("JEDEC ID", cmd.rdata[0], FLASH_JEDEC_RDATA0);
     `uvm_info("SPI_TEST", $sformatf("JEDEC ID: 0x%08h", cmd.rdata[0]), UVM_LOW)
 
     // ---------------------------------------------------------------
@@ -45,9 +46,9 @@ class ahb_qspi_spi_cmd_test extends ahb_qspi_base_test;
     cmd = qspi_cmd_sequence::type_id::create("rdsr");
     cmd.opcode     = SPI_OP_RDSR;
     cmd.do_read    = 1;
-    cmd.n_rw_bytes = 1;
+    cmd.n_rw_bytes = 4'h0;  // 1 byte
     cmd.start(env.apb_agt.sequencer);
-    `uvm_info("SPI_TEST", $sformatf("Status Register: 0x%02h", cmd.rdata[0][7:0]), UVM_LOW)
+    `uvm_info("SPI_TEST", $sformatf("Status Register: 0x%08h", cmd.rdata[0]), UVM_LOW)
 
     // ---------------------------------------------------------------
     `uvm_info("SPI_TEST", "=== Page Program + Read Verify ===", UVM_LOW)
@@ -58,13 +59,13 @@ class ahb_qspi_spi_cmd_test extends ahb_qspi_base_test;
     cmd.opcode = SPI_OP_WREN;
     cmd.start(env.apb_agt.sequencer);
 
-    // Page Program at address 0x000000 with known data
+    // Page Program at address 0x000000 with known data (4 bytes)
     cmd = qspi_cmd_sequence::type_id::create("pp");
     cmd.opcode     = SPI_OP_PP;
     cmd.do_write   = 1;
     cmd.addr_en    = 1;
     cmd.flash_addr = 22'h0;
-    cmd.n_rw_bytes = 4;
+    cmd.n_rw_bytes = 4'h3;  // 4 bytes
     cmd.wdata[0]   = 32'hDEADBEEF;
     cmd.start(env.apb_agt.sequencer);
 
@@ -76,21 +77,21 @@ class ahb_qspi_spi_cmd_test extends ahb_qspi_base_test;
         cmd = qspi_cmd_sequence::type_id::create("poll_sr");
         cmd.opcode     = SPI_OP_RDSR;
         cmd.do_read    = 1;
-        cmd.n_rw_bytes = 1;
+        cmd.n_rw_bytes = 4'h0;  // 1 byte
         cmd.start(env.apb_agt.sequencer);
         flash_busy = cmd.rdata[0][0]; // WIP bit
         timeout--;
       end
     end
 
-    // Read back with slow read (0x03)
+    // Read back with slow read (0x03), 4 bytes
     cmd = qspi_cmd_sequence::type_id::create("read_verify");
     cmd.opcode       = SPI_OP_READ;
     cmd.do_read      = 1;
     cmd.addr_en      = 1;
     cmd.flash_addr   = 22'h0;
     cmd.dummy_cycles = 0;
-    cmd.n_rw_bytes   = 4;
+    cmd.n_rw_bytes   = 4'h3;  // 4 bytes
     cmd.start(env.apb_agt.sequencer);
 
     `uvm_info("SPI_TEST", $sformatf("Read back: 0x%08h", cmd.rdata[0]), UVM_LOW)
@@ -104,7 +105,7 @@ class ahb_qspi_spi_cmd_test extends ahb_qspi_base_test;
     cmd.addr_en      = 1;
     cmd.flash_addr   = 22'h0;
     cmd.dummy_cycles = 8;
-    cmd.n_rw_bytes   = 4;
+    cmd.n_rw_bytes   = 4'h3;  // 4 bytes
     cmd.start(env.apb_agt.sequencer);
 
     `uvm_info("SPI_TEST", $sformatf("Fast read: 0x%08h", cmd.rdata[0]), UVM_LOW)

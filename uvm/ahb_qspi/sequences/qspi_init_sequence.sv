@@ -31,7 +31,7 @@ class qspi_init_sequence extends uvm_sequence #(apb_master_transaction);
     wr.wdata = 32'h0000_0005;  // HCLK / 10 (10 MHz SCLK at 100 MHz HCLK)
     wr.start(m_sequencer);
 
-    // RSTEN (0x66) — enable software reset
+    // RSTEN (0x66) — enable software reset (no data, no address)
     cmd = qspi_cmd_sequence::type_id::create("cmd_rsten");
     cmd.opcode = SPI_OP_RSTEN;
     cmd.start(m_sequencer);

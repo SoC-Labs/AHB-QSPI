@@ -70,11 +70,10 @@ class ahb_qspi_reset_test extends ahb_qspi_base_test;
     cmd = qspi_cmd_sequence::type_id::create("jedec");
     cmd.opcode     = SPI_OP_JEDEC_ID;
     cmd.do_read    = 1;
-    cmd.n_rw_bytes = 3;
+    cmd.n_rw_bytes = 4'h2;  // 3 bytes
     cmd.start(env.apb_agt.sequencer);
 
-    env.scoreboard.check_reg_value("JEDEC after restore", cmd.rdata[0],
-      {24'h0, FLASH_MFG_ID}, 32'h000000FF);
+    env.scoreboard.check_reg_value("JEDEC after restore", cmd.rdata[0], FLASH_JEDEC_RDATA0);
 
     `uvm_info("RST_TEST", "Reset test complete", UVM_LOW)
     phase.drop_objection(this);

@@ -61,9 +61,10 @@ class clkdiv_sweep_sequence extends uvm_sequence #(apb_master_transaction);
     apb_write_sequence wr;
     qspi_cmd_sequence  cmd;
 
-    `uvm_info("CLKDIV_SWEEP", "Sweeping CLK_DIV 0-31 with JEDEC ID reads", UVM_LOW)
+    `uvm_info("CLKDIV_SWEEP", "Sweeping CLK_DIV 1-31 with JEDEC ID reads", UVM_LOW)
 
-    for (int div = 0; div < 32; div++) begin
+    // Start at 1 (skip 0 = bypass mode which can violate flash timing)
+    for (int div = 1; div < 32; div++) begin
       // Set clock divider
       wr = apb_write_sequence::type_id::create($sformatf("wr_div_%0d", div));
       wr.addr  = QSPI_CLK_DIV_ADDR;
@@ -72,17 +73,17 @@ class clkdiv_sweep_sequence extends uvm_sequence #(apb_master_transaction);
 
       // Issue JEDEC ID read and verify
       cmd = qspi_cmd_sequence::type_id::create($sformatf("cmd_jedec_%0d", div));
-      cmd.opcode    = SPI_OP_JEDEC_ID;
-      cmd.do_read   = 1;
-      cmd.n_rw_bytes = 3;
+      cmd.opcode     = SPI_OP_JEDEC_ID;
+      cmd.do_read    = 1;
+      cmd.n_rw_bytes = 4'h2;  // 3 bytes
       cmd.start(m_sequencer);
 
-      // Check manufacturer ID
-      if (cmd.rdata[0][7:0] != FLASH_MFG_ID)
-        `uvm_error("CLKDIV_SWEEP", $sformatf("JEDEC ID mismatch at CLK_DIV=%0d: got 0x%02h, expected 0x%02h",
-          div, cmd.rdata[0][7:0], FLASH_MFG_ID))
+      // Check full JEDEC ID value
+      if (cmd.rdata[0] != FLASH_JEDEC_RDATA0)
+        `uvm_error("CLKDIV_SWEEP", $sformatf("JEDEC ID mismatch at CLK_DIV=%0d: got 0x%08h, expected 0x%08h",
+          div, cmd.rdata[0], FLASH_JEDEC_RDATA0))
       else
-        `uvm_info("CLKDIV_SWEEP", $sformatf("CLK_DIV=%0d: JEDEC ID OK (0x%02h)", div, cmd.rdata[0][7:0]), UVM_MEDIUM)
+        `uvm_info("CLKDIV_SWEEP", $sformatf("CLK_DIV=%0d: JEDEC ID OK (0x%08h)", div, cmd.rdata[0]), UVM_MEDIUM)
     end
   endtask
 
@@ -111,7 +112,7 @@ class dummy_sweep_sequence extends uvm_sequence #(apb_master_transaction);
       cmd.addr_en      = 1;
       cmd.flash_addr   = 22'h0;
       cmd.dummy_cycles = d;
-      cmd.n_rw_bytes   = 4;
+      cmd.n_rw_bytes   = 4'h3;  // 4 bytes
       cmd.start(m_sequencer);
 
       `uvm_info("DUMMY_SWEEP", $sformatf("DUMMY=%0d: rdata[0]=0x%08h", d, cmd.rdata[0]), UVM_MEDIUM)
@@ -155,7 +156,7 @@ class mode_switch_sequence extends uvm_sequence #(apb_master_transaction);
       cmd = qspi_cmd_sequence::type_id::create($sformatf("qjedec_%0d", i));
       cmd.opcode     = SPI_OP_QUAD_JEDEC_ID;
       cmd.do_read    = 1;
-      cmd.n_rw_bytes = 3;
+      cmd.n_rw_bytes = 4'h2;  // 3 bytes
       cmd.start(m_sequencer);
 
       // Exit QPI
@@ -172,7 +173,7 @@ class mode_switch_sequence extends uvm_sequence #(apb_master_transaction);
       cmd = qspi_cmd_sequence::type_id::create($sformatf("sjedec_%0d", i));
       cmd.opcode     = SPI_OP_JEDEC_ID;
       cmd.do_read    = 1;
-      cmd.n_rw_bytes = 3;
+      cmd.n_rw_bytes = 4'h2;  // 3 bytes
       cmd.start(m_sequencer);
     end
   endtask

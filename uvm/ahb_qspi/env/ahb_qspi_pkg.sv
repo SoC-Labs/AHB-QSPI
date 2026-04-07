@@ -122,10 +122,12 @@ package ahb_qspi_pkg;
 
   // ===========================================================================
   // SST26VF064B Expected JEDEC ID
+  // After byte-swap in RDATA0: {capacity, type, mfg, 0x00}
   // ===========================================================================
   parameter FLASH_MFG_ID         = 8'hBF;   // Microchip/SST
   parameter FLASH_DEV_TYPE       = 8'h26;
   parameter FLASH_DEV_ID         = 8'h43;   // 64Mbit
+  parameter FLASH_JEDEC_RDATA0   = 32'h4326BF00; // Expected RDATA0 value for 3-byte JEDEC read
 
   // ===========================================================================
   // Reset values

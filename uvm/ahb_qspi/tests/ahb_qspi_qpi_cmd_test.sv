@@ -34,10 +34,10 @@ class ahb_qspi_qpi_cmd_test extends ahb_qspi_base_test;
     cmd = qspi_cmd_sequence::type_id::create("qjedec");
     cmd.opcode     = SPI_OP_QUAD_JEDEC_ID;
     cmd.do_read    = 1;
-    cmd.n_rw_bytes = 3;
+    cmd.n_rw_bytes = 4'h2;  // 3 bytes
     cmd.start(env.apb_agt.sequencer);
 
-    env.scoreboard.check_reg_value("QPI JEDEC MFG", cmd.rdata[0], {24'h0, FLASH_MFG_ID}, 32'h000000FF);
+    env.scoreboard.check_reg_value("QPI JEDEC ID", cmd.rdata[0], FLASH_JEDEC_RDATA0);
     `uvm_info("QPI_TEST", $sformatf("QPI JEDEC ID: 0x%08h", cmd.rdata[0]), UVM_LOW)
 
     // ---------------------------------------------------------------
@@ -49,7 +49,7 @@ class ahb_qspi_qpi_cmd_test extends ahb_qspi_base_test;
     cmd.addr_en      = 1;
     cmd.flash_addr   = 22'h0;
     cmd.dummy_cycles = 4;
-    cmd.n_rw_bytes   = 4;
+    cmd.n_rw_bytes   = 4'h3;  // 4 bytes
     cmd.start(env.apb_agt.sequencer);
 
     `uvm_info("QPI_TEST", $sformatf("QPI fast read: 0x%08h", cmd.rdata[0]), UVM_LOW)
@@ -68,11 +68,10 @@ class ahb_qspi_qpi_cmd_test extends ahb_qspi_base_test;
     cmd = qspi_cmd_sequence::type_id::create("spi_jedec");
     cmd.opcode     = SPI_OP_JEDEC_ID;
     cmd.do_read    = 1;
-    cmd.n_rw_bytes = 3;
+    cmd.n_rw_bytes = 4'h2;  // 3 bytes
     cmd.start(env.apb_agt.sequencer);
 
-    env.scoreboard.check_reg_value("SPI JEDEC after QPI exit", cmd.rdata[0],
-      {24'h0, FLASH_MFG_ID}, 32'h000000FF);
+    env.scoreboard.check_reg_value("SPI JEDEC after QPI exit", cmd.rdata[0], FLASH_JEDEC_RDATA0);
 
     `uvm_info("QPI_TEST", "QPI command test complete", UVM_LOW)
     phase.drop_objection(this);
