@@ -1,0 +1,33 @@
+#-----------------------------------------------------------------------------
+# SoCLabs AHB QSPI — SpyGlass CDC Waivers
+#
+# Suppress CDC violations originating entirely within third-party IP.
+# AHB QSPI-authored RTL should NEVER be waived here —
+# add targeted waivers with justification comments instead.
+#
+# Contributors
+#
+# David Mapstone (d.a.mapstone@soton.ac.uk)
+#
+# Copyright 2026, SoC Labs (www.soclabs.org)
+#-----------------------------------------------------------------------------
+
+# ============================================================================
+# Third-party IP: ARM CMSDK
+# ============================================================================
+# CMSDK APB slave mux is a purely combinational routing block with no
+# real CDC paths — any flagged crossings are false positives.
+
+waive -du "cmsdk_apb_slave_mux" -comment "ARM CMSDK IP — combinational mux, no real CDC"
+
+# ============================================================================
+# Third-party IP: ARM CG092 Flash Cache
+# ============================================================================
+# The CG092 p_flash_cache_f0 contains its own CDC synchronisers
+# (p_flash_cache_f0_capt_sync, cdc_capt_sync, static_reg) for the
+# HCLK/PCLK boundary.  These are pre-verified by ARM.
+
+waive -du "p_flash_cache_f0_capt_sync" -comment "ARM CG092 CDC sync cell — pre-verified"
+waive -du "cdc_capt_sync"              -comment "ARM CG092 CDC sync cell — pre-verified"
+waive -du "p_flash_cache_f0_static_reg" -comment "ARM CG092 static reg — pre-verified"
+waive -du "static_reg"                  -comment "ARM CG092 static reg — pre-verified"

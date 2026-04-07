@@ -43,3 +43,16 @@ imp
 
 .vscode
 asic/TSMC*nm/work
+
+# SpyGlass CDC analysis
+cdc/top_ahb_qspi/
+cdc/*_spyglass/
+cdc/*_cdc_summary.rpt
+cdc/*_cdc_detail.rpt
+cdc/spyglass_output/
+cdc/spyglass.log
+cdc/sg_shell.log
+
+uvm/ahb_qspi/sim_build
+uvm/ahb_qspi/csrc
+vc_hdrs.h
