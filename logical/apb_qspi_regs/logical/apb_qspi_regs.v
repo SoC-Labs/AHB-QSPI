@@ -74,6 +74,24 @@ reg qspi_finished;
 reg qspi_busy_last;
 assign IRQ_QSPI_FINISHED = qspi_finished;
 
+// 2-FF CDC synchronizers for signals from QSPI_SCLK_i domain into PCLK domain
+reg qspi_enable_ack_meta, qspi_enable_ack_sync;
+reg qspi_busy_meta,       qspi_busy_sync;
+
+always @(posedge PCLK or negedge PRESETn) begin
+    if(~PRESETn) begin
+        qspi_enable_ack_meta <= 1'b0;
+        qspi_enable_ack_sync <= 1'b0;
+        qspi_busy_meta       <= 1'b0;
+        qspi_busy_sync       <= 1'b0;
+    end else begin
+        qspi_enable_ack_meta <= QSPI_ENABLE_ACK;
+        qspi_enable_ack_sync <= qspi_enable_ack_meta;
+        qspi_busy_meta       <= QSPI_BUSY;
+        qspi_busy_sync       <= qspi_busy_meta;
+    end
+end
+
 
 localparam [7:0] PIDR0 = 8'h59; //0xFE0
 localparam [7:0] PIDR1 = 8'h16; //0xFE4
@@ -154,11 +172,11 @@ always @(posedge PCLK or negedge PRESETn) begin
                 10'h00D: reg13 = PWDATA[4:0];
             endcase
         end
-        if(QSPI_ENABLE_ACK)
+        if(qspi_enable_ack_sync)
             reg2[8]=1'b0;
         if(reg1[8] & (~qspi_finished))
             reg1[8]=1'b0;
-        reg1[0] = QSPI_BUSY;
+        reg1[0] = qspi_busy_sync;
     end
 end
 
@@ -205,9 +223,9 @@ always @(posedge PCLK or negedge PRESETn) begin
         qspi_finished <= 1'b0;
         qspi_busy_last <= 1'b0;
     end else begin
-        qspi_busy_last <= QSPI_BUSY;
+        qspi_busy_last <= qspi_busy_sync;
 
-        if(qspi_busy_last&(~QSPI_BUSY)) begin
+        if(qspi_busy_last&(~qspi_busy_sync)) begin
             qspi_finished <= 1'b1;
         end else if((reg1[8])) begin
             qspi_finished <= 1'b0;

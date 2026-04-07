@@ -52,14 +52,18 @@ reg [3:0]   QSPI_IO_o_reg;
 reg [127:0] data_in_reg;
 reg [21:0]  last_QSPI_ADDR;
 
+// 2-FF CDC synchronizer for QSPI_ENABLE (HCLK/PCLK -> QSPI_SCLK_i domain)
+reg QSPI_enable_sync_meta;
 reg QSPI_enable_sync;
 
 always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
-    if(~HRESETn)begin
-        QSPI_enable_sync <= 1'b0;
-    end else begin 
-        QSPI_enable_sync <= QSPI_ENABLE;
-    end 
+    if(~HRESETn) begin
+        QSPI_enable_sync_meta <= 1'b0;
+        QSPI_enable_sync      <= 1'b0;
+    end else begin
+        QSPI_enable_sync_meta <= QSPI_ENABLE;
+        QSPI_enable_sync      <= QSPI_enable_sync_meta;
+    end
 end
 
 reg [127:0]   QSPI_WDATA_reg;

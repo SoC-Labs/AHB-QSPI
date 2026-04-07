@@ -43,6 +43,29 @@ assign AHB_QSPI_WRITE=1'b0;
 assign AHB_QSPI_WDATA = HWDATA;
 assign AHB_QSPI_N_RW_BYTES = 4'hF;
 
+// 2-FF CDC synchronizers for signals from QSPI_SCLK_i domain into HCLK domain
+reg ahb_qspi_enable_ack_meta, ahb_qspi_enable_ack_sync;
+reg ahb_qspi_busy_meta,       ahb_qspi_busy_sync;
+
+always @(posedge HCLK or negedge HRESETn) begin
+    if(~HRESETn) begin
+        ahb_qspi_enable_ack_meta <= 1'b0;
+        ahb_qspi_enable_ack_sync <= 1'b0;
+        ahb_qspi_busy_meta       <= 1'b0;
+        ahb_qspi_busy_sync       <= 1'b0;
+    end else begin
+        ahb_qspi_enable_ack_meta <= AHB_QSPI_ENABLE_ACK;
+        ahb_qspi_enable_ack_sync <= ahb_qspi_enable_ack_meta;
+        ahb_qspi_busy_meta       <= AHB_QSPI_BUSY;
+        ahb_qspi_busy_sync       <= ahb_qspi_busy_meta;
+    end
+end
+
+// AHB_QSPI_RDATA is safe-by-protocol: the 128-bit data from the QSPI_SCLK_i
+// domain is guaranteed stable for multiple cycles before QSPI_BUSY deasserts.
+// The synchronized ahb_qspi_busy_sync serves as the valid qualifier — by the
+// time it deasserts in the HCLK domain, RDATA has been stable for at least
+// 2 HCLK cycles (the sync latency), providing adequate setup margin.
 
 wire [31:0] AHB_QSPI_RDATA_W0 = {AHB_QSPI_RDATA[71:64],AHB_QSPI_RDATA[79:72],AHB_QSPI_RDATA[87:80],AHB_QSPI_RDATA[95:88]}; //AHB_QSPI_RDATA[95:64];
 wire [31:0] AHB_QSPI_RDATA_W1 = {AHB_QSPI_RDATA[39:32], AHB_QSPI_RDATA[47:40], AHB_QSPI_RDATA[55:48], AHB_QSPI_RDATA[63:56]}; //AHB_QSPI_RDATA[63:32]; //94000049
@@ -121,17 +144,17 @@ always @(posedge HCLK or negedge HRESETn) begin
         AHB_QSPI_ADDR <= 22'd0;
     end else begin
         if(current_state == WAIT_READ) begin
-            if(AHB_QSPI_BUSY!=1'b1) begin
+            if(ahb_qspi_busy_sync!=1'b1) begin
                 if(qspi_started==1'b0) begin
                     AHB_QSPI_ENABLE <= 1'b1;
                 end
             end
-            if(AHB_QSPI_ENABLE_ACK) begin
+            if(ahb_qspi_enable_ack_sync) begin
                 AHB_QSPI_ENABLE <= 1'b0;
                 qspi_started <= 1'b1;
             end
             if(qspi_started==1'b1) begin
-                if(AHB_QSPI_BUSY==1'b0) begin
+                if(ahb_qspi_busy_sync==1'b0) begin
                     HRDATA <= AHB_QSPI_RDATA_i;
                     qspi_ready <= 1'b1;
                 end
