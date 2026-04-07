@@ -78,8 +78,8 @@ link
 ##-----------------------------------------------------------------------------
 set HCLK "HCLK"
 set PCLK "PCLK"
-set HCLK_PERIOD 10
-set PCLK_PERIOD 10
+set HCLK_PERIOD 4
+set PCLK_PERIOD 4
 
 create_clock -name "$HCLK" -period $HCLK_PERIOD [get_ports HCLK]
 create_clock -name "$PCLK" -period $PCLK_PERIOD [get_ports PCLK]

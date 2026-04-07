@@ -294,6 +294,7 @@ wire QSPI_SCLK_i;
 
 
 qspi_controller_mux u_qspi_controller_mux(
+    .HRESETn(HRESETn),
     .QSPI_SCLK(QSPI_SCLK_i),
     .XIP_ACTIVE(XIP_ACTIVE),
 

@@ -62,7 +62,12 @@ else ifeq ($(SIM), vcs)
 	COMPILE_ARGS += -kdb +neg_tchk -cm line+tgl+fsm+branch+cond
 	SIM_CMD_SUFFIX += -cm line+tgl+fsm+branch+cond
 endif
-include $(SOCLABS_AHB_QSPI_DIR)/simulate/sim/cocotb/makefile.flist
+MAKEFILE_FLIST := $(SOCLABS_AHB_QSPI_DIR)/simulate/sim/cocotb/makefile.flist
+ifneq ($(wildcard $(MAKEFILE_FLIST)),)
+  include $(MAKEFILE_FLIST)
+else
+  $(warning makefile.flist not found at $(MAKEFILE_FLIST) -- run 'make flist_makefile_nanosoc' from the top level first)
+endif
 include $(shell cocotb-config --makefiles)/Makefile.sim
 
 iverilog_dump.v:

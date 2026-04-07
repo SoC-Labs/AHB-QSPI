@@ -132,7 +132,7 @@ ahb_qspi_pads u_ahb_qspi_pads(
 
 `ifdef GATE_SIMS
 initial begin
-    $sdf_annotate("/home/dwn1c21/SoC-Labs/ahb_qspi/imp/ASIC/top_ahb_qspi.sdf", u_ahb_qspi_pads);
+    $sdf_annotate("../../imp/ASIC/top_ahb_qspi.sdf", u_ahb_qspi_pads);
 end
 `endif
 

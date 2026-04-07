@@ -251,8 +251,16 @@ end
 
 reg QSPI_IO_e_int;
 
-always @(negedge QSPI_SCLK_i) begin
-    if(current_state==OP) begin
+always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
+    if(~HRESETn) begin
+        QSPI_SCLK_e <= 1'b0;
+        QSPI_IO_o_reg <= 4'hF;
+        QSPI_IO_e_int <= 1'b1;
+        op_code <= 8'h00;
+        addr_code <= 24'h000000;
+        qspi_mode_reg <= 8'h00;
+        QSPI_WDATA_reg <= 128'd0;
+    end else if(current_state==OP) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
         if(QSPI_QIO_MODE==1'b1) begin

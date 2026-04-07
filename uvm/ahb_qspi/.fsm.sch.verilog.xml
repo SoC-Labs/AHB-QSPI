@@ -1,0 +1,20 @@
+<Command name="schRTLInfo"  delimiter="."  >
+<RTLBlock >
+<RTLInfo   name="state_reg_0"  type="2"  fileName="/research/AAA/ip_library/latest/Corstone-101/logical/cmsdk_ahb_to_apb/verilog/cmsdk_ahb_to_apb.v"  >
+    <Seg beginLine="180"  endLine="257"  />
+  </RTLInfo>
+<Instance name="cmsdk_ahb_to_apb"  />
+</RTLBlock>
+<RTLBlock >
+<RTLInfo   name="current_state_1"  type="2"  fileName="/home/dam1n19/SoCLabs/ahb_qspi/logical/qspi_controller/logical/qspi_controller.sv"  >
+    <Seg beginLine="75"  endLine="142"  />
+  </RTLInfo>
+<Instance name="test_top.u_dut.u_top_ahb_qspi.u_qspi_controller"  />
+</RTLBlock>
+<RTLBlock >
+<RTLInfo   name="current_state_2"  type="2"  fileName="/home/dam1n19/SoCLabs/ahb_qspi/logical/ahb_qspi_interface/logical/ahb_qspi_interface.sv"  >
+    <Seg beginLine="102"  endLine="126"  />
+  </RTLInfo>
+<Instance name="test_top.u_dut.u_top_ahb_qspi.u_ahb_qspi_interface"  />
+</RTLBlock>
+</Command>

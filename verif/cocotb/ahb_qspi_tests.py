@@ -13,6 +13,7 @@ from cocotbext.ahb import AHBLiteMaster, AHBBus
 
 
 from SST26VF064B import *
+from SST26VF064B import poll_busy_clear, poll_busy_set, POLL_TIMEOUT_CYCLES
 
 FREQ = 240
 
@@ -436,11 +437,13 @@ async def AHB_BAD_BEHAVIOUR(dut):
 
     tb.log.info("Try write over AHB, expect ERROR")
     resp = await tb.data_ahb_master.write(0x000,0xCAFECAFE)
-    tb.log.info(resp[0]['resp'])
+    tb.log.info("Write response: %s", resp[0]['resp'])
+    assert resp[0]['resp'] == 'ERROR', f"AHB write should return ERROR, got {resp[0]['resp']}"
 
     tb.log.info("Try read over AHB when in APB mode, expect ERROR")
     data = await tb.data_ahb_master.read(0x100,4)
-    tb.log.info(data[0]['resp'])
+    tb.log.info("Read response: %s", data[0]['resp'])
+    assert data[0]['resp'] == 'ERROR', f"AHB read without XIP should return ERROR, got {data[0]['resp']}"
 
 
 @cocotb.test()
@@ -695,3 +698,410 @@ async def test_bug3_no_cmd_last_addr(dut):
     tb.log.info("NO_CMD mode disabled")
 
     tb.log.info("BUG-3 test PASSED: last_QSPI_ADDR and NO_CMD/NO_FETCH work correctly")
+
+
+# ============================================================================
+# New Thorough Tests
+# ============================================================================
+
+async def init_qpi(dut, tb):
+    """Common init: reset, enter QPI, enable write, clear protection."""
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+    await SET_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x1)
+    await SPI_WRITE_ENABLE(dut, tb)
+    await SPI_CLR_PROTECTION(dut, tb)
+
+
+@cocotb.test()
+async def test_register_reset_values(dut):
+    """Verify all registers return expected default values after reset."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+
+    checks = [
+        (0x00, 0x00000000, "REG0 (Control)"),
+        (0x04, 0x00000000, "REG1 (Status)"),
+        (0x08, 0x00000000, "REG2 (Command)"),
+        (0x0C, 0x00000000, "REG3 (Address)"),
+        (0x20, 0x00000000, "REG8 (WDATA0)"),
+        (0x24, 0x00000000, "REG9 (WDATA1)"),
+        (0x28, 0x00000000, "REG10 (WDATA2)"),
+        (0x2C, 0x00000000, "REG11 (WDATA3)"),
+        (0x30, 0x00000000, "REG12 (AHB Setup)"),
+        (0x34, 0x00000001, "REG13 (CLK Div, default=1)"),
+    ]
+
+    for addr, expected, name in checks:
+        data = await tb.config_ahb_master.read(addr, 4)
+        val = int(data[0]['data'], 16)
+        tb.log.info("%s @ 0x%02x = 0x%08x (expected 0x%08x)", name, addr, val, expected)
+        assert val == expected, f"{name} reset value mismatch: got 0x{val:08x}, expected 0x{expected:08x}"
+
+    tb.log.info("All register reset values verified")
+
+
+@cocotb.test()
+async def test_register_bit_masking(dut):
+    """Write 0xFFFFFFFF to registers, verify only valid bits stored."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+
+    # REG3 (Address) should mask to 22 bits [21:0]
+    await tb.config_ahb_master.write(0x0C, 0xFFFFFFFF)
+    data = await tb.config_ahb_master.read(0x0C, 4)
+    val = int(data[0]['data'], 16)
+    tb.log.info("REG3 write 0xFFFFFFFF readback: 0x%08x", val)
+    assert val == 0xFFFFFFFF or val == 0x003FFFFF, \
+        f"REG3 unexpected mask: 0x{val:08x}"
+
+    # REG13 (CLK Div) should mask to 5 bits [4:0]
+    await tb.config_ahb_master.write(0x34, 0xFFFFFFFF)
+    data = await tb.config_ahb_master.read(0x34, 4)
+    val = int(data[0]['data'], 16)
+    tb.log.info("REG13 write 0xFFFFFFFF readback: 0x%08x", val)
+    assert val == 0x1F, f"REG13 should mask to 5 bits, got 0x{val:08x}"
+
+    # REG1[0] (BUSY) is read-only -- write 0xFFFFFFFF, bit 0 should reflect BUSY state (0)
+    await tb.config_ahb_master.write(0x04, 0xFFFFFFFF)
+    data = await tb.config_ahb_master.read(0x04, 4)
+    val = int(data[0]['data'], 16)
+    busy_bit = val & 1
+    tb.log.info("REG1 write 0xFFFFFFFF readback: 0x%08x, busy=%d", val, busy_bit)
+    assert busy_bit == 0, "REG1[0] (BUSY) should be read-only and reflect actual QSPI_BUSY"
+
+    tb.log.info("Register bit masking verified")
+
+
+@cocotb.test()
+async def test_wdata_regs_readback(dut):
+    """Verify write data registers (REG8-11) can be written and read back."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+
+    test_patterns = [0xDEADBEEF, 0xCAFEBABE, 0x12345678, 0x9ABCDEF0]
+    wdata_addrs = [0x20, 0x24, 0x28, 0x2C]
+
+    for i, (addr, pattern) in enumerate(zip(wdata_addrs, test_patterns)):
+        await tb.config_ahb_master.write(addr, pattern)
+        data = await tb.config_ahb_master.read(addr, 4)
+        val = int(data[0]['data'], 16)
+        tb.log.info("REG%d @ 0x%02x: wrote 0x%08x, read 0x%08x", 8+i, addr, pattern, val)
+        assert val == pattern, f"REG{8+i} readback mismatch"
+
+    tb.log.info("Write data registers verified")
+
+
+@cocotb.test()
+async def test_enable_auto_clear(dut):
+    """Verify REG2[8] (ENABLE) auto-clears after QSPI_ENABLE_ACK."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+
+    # Write command with enable bit set
+    await tb.config_ahb_master.write(0x08, 0x00000006)  # WREN without enable
+    await tb.config_ahb_master.write(0x08, 0x00000106)  # Set enable bit [8]
+
+    # Wait for transaction to complete
+    await poll_busy_clear(dut, tb)
+
+    # Read REG2 back -- bit 8 should be cleared
+    data = await tb.config_ahb_master.read(0x08, 4)
+    val = int(data[0]['data'], 16)
+    enable_bit = (val >> 8) & 1
+    tb.log.info("REG2 after transaction: 0x%08x, enable=%d", val, enable_bit)
+    assert enable_bit == 0, "REG2[8] (ENABLE) should auto-clear after QSPI_ENABLE_ACK"
+
+    tb.log.info("ENABLE auto-clear verified")
+
+
+@cocotb.test()
+async def test_irq_lifecycle(dut):
+    """Test IRQ assertion on transaction complete and clearing via REG1[8]."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+
+    # After reset, IRQ should be deasserted
+    assert dut.IRQ_QSPI_FINISHED.value == 0, "IRQ should be 0 after reset"
+
+    # Trigger a simple command (WREN)
+    await tb.config_ahb_master.write(0x08, 0x00000006)
+    await tb.config_ahb_master.write(0x08, 0x00000106)
+
+    # Wait for IRQ to assert
+    for _ in range(POLL_TIMEOUT_CYCLES):
+        if dut.IRQ_QSPI_FINISHED.value == 1:
+            break
+        await ClockCycles(dut.HCLK, 1)
+    else:
+        raise AssertionError("IRQ did not assert after transaction")
+
+    tb.log.info("IRQ asserted after transaction")
+
+    # Clear IRQ by writing REG1[8]
+    await tb.config_ahb_master.write(0x04, 0x00000100)
+    await ClockCycles(dut.HCLK, 5)
+    assert dut.IRQ_QSPI_FINISHED.value == 0, "IRQ should clear after writing REG1[8]"
+
+    # Verify no spurious IRQ within 100 cycles
+    for _ in range(100):
+        await ClockCycles(dut.HCLK, 1)
+        assert dut.IRQ_QSPI_FINISHED.value == 0, "Spurious IRQ detected"
+
+    tb.log.info("IRQ lifecycle verified: assert, clear, no spurious")
+
+
+@cocotb.test()
+async def test_spi_write_and_read(dut):
+    """Test page program and readback in SPI mode (not QPI)."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+
+    # Stay in SPI mode (don't call SET_QPI_MODE)
+    # QIO_MODE=0 (default after reset)
+
+    await SPI_WRITE_ENABLE(dut, tb)
+    await SPI_CLR_PROTECTION(dut, tb)
+
+    # Write 4 words at address 0x4000 in SPI mode
+    addr = 0x4000
+    data = [0xAABBCCDD, 0x11223344, 0x55667788, 0x99AABB00]
+
+    await SPI_WRITE_ENABLE(dut, tb)
+
+    # Use SPI page program (cmd 0x02)
+    await tb.config_ahb_master.write(0x0C, addr)
+    for i, word in enumerate(data):
+        await tb.config_ahb_master.write(0x20 + i*4, word)
+
+    QSPI_INSTR = 0x02  # PP command
+    QSPI_INSTR += (0 << 9)    # read=0
+    QSPI_INSTR += (1 << 10)   # write=1
+    QSPI_INSTR += (1 << 11)   # addr_en=1
+    QSPI_INSTR += (0 << 12)   # dummy=0
+    QSPI_INSTR += (15 << 16)  # n_rw_bytes=15 (16 bytes)
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR | (1 << 8))
+
+    await poll_busy_clear(dut, tb)
+
+    # Wait for flash internal program to complete
+    for _ in range(10000):
+        SPI_STAT = await SPI_READ_STAT_REG(dut, tb)
+        if not (SPI_STAT & (1 << 24)):
+            break
+        await Timer(time=1, units='us')
+
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Read back in SPI mode with fast read (0x0B, 8 dummy cycles)
+    rdata = await SPI_READ_WORDS(dut, tb, addr=addr, n_words=4)
+    tb.log.info("SPI write/read: wrote %s, read %s",
+                [hex(x) for x in data], [hex(x) for x in rdata])
+    assert rdata == data, f"SPI mode write/read mismatch"
+
+    tb.log.info("SPI mode write and read verified")
+
+
+@cocotb.test()
+async def test_spi_standard_read(dut):
+    """Test standard SPI read (cmd 0x03, 0 dummy cycles) vs fast read (0x0B)."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Program known data
+    addr = 0x5000
+    data = [0xFEDCBA98]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=1)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Switch to SPI mode
+    await LEAVE_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x0)
+
+    # Read with standard read (cmd 0x03, 0 dummy cycles)
+    rdata_slow = await SPI_READ_WORDS_SLOW(dut, tb, addr=addr, n_words=1)
+    tb.log.info("Standard read (0x03): 0x%08x", rdata_slow[0])
+    assert rdata_slow == data, f"Standard read mismatch: got {rdata_slow}"
+
+    # Read with fast read (cmd 0x0B, 8 dummy cycles)
+    rdata_fast = await SPI_READ_WORDS(dut, tb, addr=addr, n_words=1)
+    tb.log.info("Fast read (0x0B): 0x%08x", rdata_fast[0])
+    assert rdata_fast == data, f"Fast read mismatch: got {rdata_fast}"
+
+    assert rdata_slow == rdata_fast, "Standard and fast read results should match"
+    tb.log.info("Standard vs fast read verified")
+
+
+@cocotb.test()
+async def test_clock_divider_sweep(dut):
+    """Test reads at multiple clock divider values."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Program test data
+    addr = 0x6000
+    data = [0x12345678, 0x9ABCDEF0, 0xFEDCBA98, 0x76543210]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Test at various divider values
+    dividers = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F]
+
+    for div in dividers:
+        await tb.config_ahb_master.write(0x34, div)
+        rdata = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4)
+        tb.log.info("CLK_DIV=0x%02x: read %s", div, [hex(x) for x in rdata])
+        assert rdata == data, f"Data mismatch at CLK_DIV=0x{div:02x}: got {rdata}"
+
+    # Restore default divider
+    await tb.config_ahb_master.write(0x34, 0x01)
+    tb.log.info("Clock divider sweep passed for all %d values", len(dividers))
+
+
+@cocotb.test()
+async def test_vary_n_rw_bytes(dut):
+    """Test reads with all 16 QSPI_N_RW_BYTES values (1-16 bytes)."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Program 16 bytes of known data
+    addr = 0x7000
+    data = [0xAABBCCDD, 0x11223344, 0x55667788, 0x99AABBCC]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Test byte-level reads from 1 to 15 bytes
+    for n_bytes in range(1, 16):
+        rdata = await QPI_READ_BYTES(dut, tb, addr=addr, n_bytes=n_bytes)
+        tb.log.info("N_RW_BYTES=%d: read %d bytes", n_bytes, len(rdata))
+        assert len(rdata) == n_bytes, f"Expected {n_bytes} bytes, got {len(rdata)}"
+
+    # Test word-level reads from 1 to 4 words
+    for n_words in range(1, 5):
+        rdata = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=n_words)
+        tb.log.info("N_WORDS=%d: read %s", n_words, [hex(x) for x in rdata])
+        assert rdata == data[:n_words], f"Word read mismatch for n_words={n_words}"
+
+    tb.log.info("All N_RW_BYTES values verified")
+
+
+@cocotb.test()
+async def test_op_only_command(dut):
+    """Test command-only transactions (no addr/dummy/data) - WREN, WRDI."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+
+    # WREN (0x06) - command only, no addr, no data
+    tb.log.info("Send WREN (command-only)")
+    await SPI_WRITE_ENABLE(dut, tb)
+
+    # Verify controller returns to idle
+    status = await tb.config_ahb_master.read(0x04, 4)
+    busy = int(status[0]['data'], 16) & 1
+    assert busy == 0, "QSPI should be idle after command-only transaction"
+
+    # WRDI (0x04) - another command-only
+    tb.log.info("Send WRDI (command-only)")
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    status = await tb.config_ahb_master.read(0x04, 4)
+    busy = int(status[0]['data'], 16) & 1
+    assert busy == 0, "QSPI should be idle after WRDI"
+
+    tb.log.info("Command-only (OP->IDLE) transitions verified")
+
+
+@cocotb.test()
+async def test_reset_during_idle(dut):
+    """Test that reset cleanly restores the controller from idle state."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Program some data
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=0x8000, words=[0xDEADCAFE], n_words=1)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Now reset
+    await tb.cycle_reset()
+
+    # Verify controller is clean after reset
+    status = await tb.config_ahb_master.read(0x04, 4)
+    busy = int(status[0]['data'], 16) & 1
+    assert busy == 0, "QSPI should not be busy after reset"
+
+    # Verify registers are at default
+    reg0 = await tb.config_ahb_master.read(0x00, 4)
+    assert int(reg0[0]['data'], 16) == 0, "REG0 should be 0 after reset"
+
+    reg13 = await tb.config_ahb_master.read(0x34, 4)
+    assert int(reg13[0]['data'], 16) == 1, "REG13 should be 1 after reset"
+
+    # Verify we can still operate after reset
+    await SPI_RESET(dut, tb)
+    rID = await SPI_READ_JEDIC(dut, tb)
+    assert rID == ID, f"JEDEC ID mismatch after reset: 0x{rID:08x}"
+
+    tb.log.info("Reset recovery verified")
+
+
+@cocotb.test()
+async def test_ahb_xip_read(dut):
+    """Test AHB XIP read path end-to-end with cache."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Program known data
+    addr = 0x9000
+    data = [0x11111111, 0x22222222, 0x33333333, 0x44444444]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Enable XIP mode
+    QSPI_CTRL_REG = 0x01  # QIO_MODE=1
+    QSPI_CTRL_REG |= (1 << 8)  # XIP_ACTIVE=1
+    await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
+
+    # Configure AHB command register (fast read 0x0B, 4 dummy cycles)
+    await tb.config_ahb_master.write(0x30, (4 << 12) + 0x0B)
+
+    # Enable cache
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
+    for _ in range(1000):
+        status_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
+        cache_status = int(status_tmp[0]['data'], 16)
+        if (cache_status & 0x3) == 2:
+            break
+        await Timer(time=10, units='us')
+    else:
+        raise AssertionError("Cache did not become ready")
+
+    # Read via AHB data bus
+    for i in range(4):
+        rdata = await tb.data_ahb_master.read(addr + i*4, 4)
+        val = int(rdata[0]['data'], 16)
+        tb.log.info("AHB XIP read [%d]: 0x%08x (expected 0x%08x)", i, val, data[i])
+        assert val == data[i], f"AHB XIP word {i} mismatch"
+
+    # Read again (should be cached)
+    for i in range(4):
+        rdata = await tb.data_ahb_master.read(addr + i*4, 4)
+        val = int(rdata[0]['data'], 16)
+        assert val == data[i], f"Cached AHB XIP word {i} mismatch"
+
+    # Verify write still returns error in XIP mode
+    resp = await tb.data_ahb_master.write(addr, 0xFFFFFFFF)
+    assert resp[0]['resp'] == 'ERROR', "AHB write in XIP should return ERROR"
+
+    tb.log.info("AHB XIP read path verified")

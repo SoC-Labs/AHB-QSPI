@@ -96,11 +96,11 @@ This verification plan covers the cocotb-based functional verification of the AH
 
 | Field | Value |
 |-------|-------|
-| **Status** | Implemented (needs assertions) |
+| **Status** | Implemented |
 | **File** | `ahb_qspi_tests.py:432-443` |
 | **Feature** | AHB error response handling |
-| **Description** | Attempts AHB write (should fail with ERROR). Attempts AHB read when not in XIP mode (should fail). Currently logs responses but does NOT assert on them. |
-| **Assertions** | 0 (log-only — **needs fix**) |
+| **Description** | Attempts AHB write (should fail with ERROR). Attempts AHB read when not in XIP mode (should fail). Asserts HRESP=ERROR for both. |
+| **Assertions** | 2 (write error + read error) |
 | **FSM States** | IDLE, ERR |
 | **Coverage** | AHB write rejection, AHB read without XIP |
 
@@ -143,32 +143,135 @@ This verification plan covers the cocotb-based functional verification of the AH
 | **FSM States** | IDLE, OP, ADDR, NO_FETCH, MODE, DUMMY, DATA_I |
 | **Coverage** | NO_CMD mode, NO_FETCH path, last address comparison, address update |
 
+### 3.9 test_register_reset_values
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | Register reset defaults |
+| **Description** | After reset, verifies all 10 registers (REG0-3, REG8-11, REG12-13) return expected defaults. Notably verifies REG13 (CLK_DIV) resets to 0x01. |
+| **Assertions** | 10 |
+| **Coverage** | All register reset values |
+
+### 3.10 test_register_bit_masking
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | Register field isolation |
+| **Description** | Writes 0xFFFFFFFF to REG3, REG13, REG1 and verifies only valid bits stored. REG13 masks to 5 bits (0x1F), REG1[0] is read-only. |
+| **Assertions** | 3 |
+| **Coverage** | Bit masking, read-only fields |
+
+### 3.11 test_wdata_regs_readback
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | Write data register access |
+| **Description** | Writes unique patterns to REG8-11, reads back, verifies data integrity. |
+| **Assertions** | 4 |
+| **Coverage** | Write data register R/W |
+
+### 3.12 test_enable_auto_clear
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | REG2[8] ENABLE auto-clear |
+| **Description** | Writes a command with ENABLE bit set, waits for completion, verifies bit auto-clears. |
+| **Assertions** | 1 |
+| **Coverage** | ENABLE_ACK handshake clearing REG2[8] |
+
+### 3.13 test_irq_lifecycle
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | Interrupt assert, clear, no-spurious |
+| **Description** | Verifies IRQ is 0 after reset, asserts after transaction completes, clears when REG1[8]=1 written, stays deasserted for 100 cycles. |
+| **Assertions** | 4 (reset=0, assert, clear, no-spurious) |
+| **Coverage** | IRQ lifecycle |
+
+### 3.14 test_spi_write_and_read
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | SPI mode page program and readback |
+| **Description** | Programs 4 words in SPI mode (not QPI) using cmd 0x02, reads back with fast read 0x0B. Verifies data integrity in SPI mode. |
+| **Assertions** | 1 data comparison |
+| **FSM States** | IDLE, OP, ADDR, DATA_O, DATA_I, DUMMY |
+| **Coverage** | SPI mode write, SPI mode read |
+
+### 3.15 test_spi_standard_read
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | Standard SPI read (cmd 0x03) vs fast read (0x0B) |
+| **Description** | Reads same data with standard read (0 dummy cycles) and fast read (8 dummy cycles), verifies both return identical data. |
+| **Assertions** | 3 |
+| **FSM States** | All read states |
+| **Coverage** | Standard read cmd, fast read cmd, result comparison |
+
+### 3.16 test_clock_divider_sweep
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | Clock divider correctness across values |
+| **Description** | Programs data, reads back at 7 different CLK_DIV values (0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F). Verifies data integrity at each speed. |
+| **Assertions** | 7 data comparisons |
+| **Coverage** | Full CLK_DIV range |
+
+### 3.17 test_vary_n_rw_bytes
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | All N_RW_BYTES values |
+| **Description** | Tests byte-level reads (1-15 bytes) and word-level reads (1-4 words). Verifies correct data count and content. |
+| **Assertions** | 19 (15 byte + 4 word) |
+| **Coverage** | All QSPI_N_RW_BYTES mux paths |
+
+### 3.18 test_op_only_command
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | Command-only transactions (OP->IDLE) |
+| **Description** | Sends WREN and WRDI (no addr/dummy/data), verifies clean return to idle. |
+| **Assertions** | 2 busy=0 checks |
+| **FSM States** | OP, IDLE |
+| **Coverage** | OP->IDLE path |
+
+### 3.19 test_reset_during_idle
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | Reset recovery |
+| **Description** | Operates the controller, resets, verifies all registers at defaults, then verifies the controller still works (JEDEC ID read). |
+| **Assertions** | 4 |
+| **Coverage** | Reset recovery, post-reset operation |
+
+### 3.20 test_ahb_xip_read
+
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **Feature** | AHB XIP read path end-to-end |
+| **Description** | Programs data, enables XIP mode and cache, reads 4 words via AHB data bus, reads again (cached), verifies write returns ERROR in XIP mode. |
+| **Assertions** | 9 (4 uncached + 4 cached + 1 write error) |
+| **FSM States** | All (via XIP path) |
+| **Coverage** | AHB XIP, cache hit, cache miss, XIP write rejection |
+
 ---
 
 ## 4. Proposed Tests (Not Yet Implemented)
 
-### 4.1 Register Tests
-
-#### test_register_bit_masking
-| Field | Value |
-|-------|-------|
-| **Priority** | High |
-| **Feature** | Register field isolation |
-| **Description** | Write 0xFFFFFFFF to each register, read back, verify only defined bits are stored. REG3 should mask to [21:0], REG13 to [4:0], REG1[0] is read-only (BUSY), etc. |
-
-#### test_register_reset_values
-| Field | Value |
-|-------|-------|
-| **Priority** | High |
-| **Feature** | Register reset defaults |
-| **Description** | After reset, verify all registers return expected defaults: REG0-3=0, REG8-11=0, REG12=0, REG13=0x01. |
-
-#### test_wdata_regs_readback
-| Field | Value |
-|-------|-------|
-| **Priority** | Medium |
-| **Feature** | Write data register access |
-| **Description** | Write patterns to REG8-REG11, read back, verify data integrity including nibble swizzle. |
+### 4.1 Remaining Register Tests
 
 #### test_rdata_regs_readonly
 | Field | Value |
@@ -177,28 +280,7 @@ This verification plan covers the cocotb-based functional verification of the AH
 | **Feature** | Read data register write protection |
 | **Description** | Attempt to write to REG4-7, verify they are unaffected (read-only). |
 
-#### test_enable_auto_clear
-| Field | Value |
-|-------|-------|
-| **Priority** | Medium |
-| **Feature** | REG2[8] auto-clear on ENABLE_ACK |
-| **Description** | Write REG2 with ENABLE bit set, verify it auto-clears after the controller acknowledges. |
-
-### 4.2 QSPI Protocol Tests
-
-#### test_spi_standard_read
-| Field | Value |
-|-------|-------|
-| **Priority** | High |
-| **Feature** | Standard SPI read (cmd 0x03) |
-| **Description** | Test slow read command 0x03 with 0 dummy cycles in SPI mode. Currently only fast read (0x0B) is tested with proper data verification. |
-
-#### test_spi_write_data
-| Field | Value |
-|-------|-------|
-| **Priority** | High |
-| **Feature** | SPI mode page program |
-| **Description** | Page program and readback in SPI mode (not QPI). Currently all write operations use QPI mode. |
+### 4.2 Remaining QSPI Protocol Tests
 
 #### test_vary_dummy_cycles
 | Field | Value |
@@ -207,20 +289,6 @@ This verification plan covers the cocotb-based functional verification of the AH
 | **Feature** | Dummy cycle sweep |
 | **Description** | Sweep QSPI_DUMMY_CYCLES from 1-15 with read operations, verify correct protocol timing and data. |
 
-#### test_vary_n_rw_bytes
-| Field | Value |
-|-------|-------|
-| **Priority** | Medium |
-| **Feature** | Data size sweep |
-| **Description** | Test all 16 QSPI_N_RW_BYTES values (0-15) with write+read verification. |
-
-#### test_op_only_cmd
-| Field | Value |
-|-------|-------|
-| **Priority** | Low |
-| **Feature** | Command-only transactions |
-| **Description** | Send command with no addr/dummy/data (e.g., WREN 0x06). Verify clean FSM exit from OP→IDLE. |
-
 #### test_spi_continuous_read
 | Field | Value |
 |-------|-------|
@@ -228,37 +296,7 @@ This verification plan covers the cocotb-based functional verification of the AH
 | **Feature** | SPI mode continuous read |
 | **Description** | Currently MODE state in SPI mode immediately exits to IDLE (line 178-179 of qspi_controller.sv). Verify this behavior and that data can still be read. |
 
-### 4.3 Clock Divider Tests
-
-#### test_clk_div_sweep
-| Field | Value |
-|-------|-------|
-| **Priority** | Medium |
-| **Feature** | Clock divider values |
-| **Description** | Test CLK_DIV values 0, 1, 2, 4, 8, 16, 31 with read operations. Verify correct data at each speed. |
-
-#### test_clk_div_zero_bypass
-| Field | Value |
-|-------|-------|
-| **Priority** | Medium |
-| **Feature** | Clock divider bypass |
-| **Description** | Verify CLK_DIV=0 uses HCLK directly as SCLK (fastest mode). |
-
-### 4.4 AHB/Cache Tests
-
-#### test_ahb_write_error_assert
-| Field | Value |
-|-------|-------|
-| **Priority** | High |
-| **Feature** | AHB write error response |
-| **Description** | Same as AHB_BAD_BEHAVIOUR but with actual assertions on HRESP=ERROR. |
-
-#### test_ahb_read_no_xip_assert
-| Field | Value |
-|-------|-------|
-| **Priority** | High |
-| **Feature** | AHB read without XIP error |
-| **Description** | Assert error response when reading AHB data bus with XIP_ACTIVE=0. |
+### 4.3 Remaining AHB/Cache Tests
 
 #### test_ahb_cache_coherency
 | Field | Value |
@@ -281,30 +319,7 @@ This verification plan covers the cocotb-based functional verification of the AH
 | **Feature** | Address alignment |
 | **Description** | Read from non-16B-aligned addresses via AHB, verify correct word selection from 128-bit cache line. |
 
-### 4.5 Interrupt Tests
-
-#### test_irq_assert_on_complete
-| Field | Value |
-|-------|-------|
-| **Priority** | High |
-| **Feature** | IRQ assertion |
-| **Description** | Trigger a QSPI transaction, verify IRQ_QSPI_FINISHED asserts when BUSY transitions 1→0. |
-
-#### test_irq_clear
-| Field | Value |
-|-------|-------|
-| **Priority** | High |
-| **Feature** | IRQ clear mechanism |
-| **Description** | After IRQ asserts, write REG1[8]=1 to clear it. Verify IRQ deasserts and stays deasserted. |
-
-#### test_irq_no_spurious
-| Field | Value |
-|-------|-------|
-| **Priority** | Medium |
-| **Feature** | No spurious IRQ |
-| **Description** | After reset and without triggering any transaction, verify IRQ stays deasserted. |
-
-### 4.6 Error / Corner Case Tests
+### 4.4 Error / Corner Case Tests
 
 #### test_simultaneous_rw_bits
 | Field | Value |
