@@ -35,10 +35,10 @@ SG_FLAGS := -batch \
 # ── Generate resolved flist ──────────────────────────────────────────────────
 # Recursively flatten nested -f includes and convert $(VAR) to ${VAR} so
 # SpyGlass can resolve environment variables.
-$(RESOLVED_FLIST): $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI.flist
+$(RESOLVED_FLIST): $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_SIM.flist
 	@echo "Generating resolved flist for SpyGlass..."
 	@python3 $(SOCLABS_AHB_QSPI_DIR)/cdc/resolve_flist.py \
-		$(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI.flist \
+		$(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_SIM.flist \
 		$(RESOLVED_FLIST)
 
 # ── Default target: run CDC analysis ─────────────────────────────────────────

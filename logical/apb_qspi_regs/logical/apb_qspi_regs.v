@@ -135,10 +135,33 @@ assign QSPI_N_RW_BYTES = reg2[19:16];
 
 assign QSPI_ADDR = reg3[21:0];
 
-assign QSPI_WDATA[31:0] =   {reg8[27:24],reg8[31:28],reg8[19:16],reg8[23:20],reg8[11:8],reg8[15:12],reg8[3:0],reg8[7:4]};
-assign QSPI_WDATA[63:32] =  {reg9[27:24],reg9[31:28],reg9[19:16],reg9[23:20],reg9[11:8],reg9[15:12],reg9[3:0],reg9[7:4]};
-assign QSPI_WDATA[95:64] =  {reg10[27:24],reg10[31:28],reg10[19:16],reg10[23:20],reg10[11:8],reg10[15:12],reg10[3:0],reg10[7:4]};
-assign QSPI_WDATA[127:96] = {reg11[27:24],reg11[31:28],reg11[19:16],reg11[23:20],reg11[11:8],reg11[15:12],reg11[3:0],reg11[7:4]};
+// WDATA byte transformation:
+//   QPI mode  — nibble-swap per byte (compensates for nibble-serial, lower-nibble-first output)
+//   SPI mode  — bit-reversal per byte (compensates for bit-serial, LSB-first output)
+assign QSPI_WDATA[31:0]   = QSPI_QIO_MODE ?
+    {reg8[27:24],reg8[31:28],reg8[19:16],reg8[23:20],reg8[11:8],reg8[15:12],reg8[3:0],reg8[7:4]} :
+    {reg8[24],reg8[25],reg8[26],reg8[27],reg8[28],reg8[29],reg8[30],reg8[31],
+     reg8[16],reg8[17],reg8[18],reg8[19],reg8[20],reg8[21],reg8[22],reg8[23],
+     reg8[8],reg8[9],reg8[10],reg8[11],reg8[12],reg8[13],reg8[14],reg8[15],
+     reg8[0],reg8[1],reg8[2],reg8[3],reg8[4],reg8[5],reg8[6],reg8[7]};
+assign QSPI_WDATA[63:32]  = QSPI_QIO_MODE ?
+    {reg9[27:24],reg9[31:28],reg9[19:16],reg9[23:20],reg9[11:8],reg9[15:12],reg9[3:0],reg9[7:4]} :
+    {reg9[24],reg9[25],reg9[26],reg9[27],reg9[28],reg9[29],reg9[30],reg9[31],
+     reg9[16],reg9[17],reg9[18],reg9[19],reg9[20],reg9[21],reg9[22],reg9[23],
+     reg9[8],reg9[9],reg9[10],reg9[11],reg9[12],reg9[13],reg9[14],reg9[15],
+     reg9[0],reg9[1],reg9[2],reg9[3],reg9[4],reg9[5],reg9[6],reg9[7]};
+assign QSPI_WDATA[95:64]  = QSPI_QIO_MODE ?
+    {reg10[27:24],reg10[31:28],reg10[19:16],reg10[23:20],reg10[11:8],reg10[15:12],reg10[3:0],reg10[7:4]} :
+    {reg10[24],reg10[25],reg10[26],reg10[27],reg10[28],reg10[29],reg10[30],reg10[31],
+     reg10[16],reg10[17],reg10[18],reg10[19],reg10[20],reg10[21],reg10[22],reg10[23],
+     reg10[8],reg10[9],reg10[10],reg10[11],reg10[12],reg10[13],reg10[14],reg10[15],
+     reg10[0],reg10[1],reg10[2],reg10[3],reg10[4],reg10[5],reg10[6],reg10[7]};
+assign QSPI_WDATA[127:96] = QSPI_QIO_MODE ?
+    {reg11[27:24],reg11[31:28],reg11[19:16],reg11[23:20],reg11[11:8],reg11[15:12],reg11[3:0],reg11[7:4]} :
+    {reg11[24],reg11[25],reg11[26],reg11[27],reg11[28],reg11[29],reg11[30],reg11[31],
+     reg11[16],reg11[17],reg11[18],reg11[19],reg11[20],reg11[21],reg11[22],reg11[23],
+     reg11[8],reg11[9],reg11[10],reg11[11],reg11[12],reg11[13],reg11[14],reg11[15],
+     reg11[0],reg11[1],reg11[2],reg11[3],reg11[4],reg11[5],reg11[6],reg11[7]};
 
 assign AHB_QSPI_CMD = reg12[7:0];
 assign AHB_QSPI_DUMMY_CYCLES = reg12[15:12];

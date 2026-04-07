@@ -41,8 +41,12 @@ class ahb_qspi_stress_test extends ahb_qspi_base_test;
     storm_seq.start(env.apb_agt.sequencer);
 
     // Re-init after storm (registers are now random)
-    apb_write(QSPI_CTRL_ADDR, 32'h0);
-    apb_write(QSPI_CLK_DIV_ADDR, 32'h2);
+    // Restore all registers to safe values before attempting QSPI commands
+    apb_write(QSPI_SPI_CMD_ADDR, 32'h0);  // Clear any pending command
+    apb_write(QSPI_CTRL_ADDR, 32'h0);     // Clear QIO_MODE, XIP_ACTIVE
+    apb_write(QSPI_CLK_DIV_ADDR, 32'h5);  // Safe clock divider
+    apb_write(QSPI_STATUS_ADDR, (1 << STATUS_IRQ_CLR_BIT));  // Clear IRQ
+    wait_clks(100);  // Allow any in-flight transaction to complete
 
     // Verify controller still works after storm
     begin

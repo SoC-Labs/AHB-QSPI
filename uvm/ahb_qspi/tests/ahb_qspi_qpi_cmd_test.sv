@@ -32,9 +32,10 @@ class ahb_qspi_qpi_cmd_test extends ahb_qspi_base_test;
     `uvm_info("QPI_TEST", "=== QPI JEDEC ID ===", UVM_LOW)
     // ---------------------------------------------------------------
     cmd = qspi_cmd_sequence::type_id::create("qjedec");
-    cmd.opcode     = SPI_OP_QUAD_JEDEC_ID;
-    cmd.do_read    = 1;
-    cmd.n_rw_bytes = 4'h2;  // 3 bytes
+    cmd.opcode       = SPI_OP_QUAD_JEDEC_ID;
+    cmd.do_read      = 1;
+    cmd.n_rw_bytes   = 4'h2;  // 3 bytes
+    cmd.dummy_cycles = 4'h2;  // QPI JEDEC requires 2 dummy cycles
     cmd.start(env.apb_agt.sequencer);
 
     env.scoreboard.check_reg_value("QPI JEDEC ID", cmd.rdata[0], FLASH_JEDEC_RDATA0);

@@ -25,14 +25,18 @@ class ahb_qspi_irq_test extends ahb_qspi_base_test;
     init_seq = qspi_init_sequence::type_id::create("init");
     init_seq.start(env.apb_agt.sequencer);
 
+    // Ensure IRQ is clear after init (init commands may leave it set)
+    apb_write(QSPI_STATUS_ADDR, (1 << STATUS_IRQ_CLR_BIT));
+    wait_clks(10);
+
     // ---------------------------------------------------------------
     `uvm_info("IRQ_TEST", "=== IRQ on Command Complete ===", UVM_LOW)
     // ---------------------------------------------------------------
 
-    // Verify IRQ is initially low
+    // Verify IRQ is low after explicit clear
     @(ahb_vif.drv_cb);
     if (ahb_vif.drv_cb.irq_qspi_finished !== 1'b0)
-      `uvm_error("IRQ_TEST", "IRQ should be low before any command")
+      `uvm_error("IRQ_TEST", "IRQ should be low after explicit clear")
 
     // Issue JEDEC ID command manually (two-phase, no auto IRQ clear)
     begin
