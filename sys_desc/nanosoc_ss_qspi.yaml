@@ -1,0 +1,87 @@
+#-----------------------------------------------------------------------------
+# NanoSoC QSPI Flash Subsystem Module
+# A joint work commissioned on behalf of SoC Labs, under Arm Academic Access license.
+#
+# Contributors
+#
+# Daniel Newbrook (d.newbrook@soton.ac.uk)
+# David Mapstone (d.a.mapstone@soton.ac.uk)
+#
+# Copyright 2021-2026, SoC Labs (www.soclabs.org)
+#-----------------------------------------------------------------------------
+# Derived from RTL: logical/top_ahb_qspi/logical/top_ahb_qspi.v
+#
+# QSPI flash subsystem providing:
+#   - AHB slave port for memory-mapped flash reads (XIP-capable via Arm CG092 cache)
+#   - APB slave port for QSPI controller configuration registers
+#   - SPI/Quad-SPI pad interface with configurable clock divider
+#
+# The memory-mapped AHB port translates read accesses into QSPI read commands
+# via an integrated flash cache (Arm CG092). Write accesses to flash are
+# performed via the APB control registers (command-based programming).
+#
+# Internal architecture:
+#                                              +-> apb_qspi_regs (QSPI ctrl)
+#   APB Slave --> cmsdk_apb_slave_mux -------->|
+#                                              +-> cache_subsystem APB (CG092 cfg)
+#
+#   AHB Slave --> cache_subsystem --> ahb_qspi_interface --> qspi_controller_mux --> qspi_controller
+#                                                                  ^
+#                                            apb_qspi_regs -------+
+#
+# Internal APB address map (from APB slave port):
+#   0x0000 - 0x0FFF   QSPI controller registers (apb_qspi_regs)
+#   0x1000 - 0x1FFF   Flash cache configuration (Arm CG092)
+
+module:
+  name: nanosoc_ss_qspi
+  gen: False
+  desc: >
+    QSPI flash subsystem with AHB memory-mapped read interface and APB
+    control register interface. Integrates an Arm CG092 flash cache for
+    XIP performance. Supports Standard SPI and Quad-SPI modes with
+    configurable clock divider. The AHB port provides memory-mapped
+    read-only access for boot image loading and execute-in-place (XIP).
+    Flash programming and erase operations are performed via APB register
+    commands. An internal mux arbitrates between AHB (XIP) and APB
+    (direct) QSPI access based on the XIP_ACTIVE configuration bit.
+
+  params:
+    SYS_ADDR_W:  { type: int, default: 32, desc: "System address width" }
+    SYS_DATA_W:  { type: int, default: 32, desc: "System data width" }
+    APB_ADDR_W:  { type: int, default: 12, desc: "APB address width" }
+    APB_DATA_W:  { type: int, default: 32, desc: "APB data width" }
+    QSPI_ADDR_W: { type: int, default: 22, desc: "Flash address width (phys = 2^N bytes, default 4 MB)" }
+
+  interfaces:
+    # Clocks and Resets
+    - { name: HCLK,    type: wire, direction: in, params: { WIDTH: 1 }, desc: "AHB clock" }
+    - { name: HRESETn, type: wire, direction: in, params: { WIDTH: 1 }, desc: "AHB reset (active low)" }
+
+    # AHB slave port — memory-mapped flash reads (via CG092 cache)
+    - { name: ahb_slave, type: ahb, direction: target, params: { ADDR_WIDTH: $SYS_ADDR_W, DATA_WIDTH: $SYS_DATA_W }, desc: "AHB slave port for memory-mapped flash access (read-only, cached)" }
+
+    # APB slave port — QSPI controller configuration registers
+    - { name: QSPI_PSEL,    type: wire, direction: in,  params: { WIDTH: 1 },          desc: "APB peripheral select" }
+    - { name: QSPI_PADDR,   type: wire, direction: in,  params: { WIDTH: 10 },         desc: "APB address (word-aligned, bits [11:2])" }
+    - { name: QSPI_PENABLE, type: wire, direction: in,  params: { WIDTH: 1 },          desc: "APB enable" }
+    - { name: QSPI_PWRITE,  type: wire, direction: in,  params: { WIDTH: 1 },          desc: "APB write" }
+    - { name: QSPI_PWDATA,  type: wire, direction: in,  params: { WIDTH: $APB_DATA_W }, desc: "APB write data" }
+    - { name: QSPI_PRDATA,  type: wire, direction: out, params: { WIDTH: $APB_DATA_W }, desc: "APB read data" }
+    - { name: QSPI_PREADY,  type: wire, direction: out, params: { WIDTH: 1 },          desc: "APB ready" }
+    - { name: QSPI_PSLVERR, type: wire, direction: out, params: { WIDTH: 1 },          desc: "APB slave error" }
+
+    # QSPI pad signals
+    - { name: qspi_sclk,  type: wire, direction: out,   params: { WIDTH: 1 }, desc: "QSPI serial clock" }
+    - { name: qspi_csn,   type: wire, direction: out,   params: { WIDTH: 1 }, desc: "QSPI chip select (active low)" }
+    - { name: qspi_io_o,  type: wire, direction: out,   params: { WIDTH: 4 }, desc: "QSPI data output (IO[3:0])" }
+    - { name: qspi_io_i,  type: wire, direction: in,    params: { WIDTH: 4 }, desc: "QSPI data input (IO[3:0])" }
+    - { name: qspi_io_oe, type: wire, direction: out,   params: { WIDTH: 4 }, desc: "QSPI data output enable (IO[3:0])" }
+
+    # Interrupt
+    - { name: irq_qspi_finished, type: wire, direction: out, params: { WIDTH: 1 }, desc: "QSPI transaction finished interrupt" }
+
+  register_maps:
+    - name: apb_qspi_regs
+      base_offset: 0x0000
+      description: QSPI controller registers (command, status, data, clock config)

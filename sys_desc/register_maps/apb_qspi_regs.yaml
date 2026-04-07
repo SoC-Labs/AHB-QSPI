@@ -1,0 +1,265 @@
+#-----------------------------------------------------------------------------
+# AHB QSPI Controller Register Map
+# A joint work commissioned on behalf of SoC Labs, under Arm Academic Access license.
+#
+# Contributors
+#
+# Daniel Newbrook (d.newbrook@soton.ac.uk)
+# David Mapstone (d.a.mapstone@soton.ac.uk)
+#
+# Copyright 2021-2026, SoC Labs (www.soclabs.org)
+#-----------------------------------------------------------------------------
+# Derived from RTL: logical/apb_qspi_regs/logical/apb_qspi_regs.v
+#                   src/rdl/apb_qspi_regs.rdl
+#
+# APB register interface for the QSPI flash controller. Provides command-based
+# access for flash programming/erase, JEDEC ID reading, status polling, XIP
+# configuration, and clock divider control. Memory-mapped reads are handled by
+# the AHB port via the CG092 cache and do not require register interaction.
+#
+# Note: Data registers use nibble-swapped byte ordering for SPI compatibility.
+# Read data (RDATA0-3) is byte-swapped on readback. Write data (WDATA0-3) is
+# nibble-swapped before being sent to the QSPI controller.
+
+register_map:
+  name: apb_qspi_regs
+  module: apb_qspi_regs
+  gen: False
+  description: >
+    QSPI flash controller registers. Provides command-based access for flash
+    programming/erase, JEDEC ID reading, status polling, and configuration
+    of SPI mode, clock divider, and XIP (execute-in-place) settings. The
+    AHB interface configuration (opcode, dummy cycles) for memory-mapped
+    reads is also set via these registers.
+  address_width: 12
+  data_width: 32
+
+  identification:
+    pidr0: 0x59
+    pidr1: 0x16
+    pidr2: 0x15
+    pidr3: 0x00
+    pidr4: 0x00
+    cidr0: 0x50
+    cidr1: 0x51
+    cidr2: 0x4C
+    cidr3: 0x53
+
+  registers:
+    - name: QSPI_CTRL
+      offset: 0x000
+      width: 32
+      access: RW
+      reset_value: 0x00000000
+      description: QSPI controller control register
+      fields:
+        - name: QIO_MODE
+          bits: "0"
+          access: RW
+          reset_value: 0
+          description: Quad I/O mode enable (1=quad 4-bit, 0=standard 1-bit SPI)
+        - name: XIP_ACTIVE
+          bits: "8"
+          access: RW
+          reset_value: 0
+          description: >
+            Execute-in-place mode enable. When set, the AHB interface has
+            priority on the QSPI bus for memory-mapped flash reads. APB
+            command access is blocked while XIP is active.
+        - name: MODE_CODE
+          bits: "23:16"
+          access: RW
+          reset_value: 0x00
+          description: >
+            Mode code byte sent after address phase during continuous read.
+            Used to keep the flash in continuous read mode between
+            transactions (device-specific, e.g. 0xA0 for some Microchip parts).
+        - name: CONT_READ
+          bits: "24"
+          access: RW
+          reset_value: 0
+          description: >
+            Continuous read enable. When set, the mode code byte is sent
+            after the address phase to maintain continuous read mode.
+        - name: NO_CMD
+          bits: "25"
+          access: RW
+          reset_value: 0
+          description: >
+            Suppress command opcode. When set, the opcode phase is skipped
+            (used in continuous read mode after the first transaction).
+
+    - name: QSPI_STATUS
+      offset: 0x004
+      width: 32
+      access: RW
+      reset_value: 0x00000000
+      description: QSPI controller status register
+      fields:
+        - name: BUSY
+          bits: "0"
+          access: RO
+          description: QSPI transaction in progress (active while nCS is asserted)
+        - name: IRQ_CLR
+          bits: "8"
+          access: W1C
+          reset_value: 0
+          description: Write 1 to clear the QSPI finished interrupt
+
+    - name: QSPI_SPI_CMD
+      offset: 0x008
+      width: 32
+      access: RW
+      reset_value: 0x00000000
+      description: >
+        SPI command register — configures and triggers a QSPI transaction.
+        Writing ENABLE=1 starts the transaction; it auto-clears on
+        acknowledgement from the controller.
+      fields:
+        - name: CMD
+          bits: "7:0"
+          access: RW
+          reset_value: 0x00
+          description: >
+            SPI command opcode (e.g. 0x03=Read, 0x0B=Fast Read, 0x02=Page
+            Program, 0x9F=JEDEC ID, 0x66=RSTEN, 0x99=RST, 0x38=EQIO)
+        - name: ENABLE
+          bits: "8"
+          access: RW
+          reset_value: 0
+          description: >
+            Write 1 to start command execution. Auto-clears when the
+            controller acknowledges the command.
+        - name: READ
+          bits: "9"
+          access: RW
+          reset_value: 0
+          description: Enable data read phase (controller reads N_RW_BYTES from flash)
+        - name: WRITE
+          bits: "10"
+          access: RW
+          reset_value: 0
+          description: Enable data write phase (controller writes N_RW_BYTES to flash)
+        - name: ADDR_EN
+          bits: "11"
+          access: RW
+          reset_value: 0
+          description: Enable address phase (3-byte address from QSPI_ADDR register)
+        - name: DUMMY_CYCLES
+          bits: "15:12"
+          access: RW
+          reset_value: 0
+          description: Number of dummy clock cycles between address and data phases (0-15)
+        - name: N_RW_BYTES
+          bits: "19:16"
+          access: RW
+          reset_value: 0
+          description: >
+            Number of data bytes to read or write (0-15, where 0 means 16 bytes).
+            Maximum 16 bytes (128 bits) per transaction.
+
+    - name: QSPI_ADDR
+      offset: 0x00C
+      width: 32
+      access: RW
+      reset_value: 0x00000000
+      description: Flash address register for command-based transfers
+      fields:
+        - name: ADDR
+          bits: "21:0"
+          access: RW
+          reset_value: 0
+          description: Flash byte address (22-bit, supporting up to 4 MB)
+
+    - name: QSPI_RDATA0
+      offset: 0x010
+      width: 32
+      access: RO
+      description: >
+        Read data register 0 (bytes 0-3). Data is byte-swapped on readback
+        for little-endian host access.
+
+    - name: QSPI_RDATA1
+      offset: 0x014
+      width: 32
+      access: RO
+      description: Read data register 1 (bytes 4-7). Byte-swapped on readback.
+
+    - name: QSPI_RDATA2
+      offset: 0x018
+      width: 32
+      access: RO
+      description: Read data register 2 (bytes 8-11). Byte-swapped on readback.
+
+    - name: QSPI_RDATA3
+      offset: 0x01C
+      width: 32
+      access: RO
+      description: Read data register 3 (bytes 12-15). Byte-swapped on readback.
+
+    - name: QSPI_WDATA0
+      offset: 0x020
+      width: 32
+      access: RW
+      reset_value: 0x00000000
+      description: >
+        Write data register 0 (bytes 0-3). Data is nibble-swapped before
+        being sent to the QSPI controller for SPI wire ordering.
+
+    - name: QSPI_WDATA1
+      offset: 0x024
+      width: 32
+      access: RW
+      reset_value: 0x00000000
+      description: Write data register 1 (bytes 4-7). Nibble-swapped.
+
+    - name: QSPI_WDATA2
+      offset: 0x028
+      width: 32
+      access: RW
+      reset_value: 0x00000000
+      description: Write data register 2 (bytes 8-11). Nibble-swapped.
+
+    - name: QSPI_WDATA3
+      offset: 0x02C
+      width: 32
+      access: RW
+      reset_value: 0x00000000
+      description: Write data register 3 (bytes 12-15). Nibble-swapped.
+
+    - name: QSPI_AHB_SETUP
+      offset: 0x030
+      width: 32
+      access: RW
+      reset_value: 0x00000000
+      description: >
+        AHB interface SPI configuration. Sets the opcode and dummy cycle
+        count used for memory-mapped reads via the AHB/cache path.
+      fields:
+        - name: AHB_CMD
+          bits: "7:0"
+          access: RW
+          reset_value: 0x00
+          description: >
+            SPI command opcode for AHB memory-mapped reads (e.g. 0x0B=Fast
+            Read, 0x6B=Quad Output Fast Read)
+        - name: AHB_DUMMY_CYCLES
+          bits: "15:12"
+          access: RW
+          reset_value: 0
+          description: Number of dummy clock cycles for AHB read commands (0-15)
+
+    - name: QSPI_CLK_DIV
+      offset: 0x034
+      width: 32
+      access: RW
+      reset_value: 0x00000001
+      description: Clock divider register (SCLK = HCLK / (2 * CLK_DIV))
+      fields:
+        - name: CLK_DIV
+          bits: "4:0"
+          access: RW
+          reset_value: 1
+          description: >
+            Clock divider value (1-31). QSPI serial clock frequency is
+            HCLK / (2 * CLK_DIV). Default 1 gives HCLK/2.

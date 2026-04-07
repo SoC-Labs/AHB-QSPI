@@ -101,6 +101,16 @@ for the CG092 register please see documentation from Arm.
         \hline
         Write Data 3 & 0x002C \\
         \hline
+        AHB SPI Setup & 0x0030 \\
+        \hline
+        Clock Divider & 0x0034 \\
+        \hline
+        Peripheral ID 4-7 & 0x0FD0-0x0FDC \\
+        \hline
+        Peripheral ID 0-3 & 0x0FE0-0x0FEC \\
+        \hline
+        Component ID 0-3 & 0x0FF0-0x0FFC \\
+        \hline
         CG092 Cache control & 0x1000-0x1FFF \\
         \hline
     \end{tabular}
@@ -135,10 +145,12 @@ for the CG092 register please see documentation from Arm.
     \label{address-map}
     \begin{tabular}{||c | c ||}
         \hline
-        Bits & Function \\ 
+        Bits & Function \\
         \hline\hline
-        0 & QSPI Busy \\
-        \hline 
+        0 & QSPI Busy (read-only) \\
+        \hline
+        8 & IRQ Clear (write 1 to clear QSPI finished interrupt) \\
+        \hline
     \end{tabular}
 \end{center}
 \end{table}
@@ -182,6 +194,37 @@ for the CG092 register please see documentation from Arm.
     \end{tabular}
 \end{center}
 \end{table}
+
+\begin{table}[!h]
+    \begin{center}
+    \caption{AHB SPI Setup Register Bits (0x0030)}
+    \begin{tabular}{||c | c ||}
+        \hline
+        Bits & Function \\
+        \hline\hline
+        0-7 & AHB QSPI Command (opcode for XiP reads) \\
+        \hline
+        12-15 & AHB Dummy Cycles (N-1) \\
+        \hline
+    \end{tabular}
+\end{center}
+\end{table}
+
+\begin{table}[!h]
+    \begin{center}
+    \caption{Clock Divider Register Bits (0x0034)}
+    \begin{tabular}{||c | c ||}
+        \hline
+        Bits & Function \\
+        \hline\hline
+        0-4 & QSPI Clock Divider (SCLK = HCLK / 2N, default=1) \\
+        \hline
+    \end{tabular}
+\end{center}
+\end{table}
+
+\section{Interrupts}
+The QSPI controller provides a single interrupt output (\texttt{IRQ\_QSPI\_FINISHED}) which is asserted on the falling edge of the QSPI busy signal (i.e. when a QSPI transaction completes). To clear the interrupt, write a 1 to bit 8 of the Status Register (0x0004).
 
 \section{Setting XiP Mode}
 Typical flow for entering XiP

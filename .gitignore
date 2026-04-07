@@ -40,3 +40,5 @@ docs/tex/*.out
 docs/tex/*.toc
  
 imp
+
+.vscode
