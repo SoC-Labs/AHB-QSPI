@@ -8,11 +8,14 @@ SPYGLASS      := $(SPYGLASS_HOME)/bin/spyglass
 MODULE ?= top_ahb_qspi
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-export FLIST  := $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI.flist
-export SGDC   := $(SOCLABS_AHB_QSPI_DIR)/cdc/top_ahb_qspi.sgdc
-export SWL    := $(SOCLABS_AHB_QSPI_DIR)/cdc/waiver.swl
-export SG_TOP := $(MODULE)
-PRJ           := $(SOCLABS_AHB_QSPI_DIR)/cdc/top_ahb_qspi.prj
+# SpyGlass cannot resolve $(VAR) syntax in flists. We generate a resolved
+# flat flist with ${VAR} syntax that SpyGlass can process.
+RESOLVED_FLIST := $(SOCLABS_AHB_QSPI_DIR)/cdc/resolved.flist
+export FLIST   := $(RESOLVED_FLIST)
+export SGDC    := $(SOCLABS_AHB_QSPI_DIR)/cdc/top_ahb_qspi.sgdc
+export SWL     := $(SOCLABS_AHB_QSPI_DIR)/cdc/waiver.swl
+export SG_TOP  := $(MODULE)
+PRJ            := $(SOCLABS_AHB_QSPI_DIR)/cdc/top_ahb_qspi.prj
 
 # SpyGlass output directory
 SG_WORK := $(MODULE)
@@ -29,8 +32,17 @@ SG_FLAGS := -batch \
 
 .PHONY: cdc cdc-report clean help
 
+# ── Generate resolved flist ──────────────────────────────────────────────────
+# Recursively flatten nested -f includes and convert $(VAR) to ${VAR} so
+# SpyGlass can resolve environment variables.
+$(RESOLVED_FLIST): $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI.flist
+	@echo "Generating resolved flist for SpyGlass..."
+	@python3 $(SOCLABS_AHB_QSPI_DIR)/cdc/resolve_flist.py \
+		$(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI.flist \
+		$(RESOLVED_FLIST)
+
 # ── Default target: run CDC analysis ─────────────────────────────────────────
-cdc:
+cdc: $(RESOLVED_FLIST)
 	@echo "══════════════════════════════════════════════════════════"
 	@echo "  SpyGlass CDC: $(MODULE)"
 	@echo "══════════════════════════════════════════════════════════"
@@ -68,7 +80,7 @@ cdc-report:
 # ── Clean ────────────────────────────────────────────────────────────────────
 clean:
 	rm -rf *_spyglass $(MODULE) *_cdc_summary.rpt *_cdc_detail.rpt \
-	       spyglass_output spyglass.log sg_shell.log
+	       spyglass_output spyglass.log sg_shell.log resolved.flist
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 help:

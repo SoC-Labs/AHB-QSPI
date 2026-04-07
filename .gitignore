@@ -52,7 +52,9 @@ cdc/*_cdc_detail.rpt
 cdc/spyglass_output/
 cdc/spyglass.log
 cdc/sg_shell.log
+cdc/resolved.flist
 
 uvm/ahb_qspi/sim_build
 uvm/ahb_qspi/csrc
 vc_hdrs.h
+uvm/ahb_qspi/xprop.log
