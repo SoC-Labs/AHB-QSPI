@@ -42,3 +42,4 @@ docs/tex/*.toc
 imp
 
 .vscode
+asic/TSMC*nm/work

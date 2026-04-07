@@ -76,6 +76,8 @@ end
 
 // FSM:Next state decision tree
 always_comb begin
+    next_state = IDLE;
+    QSPI_ENABLE_ACK = 1'b0;
     case(current_state)
         IDLE: begin
             if(QSPI_enable_sync==1'b1 && QSPI_NO_CMD==1'b0) begin
@@ -85,9 +87,6 @@ always_comb begin
                     next_state = NO_FETCH;
                 else
                     next_state = ADDR;
-            end else begin
-                next_state = IDLE;
-                QSPI_ENABLE_ACK = 1'b0;
             end
             //op_counter=3'h0;
         end
@@ -135,7 +134,6 @@ always_comb begin
             // Next state decision from ADDR if in QPI mode
             if(QSPI_QIO_MODE==1'b1 & addr_counter==5'h05) begin
                 QSPI_ENABLE_ACK = 1'b0;
-                last_QSPI_ADDR = QSPI_ADDR;
                 if(QSPI_CONT_READ)
                     next_state = MODE;
                 else if(QSPI_DUMMY_CYCLES!=4'h0)
@@ -318,6 +316,7 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
         addr_counter <= 5'h00;
         mode_counter <= 1'b1;
         data_in_reg <= 128'd0;
+        last_QSPI_ADDR <= 22'd0;
     end else begin
         if(current_state==OP) begin
             data_in_reg <= 128'd0;
@@ -348,6 +347,8 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
 
         if(current_state == ADDR) begin
             addr_counter <= addr_counter + 1;
+            if(next_state != ADDR)
+                last_QSPI_ADDR <= QSPI_ADDR;
         end else begin
             addr_counter <= 5'h00;
         end
@@ -371,31 +372,27 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     end
 end
 
-// RDATA latch
+// RDATA output — purely combinational, no latch
 always_comb begin
-    if(~HRESETn) begin
-        QSPI_RDATA = 128'd0;
-    end else if(QSPI_nCS) begin
-        case(QSPI_N_RW_BYTES)
-            4'h0:   QSPI_RDATA = {{120{1'b0}}, data_in_reg[7:0 ]};
-            4'h1:   QSPI_RDATA = {{112{1'b0}}, data_in_reg[15:0]};
-            4'h2:   QSPI_RDATA = {{104{1'b0}}, data_in_reg[23:0]};
-            4'h3:   QSPI_RDATA = {{96{1'b0}},  data_in_reg[31:0]};
-            4'h4:   QSPI_RDATA = {{88{1'b0}},  data_in_reg[31:0], data_in_reg[39:32]};
-            4'h5:   QSPI_RDATA = {{80{1'b0}},  data_in_reg[31:0], data_in_reg[47:32]};
-            4'h6:   QSPI_RDATA = {{72{1'b0}},  data_in_reg[31:0], data_in_reg[55:32]};
-            4'h7:   QSPI_RDATA = {{64{1'b0}},  data_in_reg[31:0], data_in_reg[63:32]};
-            4'h8:   QSPI_RDATA = {{56{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[71:64]};
-            4'h9:   QSPI_RDATA = {{48{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[79:64]};
-            4'hA:   QSPI_RDATA = {{40{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[87:64]};
-            4'hB:   QSPI_RDATA = {{32{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64]};
-            4'hC:   QSPI_RDATA = {{24{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[103:96]};
-            4'hD:   QSPI_RDATA = {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
-            4'hE:   QSPI_RDATA = {{8{1'b0}},   data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
-            4'hF:   QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
-            default: QSPI_RDATA = 128'd0;
-        endcase
-    end
+    case(QSPI_N_RW_BYTES)
+        4'h0:   QSPI_RDATA = {{120{1'b0}}, data_in_reg[7:0 ]};
+        4'h1:   QSPI_RDATA = {{112{1'b0}}, data_in_reg[15:0]};
+        4'h2:   QSPI_RDATA = {{104{1'b0}}, data_in_reg[23:0]};
+        4'h3:   QSPI_RDATA = {{96{1'b0}},  data_in_reg[31:0]};
+        4'h4:   QSPI_RDATA = {{88{1'b0}},  data_in_reg[31:0], data_in_reg[39:32]};
+        4'h5:   QSPI_RDATA = {{80{1'b0}},  data_in_reg[31:0], data_in_reg[47:32]};
+        4'h6:   QSPI_RDATA = {{72{1'b0}},  data_in_reg[31:0], data_in_reg[55:32]};
+        4'h7:   QSPI_RDATA = {{64{1'b0}},  data_in_reg[31:0], data_in_reg[63:32]};
+        4'h8:   QSPI_RDATA = {{56{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[71:64]};
+        4'h9:   QSPI_RDATA = {{48{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[79:64]};
+        4'hA:   QSPI_RDATA = {{40{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[87:64]};
+        4'hB:   QSPI_RDATA = {{32{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64]};
+        4'hC:   QSPI_RDATA = {{24{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[103:96]};
+        4'hD:   QSPI_RDATA = {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
+        4'hE:   QSPI_RDATA = {{8{1'b0}},   data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
+        4'hF:   QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
+        default: QSPI_RDATA = 128'd0;
+    endcase
 end
 
 assign QSPI_nCS = ((QSPI_enable_sync==1'b1) ||(current_state!=IDLE) || (QSPI_SCLK_e==1'b1))?1'b0:1'b1;
