@@ -147,42 +147,41 @@ assign QSPI_CLK_DIV = reg13;
 
 always @(posedge PCLK or negedge PRESETn) begin
     if(~PRESETn) begin
-        reg0 = 32'd0;
-        reg1 = 32'd0;
-        reg2 = 32'd0;
-        reg3 = 32'd0;
-        reg8 = 32'd0;
-        reg9 = 32'd0;
-        reg10 = 32'd0;
-        reg11 = 32'd0;
-        reg12 = 32'd0;
-        reg13 = 5'h01;
+        reg0 <= 32'd0;
+        reg1 <= 32'd0;
+        reg2 <= 32'd0;
+        reg3 <= 32'd0;
+        reg8 <= 32'd0;
+        reg9 <= 32'd0;
+        reg10 <= 32'd0;
+        reg11 <= 32'd0;
+        reg12 <= 32'd0;
+        reg13 <= 5'h01;
     end else begin
         if(PSEL & PENABLE & PWRITE) begin
             case(PADDR)
-                10'h000: reg0 = PWDATA;
-                10'h001: reg1[31:1] = PWDATA[31:1];
-                10'h002: reg2 = PWDATA;
-                10'h003: reg3 = PWDATA;
-                10'h008: reg8 = PWDATA;
-                10'h009: reg9 = PWDATA;
-                10'h00A: reg10 = PWDATA;
-                10'h00B: reg11 = PWDATA;
-                10'h00C: reg12 = PWDATA;
-                10'h00D: reg13 = PWDATA[4:0];
+                10'h000: reg0 <= PWDATA;
+                10'h001: reg1[31:1] <= PWDATA[31:1];
+                10'h002: reg2 <= PWDATA;
+                10'h003: reg3 <= PWDATA;
+                10'h008: reg8 <= PWDATA;
+                10'h009: reg9 <= PWDATA;
+                10'h00A: reg10 <= PWDATA;
+                10'h00B: reg11 <= PWDATA;
+                10'h00C: reg12 <= PWDATA;
+                10'h00D: reg13 <= PWDATA[4:0];
             endcase
         end
         if(qspi_enable_ack_sync)
-            reg2[8]=1'b0;
+            reg2[8] <= 1'b0;
         if(reg1[8] & (~qspi_finished))
-            reg1[8]=1'b0;
-        reg1[0] = qspi_busy_sync;
+            reg1[8] <= 1'b0;
+        reg1[0] <= qspi_busy_sync;
     end
 end
 
-always @(PCLK, PADDR, QSPI_RDATA, reg0, reg1, reg2, reg3, reg8, reg9, reg10, reg11, reg12, reg13) begin
-    if(PCLK) begin
-        case(PADDR)
+always @(*) begin
+    case(PADDR)
             10'h000: PRDATA = reg0;
             10'h001: PRDATA = reg1;
             10'h002: PRDATA = reg2;
@@ -210,8 +209,7 @@ always @(PCLK, PADDR, QSPI_RDATA, reg0, reg1, reg2, reg3, reg8, reg9, reg10, reg
             10'h3FE: PRDATA = {24'd0, CIDR2};
             10'h3FF: PRDATA = {24'd0, CIDR3};
             default: PRDATA = 32'hDEADCAFE;
-        endcase
-    end
+    endcase
 end
 
 assign PREADY =  1'b1; //(PSEL & PENABLE & PWRITE) | (PSEL & ~PWRITE);
