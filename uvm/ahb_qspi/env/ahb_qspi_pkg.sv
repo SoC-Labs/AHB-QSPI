@@ -166,6 +166,8 @@ package ahb_qspi_pkg;
   `include "qspi_init_sequence.sv"
   `include "qspi_xip_sequence.sv"
   `include "qspi_stress_sequence.sv"
+  `include "qspi_data_integrity_sequence.sv"
+  `include "qspi_corner_case_sequence.sv"
 
   // Tests
   `include "ahb_qspi_base_test.sv"
@@ -179,6 +181,12 @@ package ahb_qspi_pkg;
   `include "ahb_qspi_arb_test.sv"
   `include "ahb_qspi_reset_test.sv"
   `include "ahb_qspi_stress_test.sv"
+  `include "ahb_qspi_data_integrity_test.sv"
+  `include "ahb_qspi_corner_case_test.sv"
+  `include "ahb_qspi_rdata_readonly_test.sv"
+  `include "ahb_qspi_xip_stress_test.sv"
+  `include "ahb_qspi_reset_recovery_test.sv"
+  `include "ahb_qspi_debug_test.sv"
 
 endpackage
 

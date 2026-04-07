@@ -269,34 +269,155 @@ This verification plan covers the cocotb-based functional verification of the AH
 
 ---
 
-## 4. Proposed Tests (Not Yet Implemented)
+## 4. Additional Bug-Hunting Tests (Implemented)
 
-### 4.1 Remaining Register Tests
+### 4.1 Register Corner Cases
 
 #### test_rdata_regs_readonly
 | Field | Value |
 |-------|-------|
-| **Priority** | Medium |
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
 | **Feature** | Read data register write protection |
-| **Description** | Attempt to write to REG4-7, verify they are unaffected (read-only). |
+| **Description** | Attempts to write 0xDEADBEEF to REG4-7 (RDATA), verifies they remain 0 (read-only). |
+| **Assertions** | 4 |
+| **Coverage** | Register write protection |
 
-### 4.2 Remaining QSPI Protocol Tests
+### 4.2 Data Integrity
 
-#### test_vary_dummy_cycles
+#### test_data_pattern_integrity
 | Field | Value |
 |-------|-------|
-| **Priority** | Medium |
-| **Feature** | Dummy cycle sweep |
-| **Description** | Sweep QSPI_DUMMY_CYCLES from 1-15 with read operations, verify correct protocol timing and data. |
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | Data pattern sweep for bit-stuck/swap detection |
+| **Description** | Programs and verifies 8 patterns: all-zeros, all-ones, alternating 0xAA, alternating 0x55, walking-1, walking-0, byte-ramp, nibble-swap. |
+| **Assertions** | 8 pattern comparisons |
+| **Coverage** | Bit-level data integrity, nibble/byte ordering |
 
-#### test_spi_continuous_read
+#### test_multiword_program_sizes
 | Field | Value |
 |-------|-------|
-| **Priority** | Medium |
-| **Feature** | SPI mode continuous read |
-| **Description** | Currently MODE state in SPI mode immediately exits to IDLE (line 178-179 of qspi_controller.sv). Verify this behavior and that data can still be read. |
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | Program 1, 2, 3, 4 words independently |
+| **Description** | Programs each word count at a different address, reads back and verifies each independently. |
+| **Assertions** | 4 |
+| **Coverage** | N_RW_BYTES for write operations |
 
-### 4.3 Remaining AHB/Cache Tests
+#### test_spi_qpi_data_consistency
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | Cross-mode data consistency |
+| **Description** | Programs data in QPI mode, reads back in both QPI and SPI modes, verifies identical results. |
+| **Assertions** | 3 (QPI match, SPI match, cross-match) |
+| **Coverage** | SPI vs QPI data path consistency |
+
+### 4.3 Protocol Stress / Corner Cases
+
+#### test_back_to_back_commands
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | Handshake stress under rapid commands |
+| **Description** | Issues 50 consecutive reads without extra delay, verifying data each time. Stresses ENABLE/ENABLE_ACK handshake. |
+| **Assertions** | 50 data comparisons |
+| **Coverage** | ENABLE_ACK handshake timing |
+
+#### test_enable_while_busy
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | Double-enable protection |
+| **Description** | Starts a slow read (CLK_DIV=0x1F), then issues a second ENABLE while the controller is busy. Verifies the controller does not hang or corrupt data. |
+| **Assertions** | 1 completion check |
+| **Coverage** | ENABLE contention handling |
+
+#### test_simultaneous_rw_bits
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | Invalid R+W configuration |
+| **Description** | Sets both QSPI_READ=1 and QSPI_WRITE=1 simultaneously. Verifies controller completes without hanging. |
+| **Assertions** | 1 busy-clear check |
+| **Coverage** | FSM behavior with invalid config |
+
+#### test_address_boundary
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | Address boundary reads/writes |
+| **Description** | Programs and reads at address 0x000000 and near-max address 0x3FFF00, verifying correct operation at 22-bit address boundaries. |
+| **Assertions** | 2 data comparisons |
+| **Coverage** | Address field boundary values |
+
+### 4.4 Reset and Recovery
+
+#### test_reset_during_transaction
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | Reset recovery from active transaction |
+| **Description** | Starts a slow 16-byte read, asserts reset mid-transaction, verifies registers return to defaults and controller is operational post-reset. |
+| **Assertions** | 4 (busy, reg0, clk_div, JEDEC) |
+| **Coverage** | FSM reset recovery, register defaults |
+
+### 4.5 AHB/XIP
+
+#### test_xip_multiple_addresses
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | XIP reads across scattered addresses |
+| **Description** | Programs 4 pages at different addresses, reads all via AHB XIP with cache, then re-reads in reverse order to exercise cache hits/misses. |
+| **Assertions** | 20 (16 forward + 4 reverse) |
+| **Coverage** | XIP multi-address, cache thrashing |
+
+### 4.6 Clock and Mode
+
+#### test_clock_div_zero_bypass
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | CLK_DIV=0 bypass mode |
+| **Description** | Sets CLK_DIV=0 (QSPI_SCLK=HCLK, no division) and issues a JEDEC ID read. Verifies the controller operates at maximum speed. |
+| **Assertions** | 1 completion check |
+| **Coverage** | Clock divider bypass path |
+
+#### test_continuous_read_to_normal
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | Continuous read mode transitions |
+| **Description** | Transitions between normal read, continuous read, NO_CMD mode, and back to normal. Verifies correct data at each step. |
+| **Assertions** | 4 data comparisons |
+| **Coverage** | CONT_READ, NO_CMD, NO_FETCH path transitions |
+
+### 4.7 Interrupt
+
+#### test_irq_multiple_commands
+| Field | Value |
+|-------|-------|
+| **Status** | Implemented |
+| **File** | `ahb_qspi_tests.py` |
+| **Feature** | IRQ across sequential commands |
+| **Description** | Issues 10 JEDEC ID reads, verifying IRQ assertion and clearing after each. Checks for spurious IRQ between commands. |
+| **Assertions** | 30 (3 per command: pre=0, assert, clear) |
+| **Coverage** | IRQ reliability across multiple transactions |
+
+---
+
+## 4b. Proposed Tests (Not Yet Implemented)
 
 #### test_ahb_cache_coherency
 | Field | Value |
@@ -305,56 +426,12 @@ This verification plan covers the cocotb-based functional verification of the AH
 | **Feature** | Cache coherency |
 | **Description** | Write flash via APB, read via AHB cached, invalidate cache, write new data via APB, read again, verify updated data. |
 
-#### test_ahb_sequential_reads
-| Field | Value |
-|-------|-------|
-| **Priority** | Low |
-| **Feature** | Cache line fill |
-| **Description** | Verify sequential AHB reads to adjacent addresses exploit cache line fill (128-bit line = 4 words). |
-
-#### test_ahb_addr_alignment
-| Field | Value |
-|-------|-------|
-| **Priority** | Medium |
-| **Feature** | Address alignment |
-| **Description** | Read from non-16B-aligned addresses via AHB, verify correct word selection from 128-bit cache line. |
-
-### 4.4 Error / Corner Case Tests
-
-#### test_simultaneous_rw_bits
-| Field | Value |
-|-------|-------|
-| **Priority** | Low |
-| **Feature** | Invalid R+W configuration |
-| **Description** | Set both QSPI_READ=1 and QSPI_WRITE=1 simultaneously. Verify the controller handles it without hanging. |
-
 #### test_xip_switch_while_busy
 | Field | Value |
 |-------|-------|
 | **Priority** | Medium |
 | **Feature** | XIP mode switch safety |
 | **Description** | Toggle XIP_ACTIVE while a QSPI transaction is in progress. Verify the system recovers cleanly. |
-
-#### test_enable_while_busy
-| Field | Value |
-|-------|-------|
-| **Priority** | Medium |
-| **Feature** | Double-enable protection |
-| **Description** | Assert QSPI_ENABLE while the controller is already running a transaction. Verify no corruption. |
-
-#### test_reset_during_transaction
-| Field | Value |
-|-------|-------|
-| **Priority** | Medium |
-| **Feature** | Reset recovery |
-| **Description** | Assert reset mid-transaction. Verify FSM returns to IDLE and QSPI bus is clean after reset release. |
-
-#### test_zero_byte_transfer
-| Field | Value |
-|-------|-------|
-| **Priority** | Low |
-| **Feature** | Minimum data size |
-| **Description** | Set N_RW_BYTES=0 with read enabled. Verify 1-byte read completes correctly. |
 
 ---
 

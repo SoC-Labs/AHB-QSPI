@@ -91,12 +91,30 @@ class qspi_cmd_sequence extends uvm_sequence #(apb_master_transaction);
       wr_seq.start(m_sequencer);
     end
 
-    // 4. Wait for completion (poll STATUS.BUSY)
+    // 4. Wait for BUSY to assert (ENABLE → SCLK domain sync latency),
+    //    then wait for BUSY to deassert (transaction complete).
     begin
-      bit busy = 1;
-      int timeout = 50000;
+      bit busy;
+      int timeout;
+
+      // 4a. Wait for BUSY to go high (controller has started)
+      busy = 0;
+      timeout = 50000;
+      while (!busy && timeout > 0) begin
+        rd_seq = apb_read_sequence::type_id::create("rd_busy_set");
+        rd_seq.addr = QSPI_STATUS_ADDR;
+        rd_seq.start(m_sequencer);
+        busy = rd_seq.rdata[STATUS_BUSY_BIT];
+        timeout--;
+      end
+      if (timeout == 0)
+        `uvm_warning("QSPI_CMD", "BUSY never asserted — command may have completed instantly")
+
+      // 4b. Wait for BUSY to go low (transaction complete)
+      busy = 1;
+      timeout = 50000;
       while (busy && timeout > 0) begin
-        rd_seq = apb_read_sequence::type_id::create("rd_status");
+        rd_seq = apb_read_sequence::type_id::create("rd_busy_clr");
         rd_seq.addr = QSPI_STATUS_ADDR;
         rd_seq.start(m_sequencer);
         busy = rd_seq.rdata[STATUS_BUSY_BIT];

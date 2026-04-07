@@ -48,12 +48,23 @@ class ahb_qspi_irq_test extends ahb_qspi_base_test;
       // Phase 2: enable
       apb_write(QSPI_SPI_CMD_ADDR, cmd_base | (1 << SPI_CMD_ENABLE_BIT));
 
-      // Poll for completion
+      // Poll for BUSY to assert then deassert
       begin
-        bit busy = 1;
-        int timeout = 50000;
+        bit busy;
+        int timeout;
+        // Wait for BUSY=1
+        busy = 0; timeout = 50000;
+        while (!busy && timeout > 0) begin
+          rd = apb_read_sequence::type_id::create("rd_busy_set");
+          rd.addr = QSPI_STATUS_ADDR;
+          rd.start(env.apb_agt.sequencer);
+          busy = rd.rdata[STATUS_BUSY_BIT];
+          timeout--;
+        end
+        // Wait for BUSY=0
+        busy = 1; timeout = 50000;
         while (busy && timeout > 0) begin
-          rd = apb_read_sequence::type_id::create("rd_status");
+          rd = apb_read_sequence::type_id::create("rd_busy_clr");
           rd.addr = QSPI_STATUS_ADDR;
           rd.start(env.apb_agt.sequencer);
           busy = rd.rdata[STATUS_BUSY_BIT];

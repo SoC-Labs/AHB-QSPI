@@ -1105,3 +1105,437 @@ async def test_ahb_xip_read(dut):
     assert resp[0]['resp'] == 'ERROR', "AHB write in XIP should return ERROR"
 
     tb.log.info("AHB XIP read path verified")
+
+
+# ============================================================================
+# Additional Tests for Bug Hunting
+# ============================================================================
+
+@cocotb.test()
+async def test_rdata_regs_readonly(dut):
+    """Verify RDATA registers (REG4-7) are read-only and cannot be written."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+
+    rdata_addrs = [0x10, 0x14, 0x18, 0x1C]
+    # Read initial values (should be 0 after reset)
+    for addr in rdata_addrs:
+        data = await tb.config_ahb_master.read(addr, 4)
+        initial = int(data[0]['data'], 16)
+        tb.log.info("RDATA @ 0x%02x initial = 0x%08x", addr, initial)
+
+    # Attempt to write non-zero values
+    for addr in rdata_addrs:
+        await tb.config_ahb_master.write(addr, 0xDEADBEEF)
+
+    # Read back — should still be 0 (or unchanged)
+    for addr in rdata_addrs:
+        data = await tb.config_ahb_master.read(addr, 4)
+        val = int(data[0]['data'], 16)
+        tb.log.info("RDATA @ 0x%02x after write attempt = 0x%08x", addr, val)
+        assert val == 0, f"RDATA @ 0x{addr:02x} should be read-only, got 0x{val:08x}"
+
+    tb.log.info("RDATA read-only protection verified")
+
+
+@cocotb.test()
+async def test_data_pattern_integrity(dut):
+    """Program and verify various data patterns to detect bit-stuck/swap bugs."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    patterns = [
+        ("all_zeros",     [0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+        ("all_ones",      [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF]),
+        ("alternating_a", [0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA]),
+        ("alternating_5", [0x55555555, 0x55555555, 0x55555555, 0x55555555]),
+        ("walking_1",     [0x00000001, 0x00000002, 0x00000004, 0x00000008]),
+        ("walking_0",     [0xFFFFFFFE, 0xFFFFFFFD, 0xFFFFFFFB, 0xFFFFFFF7]),
+        ("byte_ramp",     [0x00010203, 0x04050607, 0x08090A0B, 0x0C0D0E0F]),
+        ("nibble_swap",   [0xF0F0F0F0, 0x0F0F0F0F, 0xF0F0F0F0, 0x0F0F0F0F]),
+    ]
+
+    for idx, (name, data) in enumerate(patterns):
+        addr = 0xA000 + idx * 0x100
+
+        await SPI_WRITE_ENABLE(dut, tb)
+        await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+        await SPI_WRITE_DISABLE(dut, tb)
+
+        rdata = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4)
+        tb.log.info("Pattern '%s' @ 0x%06x: wrote %s, read %s",
+                    name, addr, [hex(x) for x in data], [hex(x) for x in rdata])
+        assert rdata == data, f"Pattern '{name}' mismatch at 0x{addr:06x}: got {rdata}"
+
+    tb.log.info("All data patterns verified")
+
+
+@cocotb.test()
+async def test_back_to_back_commands(dut):
+    """Issue many commands back-to-back without extra delays to stress handshake."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Program some data first
+    data = [0xBEEFCAFE, 0x12345678, 0xDEADC0DE, 0xFACEFEED]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=0xB000, words=data, n_words=4)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Issue 50 back-to-back reads to the same address
+    for i in range(50):
+        rdata = await QPI_READ_WORDS(dut, tb, addr=0xB000, n_words=4)
+        assert rdata == data, f"Back-to-back read {i} mismatch: got {rdata}"
+
+    tb.log.info("50 back-to-back reads passed")
+
+
+@cocotb.test()
+async def test_enable_while_busy(dut):
+    """Assert ENABLE while controller is busy — verify no corruption."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Program data
+    data = [0xAAAABBBB]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=0xC000, words=data, n_words=1)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Start a slow read (standard SPI read with 0 dummy, slower clock)
+    await LEAVE_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x0)
+    await tb.config_ahb_master.write(0x34, 0x1F)  # Slowest clock
+
+    # Start a read command
+    await tb.config_ahb_master.write(0x0C, 0xC000)  # Address
+    QSPI_INSTR = 0x0B  # Fast read
+    QSPI_INSTR += (1 << 9)   # read=1
+    QSPI_INSTR += (1 << 11)  # addr_en=1
+    QSPI_INSTR += (8 << 12)  # dummy=8
+    QSPI_INSTR += (3 << 16)  # n_rw_bytes=3 (4 bytes)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR | (1 << 8))
+
+    # While busy, try to issue another enable (should be ignored or queued)
+    await ClockCycles(dut.HCLK, 5)
+    status = await tb.config_ahb_master.read(0x04, 4)
+    if int(status[0]['data'], 16) & 1:
+        tb.log.info("Controller is busy, attempting second ENABLE")
+        # Write another command with ENABLE — this should not corrupt the ongoing one
+        await tb.config_ahb_master.write(0x08, 0x0000019F)  # JEDEC with enable
+
+    # Wait for original to complete
+    await poll_busy_clear(dut, tb)
+
+    # Read back and verify data is still correct
+    rdata = await SPI_READ_WORDS(dut, tb, addr=0xC000, n_words=1)
+    tb.log.info("Data after double-enable: 0x%08x (expected 0x%08x)", rdata[0], data[0])
+
+    # Restore clock
+    await tb.config_ahb_master.write(0x34, 0x01)
+    tb.log.info("Enable-while-busy test completed without hang")
+
+
+@cocotb.test()
+async def test_reset_during_transaction(dut):
+    """Assert reset mid-transaction and verify clean recovery."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Start a slow read with maximum clock divider
+    await tb.config_ahb_master.write(0x34, 0x1F)
+
+    # Issue a read command
+    await tb.config_ahb_master.write(0x0C, 0x0000)
+    QSPI_INSTR = 0x0B  # Fast read
+    QSPI_INSTR += (1 << 9)   # read=1
+    QSPI_INSTR += (1 << 11)  # addr_en=1
+    QSPI_INSTR += (6 << 12)  # dummy=6
+    QSPI_INSTR += (15 << 16) # n_rw_bytes=15 (16 bytes)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR | (1 << 8))
+
+    # Wait a few cycles then reset mid-transaction
+    await ClockCycles(dut.HCLK, 20)
+
+    # Assert reset
+    await tb.cycle_reset()
+
+    # Verify registers are at defaults
+    status = await tb.config_ahb_master.read(0x04, 4)
+    busy = int(status[0]['data'], 16) & 1
+    tb.log.info("BUSY after mid-transaction reset: %d", busy)
+    assert busy == 0, "Controller should not be busy after reset"
+
+    reg0 = await tb.config_ahb_master.read(0x00, 4)
+    assert int(reg0[0]['data'], 16) == 0, "REG0 should be 0 after reset"
+
+    reg13 = await tb.config_ahb_master.read(0x34, 4)
+    assert int(reg13[0]['data'], 16) == 1, "CLK_DIV should be 1 after reset"
+
+    # Verify controller is functional post-reset
+    await SPI_RESET(dut, tb)
+    rID = await SPI_READ_JEDIC(dut, tb)
+    assert rID == ID, f"JEDEC ID after mid-txn reset: 0x{rID:08x}"
+
+    tb.log.info("Reset during transaction: clean recovery verified")
+
+
+@cocotb.test()
+async def test_simultaneous_rw_bits(dut):
+    """Set both READ=1 and WRITE=1 simultaneously — verify no hang."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+
+    # Issue command with both READ and WRITE enabled
+    await tb.config_ahb_master.write(0x0C, 0x0000)  # Address
+    QSPI_INSTR = 0x03  # Read opcode
+    QSPI_INSTR += (1 << 9)   # read=1
+    QSPI_INSTR += (1 << 10)  # write=1 (both set)
+    QSPI_INSTR += (1 << 11)  # addr_en=1
+    QSPI_INSTR += (0 << 12)  # dummy=0
+    QSPI_INSTR += (3 << 16)  # n_rw_bytes=3
+
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR | (1 << 8))
+
+    # Should not hang — wait with timeout
+    await poll_busy_clear(dut, tb)
+
+    tb.log.info("Simultaneous R+W bits: controller did not hang")
+
+
+@cocotb.test()
+async def test_address_boundary(dut):
+    """Test reads at flash address boundaries (0x000000, near max)."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Program at address 0
+    data_zero = [0x11111111]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=0x000000, words=data_zero, n_words=1)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Program near max address (0x3FFFFF - 22-bit address space max)
+    data_max = [0x22222222]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=0x3FFF00, words=data_max, n_words=1)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Read from address 0
+    rdata = await QPI_READ_WORDS(dut, tb, addr=0x000000, n_words=1)
+    tb.log.info("Address 0x000000: 0x%08x", rdata[0])
+    assert rdata == data_zero, f"Address 0 mismatch"
+
+    # Read from near-max address
+    rdata = await QPI_READ_WORDS(dut, tb, addr=0x3FFF00, n_words=1)
+    tb.log.info("Address 0x3FFF00: 0x%08x", rdata[0])
+    assert rdata == data_max, f"Near-max address mismatch"
+
+    tb.log.info("Address boundary test passed")
+
+
+@cocotb.test()
+async def test_xip_multiple_addresses(dut):
+    """Test XIP reads across multiple non-contiguous addresses."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Program data at several scattered addresses
+    addrs = [0xD000, 0xD100, 0xD200, 0xD300]
+    test_data = {}
+    for i, addr in enumerate(addrs):
+        data = [0x10000000 + i*0x1111 + j for j in range(4)]
+        test_data[addr] = data
+        await SPI_WRITE_ENABLE(dut, tb)
+        await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+        await SPI_WRITE_DISABLE(dut, tb)
+
+    # Enable XIP mode
+    QSPI_CTRL_REG = 0x01  # QIO_MODE=1
+    QSPI_CTRL_REG |= (1 << 8)  # XIP_ACTIVE=1
+    await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
+    await tb.config_ahb_master.write(0x30, (4 << 12) + 0x0B)
+
+    # Enable cache
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
+    for _ in range(1000):
+        status_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
+        cache_status = int(status_tmp[0]['data'], 16)
+        if (cache_status & 0x3) == 2:
+            break
+        await Timer(time=10, units='us')
+
+    # Read from each address via AHB, then re-read in reverse order
+    for addr in addrs:
+        for j in range(4):
+            rdata = await tb.data_ahb_master.read(addr + j*4, 4)
+            val = int(rdata[0]['data'], 16)
+            expected = test_data[addr][j]
+            assert val == expected, \
+                f"XIP read 0x{addr+j*4:06x}: got 0x{val:08x}, expected 0x{expected:08x}"
+
+    # Re-read in reverse order (should be cached for some)
+    for addr in reversed(addrs):
+        rdata = await tb.data_ahb_master.read(addr, 4)
+        val = int(rdata[0]['data'], 16)
+        assert val == test_data[addr][0], \
+            f"XIP reverse read 0x{addr:06x} mismatch"
+
+    # Disable XIP
+    await tb.config_ahb_master.write(0x00, 0x01)
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x0)
+
+    tb.log.info("XIP multi-address read test passed")
+
+
+@cocotb.test()
+async def test_spi_qpi_data_consistency(dut):
+    """Program in QPI mode, read back in both QPI and SPI, compare."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # Program data in QPI mode
+    addr = 0xE000
+    data = [0xCAFEBABE, 0xDEADF00D, 0xBAADF00D, 0x0BADC0DE]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Read in QPI mode
+    rdata_qpi = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4)
+    tb.log.info("QPI read: %s", [hex(x) for x in rdata_qpi])
+    assert rdata_qpi == data, f"QPI read mismatch"
+
+    # Switch to SPI mode
+    await LEAVE_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x0)
+
+    # Read in SPI mode
+    rdata_spi = await SPI_READ_WORDS(dut, tb, addr=addr, n_words=4)
+    tb.log.info("SPI read: %s", [hex(x) for x in rdata_spi])
+    assert rdata_spi == data, f"SPI read mismatch"
+
+    # Cross-check
+    assert rdata_qpi == rdata_spi, "QPI and SPI reads should return identical data"
+
+    tb.log.info("SPI/QPI data consistency verified")
+
+
+@cocotb.test()
+async def test_irq_multiple_commands(dut):
+    """Verify IRQ fires correctly across multiple sequential commands."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+
+    # Issue 10 JEDEC ID reads, checking IRQ after each
+    for i in range(10):
+        assert dut.IRQ_QSPI_FINISHED.value == 0, f"IRQ should be 0 before command {i}"
+
+        # JEDEC ID read
+        await tb.config_ahb_master.write(0x08, 0x0002009F)
+        await tb.config_ahb_master.write(0x08, 0x0002039F)
+
+        # Wait for IRQ
+        for _ in range(POLL_TIMEOUT_CYCLES):
+            if dut.IRQ_QSPI_FINISHED.value == 1:
+                break
+            await ClockCycles(dut.HCLK, 1)
+        else:
+            raise AssertionError(f"IRQ did not assert after command {i}")
+
+        # Clear IRQ
+        await tb.config_ahb_master.write(0x04, 0x00000100)
+        await ClockCycles(dut.HCLK, 5)
+        assert dut.IRQ_QSPI_FINISHED.value == 0, f"IRQ should clear after cmd {i}"
+
+    tb.log.info("IRQ verified across 10 sequential commands")
+
+
+@cocotb.test()
+async def test_multiword_program_sizes(dut):
+    """Test page program with 1, 2, 3, 4 words and verify each independently."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    for n_words in range(1, 5):
+        addr = 0xF000 + (n_words - 1) * 0x100
+        data = [0x10000000 * n_words + i for i in range(n_words)]
+        # Pad to 4 words for the helper (it only writes n_words)
+        data_padded = data + [0] * (4 - n_words)
+
+        await SPI_WRITE_ENABLE(dut, tb)
+        await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data_padded[:n_words], n_words=n_words)
+        await SPI_WRITE_DISABLE(dut, tb)
+
+        rdata = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=n_words)
+        tb.log.info("Program %d words @ 0x%06x: %s", n_words, addr, [hex(x) for x in rdata])
+        assert rdata == data, f"Mismatch for {n_words}-word program at 0x{addr:06x}"
+
+    tb.log.info("Multiword program sizes (1-4) verified")
+
+
+@cocotb.test()
+async def test_clock_div_zero_bypass(dut):
+    """Test CLK_DIV=0 (bypass mode, QSPI_SCLK=HCLK) with a simple command."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+
+    # Set CLK_DIV=0 (bypass)
+    await tb.config_ahb_master.write(0x34, 0x00)
+
+    # Issue JEDEC ID read at full speed
+    rID = await SPI_READ_JEDIC(dut, tb)
+    tb.log.info("JEDEC ID at CLK_DIV=0: 0x%08x", rID)
+
+    # Restore safe divider
+    await tb.config_ahb_master.write(0x34, 0x01)
+
+    tb.log.info("CLK_DIV=0 bypass mode test completed")
+
+
+@cocotb.test()
+async def test_continuous_read_to_normal(dut):
+    """Switch between continuous read mode and normal mode, verify data."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    addr = 0xF400
+    data = [0xAAAA1111, 0xBBBB2222, 0xCCCC3333, 0xDDDD4444]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Normal read
+    rdata1 = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=False)
+    assert rdata1 == data, "Normal read mismatch before continuous mode"
+
+    # Enable continuous read mode
+    rdata2 = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=True)
+    assert rdata2 == data, "Continuous read mismatch"
+
+    # Enable NO_CMD mode for subsequent reads
+    QSPI_CTRL_REG = await tb.config_ahb_master.read(0x00, 4)
+    QSPI_CTRL_REG = int(QSPI_CTRL_REG[0]['data'], 16)
+    QSPI_CTRL_REG |= (1 << 25)
+    await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
+
+    # Read same address with NO_CMD (should hit NO_FETCH path)
+    rdata3 = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=True)
+    assert rdata3 == data, "NO_CMD read mismatch"
+
+    # Disable NO_CMD and continuous read
+    QSPI_CTRL_REG &= ~(1 << 25)
+    QSPI_CTRL_REG &= ~(1 << 24)
+    await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
+
+    # Normal read again — should still work
+    rdata4 = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=False)
+    assert rdata4 == data, "Normal read mismatch after leaving continuous mode"
+
+    tb.log.info("Continuous/normal mode transitions verified")

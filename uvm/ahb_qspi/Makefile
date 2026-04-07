@@ -103,7 +103,12 @@ TESTS = ahb_qspi_register_test \
         ahb_qspi_irq_test \
         ahb_qspi_arb_test \
         ahb_qspi_reset_test \
-        ahb_qspi_stress_test
+        ahb_qspi_stress_test \
+        ahb_qspi_data_integrity_test \
+        ahb_qspi_corner_case_test \
+        ahb_qspi_rdata_readonly_test \
+        ahb_qspi_xip_stress_test \
+        ahb_qspi_reset_recovery_test
 
 # ---------------------------------------------------------------
 # Targets
@@ -131,6 +136,11 @@ help:
 	@echo "  ahb_qspi_arb_test               - XIP/APB arbitration"
 	@echo "  ahb_qspi_reset_test             - Reset recovery"
 	@echo "  ahb_qspi_stress_test            - Register storm, mode frenzy, dummy sweep"
+	@echo "  ahb_qspi_data_integrity_test    - Data patterns, multi-word, cross-mode"
+	@echo "  ahb_qspi_corner_case_test       - N_RW sweep, R+W bits, back-to-back, addr"
+	@echo "  ahb_qspi_rdata_readonly_test    - RDATA register write protection"
+	@echo "  ahb_qspi_xip_stress_test        - XIP multi-address, cache, verify"
+	@echo "  ahb_qspi_reset_recovery_test    - Reset from configured state, multi-cycle"
 	@echo ""
 	@echo "Variables:"
 	@echo "  TEST=<name>                     - Test to run (default: ahb_qspi_register_test)"
