@@ -45,7 +45,7 @@ waive -du "p_flash_cache_f0_mrb"        -comment "ARM CG092 mrb — CDC pre-veri
 # qspi_controller (QSPI_enable_sync, current_state, QSPI_SCLK_e).
 # The delay chain in qspi_controller_mux is also clocked by QSPI_SCLK_i.
 # This is a same-domain path — no CDC synchronization needed.
-waive -rule Ac_unsync01 -msg {*AHB_QSPI_BUSY_del*QSPI_nCS*} \
+waive -rule Ac_unsync01 -msg "*AHB_QSPI_BUSY_del*QSPI_nCS*" \
     -comment "Same QSPI_SCLK_i domain: QSPI_nCS is combinational from QSPI_SCLK_i regs"
 
 # ============================================================================
@@ -54,7 +54,7 @@ waive -rule Ac_unsync01 -msg {*AHB_QSPI_BUSY_del*QSPI_nCS*} \
 # Two 2-FF synchronizers (enable_ack and busy) from the QSPI_SCLK_i domain
 # both feed the ahb_qspi_interface FSM which drives AHB_QSPI_ENABLE.
 # This is a sequential state machine — convergence is by design.
-waive -rule Ac_conv03 -msg {*AHB_QSPI_ENABLE*} \
+waive -rule Ac_conv03 -msg "*AHB_QSPI_ENABLE*" \
     -comment "By design: FSM uses both sync'd enable_ack and busy to drive ENABLE"
 
 # ============================================================================
@@ -62,16 +62,16 @@ waive -rule Ac_conv03 -msg {*AHB_QSPI_ENABLE*} \
 # ============================================================================
 # HRESETn is a system-wide async reset used across HCLK, PCLK, and
 # QSPI_SCLK_i domains — this is architecturally correct.
-waive -rule Clock_sync05a -msg {*HRESETn*} \
+waive -rule Clock_sync05a -msg "*HRESETn*" \
     -comment "HRESETn is system-wide async reset, sampled in multiple domains by design"
-waive -rule Reset_sync04 -msg {*HRESETn*} \
+waive -rule Reset_sync04 -msg "*HRESETn*" \
     -comment "Independent sync chains sharing same async reset — no functional issue"
-waive -rule Reset_sync04 -msg {*PRESETn*} \
+waive -rule Reset_sync04 -msg "*PRESETn*" \
     -comment "Independent sync chains sharing same async reset — no functional issue"
 
 # ============================================================================
 # Clock divider relationship
 # ============================================================================
 # QSPI_SCLK_i is intentionally derived from HCLK via qspi_clock_div.
-waive -rule Clock_check07 -msg {*HCLK*QSPI_SCLK_i*} \
+waive -rule Clock_check07 -msg "*HCLK*QSPI_SCLK_i*" \
     -comment "QSPI_SCLK_i is intentionally derived from HCLK via clock divider"

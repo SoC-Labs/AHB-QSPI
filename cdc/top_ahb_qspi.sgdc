@@ -113,7 +113,7 @@ quasi_static -name "u_apb_qspi_regs/reg13[*]"
 # QSPI_BUSY deasserts. The 2-FF synchronized BUSY signal in both
 # ahb_qspi_interface (HCLK) and apb_qspi_regs (PCLK) serves as the
 # valid qualifier, providing adequate setup margin.
-assume_path -from "u_qspi_controller/data_in_reg[*]" -to "u_ahb_qspi_interface/HRDATA[*]"
+cdc_false_path -from "u_qspi_controller/data_in_reg[*]" -to "u_ahb_qspi_interface/HRDATA[*]"
 
 # ============================================================================
 # Reset Domain Crossing: HRESETn in QSPI_SCLK_i domain
@@ -123,9 +123,9 @@ assume_path -from "u_qspi_controller/data_in_reg[*]" -to "u_ahb_qspi_interface/H
 # edges, so HRESETn deassertion (synchronous to HCLK) is deterministic
 # relative to QSPI_SCLK_i. When QSPI_CLK_DIV == 0, QSPI_SCLK_i IS HCLK.
 # No reset synchronizer is needed.
-assume_path -from HRESETn -to "u_qspi_controller_mux/AHB_QSPI_BUSY_del"
-assume_path -from HRESETn -to "u_qspi_controller_mux/AHB_QSPI_BUSY_del1"
-assume_path -from HRESETn -to "u_qspi_controller_mux/AHB_QSPI_BUSY_del2"
+cdc_false_path -from HRESETn -to "u_qspi_controller_mux/AHB_QSPI_BUSY_del"
+cdc_false_path -from HRESETn -to "u_qspi_controller_mux/AHB_QSPI_BUSY_del1"
+cdc_false_path -from HRESETn -to "u_qspi_controller_mux/AHB_QSPI_BUSY_del2"
 
 # ============================================================================
 # CDC Fix Status (all fixes implemented)
