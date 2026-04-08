@@ -26,5 +26,13 @@ LINT_FLIST ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI.flist
 
 # Target from Running Verilator Lint Tool
 lint_verilator:
-	@rm -rf $(LINT_DIR) 
-	@mkdir -p $(LINT_DIR)-	@cd $(LINT_DIR); verilator --lint-only -f $(LINT_FLIST) -I$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/ --top-module $(LINT_TOP)
+	@rm -rf $(LINT_DIR)
+	@mkdir -p $(LINT_DIR)
+	@cd $(LINT_DIR); verilator --lint-only \
+		-f $(LINT_FLIST) \
+		-I$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog/ \
+		$(SOCLABS_AHB_QSPI_DIR)/logical/cache_models/generic/cache_ram.v \
+		$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/testbench/execution_tb/verilog/p_flash_cache_f0_sp_ram.v \
+		-Wno-WIDTH \
+		-Wno-CASEINCOMPLETE \
+		--top-module $(LINT_TOP)

@@ -1,15 +1,4 @@
-import itertools
-import logging
-import os
-from numpy import random
-import numpy as np
-
-import cocotb
-from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, Timer, ClockCycles
-from cocotb.regression import TestFactory
-
-from cocotbext.ahb import AHBLiteMaster, AHBBus
+from cocotb.triggers import Timer, ClockCycles
 
 ID = 0x4326BF00
 

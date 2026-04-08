@@ -1,21 +1,15 @@
-import itertools
 import logging
-import os
+
 from numpy import random
-import numpy as np
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, Timer, ClockCycles
-from cocotb.regression import TestFactory
+from cocotb.triggers import Timer, ClockCycles
 
 from cocotbext.ahb import AHBLiteMaster, AHBBus
 
-
 from SST26VF064B import *
-from SST26VF064B import poll_busy_clear, poll_busy_set, POLL_TIMEOUT_CYCLES
-
-FREQ = 240
+from SST26VF064B import poll_busy_clear, POLL_TIMEOUT_CYCLES
 
 QSPI_CONFIG_ADDR = 0x0
 CACHE_CONFIG_ADDR = 0x1000
@@ -911,7 +905,7 @@ async def test_spi_write_and_read(dut):
     rdata = await SPI_READ_WORDS(dut, tb, addr=addr, n_words=4)
     tb.log.info("SPI write/read: wrote %s, read %s",
                 [hex(x) for x in data], [hex(x) for x in rdata])
-    assert rdata == data, f"SPI mode write/read mismatch"
+    assert rdata == data, "SPI mode write/read mismatch"
 
     tb.log.info("SPI mode write and read verified")
 
@@ -1084,7 +1078,7 @@ async def test_ahb_xip_read(dut):
     await tb.config_ahb_master.write(0x34, 0x01)
 
     # Do a dummy APB read to exercise the QSPI controller first
-    dummy = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=True)
+    await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=True)
 
     # Enable continuous read + NO_CMD for XIP (matches QSPI_READ_TESTS sequence)
     QSPI_CTRL_REG = await tb.config_ahb_master.read(0x00, 4)
@@ -1098,12 +1092,12 @@ async def test_ahb_xip_read(dut):
     await tb.config_ahb_master.write(0x30, QSPI_AHB_CMD_REG)
 
     # Enable cache and wait for ready
-    CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
+    await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
     await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
-    CACHE_CONFIG_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
+    await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
 
     for _ in range(1000):
-        CACHE_CONFIG_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
+        await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
         status_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
         cache_status = int(status_tmp[0]['data'], 16)
         if (cache_status & 0x3) == 2:
@@ -1371,12 +1365,12 @@ async def test_address_boundary(dut):
     # Read from low address
     rdata = await QPI_READ_WORDS(dut, tb, addr=addr_low, n_words=1)
     tb.log.info("Address 0x%06x: 0x%08x", addr_low, rdata[0])
-    assert rdata == data_low, f"Low address mismatch"
+    assert rdata == data_low, "Low address mismatch"
 
     # Read from high address
     rdata = await QPI_READ_WORDS(dut, tb, addr=addr_high, n_words=1)
     tb.log.info("Address 0x%06x: 0x%08x", addr_high, rdata[0])
-    assert rdata == data_high, f"High address mismatch"
+    assert rdata == data_high, "High address mismatch"
 
     tb.log.info("Address boundary test passed")
 
@@ -1401,7 +1395,7 @@ async def test_xip_multiple_addresses(dut):
     await tb.config_ahb_master.write(0x34, 0x01)
 
     # Do a dummy APB read to exercise the controller first
-    dummy = await QPI_READ_WORDS(dut, tb, addr=addrs[0], n_words=4, cont_read=True)
+    await QPI_READ_WORDS(dut, tb, addr=addrs[0], n_words=4, cont_read=True)
 
     # Enable continuous read + NO_CMD + XIP (matches QSPI_READ_TESTS)
     QSPI_CTRL_REG = await tb.config_ahb_master.read(0x00, 4)
@@ -1414,7 +1408,7 @@ async def test_xip_multiple_addresses(dut):
     # Enable cache and wait for ready
     await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
     for _ in range(1000):
-        CACHE_CONFIG_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
+        await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
         status_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
         cache_status = int(status_tmp[0]['data'], 16)
         if (cache_status & 0x3) == 2:
@@ -1471,7 +1465,7 @@ async def test_spi_qpi_data_consistency(dut):
     # Read in QPI mode
     rdata_qpi = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4)
     tb.log.info("QPI read: %s", [hex(x) for x in rdata_qpi])
-    assert rdata_qpi == data, f"QPI read mismatch"
+    assert rdata_qpi == data, "QPI read mismatch"
 
     # Switch to SPI mode
     await LEAVE_QPI_MODE(dut, tb)
@@ -1480,7 +1474,7 @@ async def test_spi_qpi_data_consistency(dut):
     # Read in SPI mode
     rdata_spi = await SPI_READ_WORDS(dut, tb, addr=addr, n_words=4)
     tb.log.info("SPI read: %s", [hex(x) for x in rdata_spi])
-    assert rdata_spi == data, f"SPI read mismatch"
+    assert rdata_spi == data, "SPI read mismatch"
 
     # Cross-check
     assert rdata_qpi == rdata_spi, "QPI and SPI reads should return identical data"
@@ -1613,7 +1607,7 @@ async def test_continuous_read_to_normal(dut):
     # to exit continuous read mode per SST26VF064B datasheet
     QSPI_CTRL_REG = 0x01 | (0xFF << 16) | (1 << 24)  # QIO + MODE_CODE=0xFF + CONT_READ
     await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
-    rdata_exit = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=True)
+    await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=True)
 
     # Now clear continuous read mode fully
     await tb.config_ahb_master.write(0x00, 0x01)  # QIO_MODE only

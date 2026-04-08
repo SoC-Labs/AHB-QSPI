@@ -168,6 +168,39 @@ verilator-lint:
     expire_in: 30 days
   allow_failure: true
 
+hal-lint:
+  stage: lint
+  needs: [clone, preflight]
+  tags:
+    - xcelium
+  variables:
+    XCELIUM_HOME: /eda/cadence/xcelium
+  script:
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    - export PATH="$XCELIUM_HOME/tools/bin:$PATH"
+    - echo "HAL version:" && hal -version 2>&1 | head -1
+    # Lint standalone modules (no external IP dependencies)
+    - make -C "$WORK_DIR/lint" lint-standalone 2>&1 | tee hal_lint_standalone.log
+    # Lint all modules including top-level (requires CG092 + Corstone-101)
+    - make -C "$WORK_DIR/lint" lint-each 2>&1 | tee hal_lint_all.log
+    # Generate reports
+    - |
+      for mod in qspi_controller qspi_clock_div apb_qspi_regs ahb_qspi_interface top_ahb_qspi; do
+        make -C "$WORK_DIR/lint" report MODULE=$mod 2>&1 || true
+      done
+  after_script:
+    - cp "$WORK_DIR/lint/"*_hal.log . 2>/dev/null || true
+    - cp "$WORK_DIR/lint/"*_hal_report.txt . 2>/dev/null || true
+  artifacts:
+    when: always
+    paths:
+      - "*_hal.log"
+      - "*_hal_report.txt"
+      - hal_lint_standalone.log
+      - hal_lint_all.log
+    expire_in: 30 days
+
 # ============================================================================
 # Stage 3: CDC Analysis
 # ============================================================================
