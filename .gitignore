@@ -59,3 +59,5 @@ uvm/ahb_qspi/csrc
 vc_hdrs.h
 uvm/ahb_qspi/xprop.log
 uvm/ahb_qspi/xprop.log
+
+*stacktrace.vstf

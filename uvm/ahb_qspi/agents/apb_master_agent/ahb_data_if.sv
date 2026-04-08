@@ -11,14 +11,16 @@ interface ahb_data_if (
 );
 
   // AHB signals (test drives these for XIP reads)
-  logic [31:0] haddr;
-  logic [1:0]  htrans;
-  logic        hwrite;
-  logic [2:0]  hsize;
-  logic [2:0]  hburst;
-  logic [3:0]  hprot;
-  logic [31:0] hwdata;
-  logic        hsel;
+  // Initialised to idle/deselected defaults to prevent xprop X propagation
+  // through the AHB HREADY feedback path after reset deassertion.
+  logic [31:0] haddr  = 32'h0;
+  logic [1:0]  htrans = 2'b00;
+  logic        hwrite = 1'b0;
+  logic [2:0]  hsize  = 3'b000;
+  logic [2:0]  hburst = 3'b000;
+  logic [3:0]  hprot  = 4'b0000;
+  logic [31:0] hwdata = 32'h0;
+  logic        hsel   = 1'b0;
   logic [31:0] hrdata;
   logic        hready;
   logic        hresp;

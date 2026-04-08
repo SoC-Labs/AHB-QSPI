@@ -49,6 +49,17 @@ async def wait_for_irq(dut, tb, timeout=POLL_TIMEOUT_CYCLES):
     assert int(data[0]['data'], 16) == 0
 
 async def SPI_RESET(dut,tb):
+    # Set clock divider to safe value before any flash commands.
+    # Default CLK_DIV=1 (HCLK/2) is too fast: commands complete before the
+    # CDC-synchronised BUSY flag propagates, so poll_busy_clear returns
+    # prematurely and the next command can overlap, preventing nCS from
+    # cycling high between transactions.  The SST26VF064B flash model
+    # blocks inside its RST handler waiting for posedge CEb; if that edge
+    # never arrives, no subsequent command is processed and read data
+    # stays at 'z'/'x'.  CLK_DIV=5 (HCLK/10) matches the UVM testbench
+    # and gives enough margin for the synchronisers.
+    await tb.config_ahb_master.write(0x34, 0x00000005)
+
     await tb.config_ahb_master.write(0x08, 0x00000066)
     await tb.config_ahb_master.write(0x08, 0x00000166)
 
@@ -58,11 +69,13 @@ async def SPI_RESET(dut,tb):
     await tb.config_ahb_master.write(0x08, 0x00000099)
     await tb.config_ahb_master.write(0x08, 0x00000199)
 
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
             
 async def SPI_READ_JEDIC(dut, tb):
     await tb.config_ahb_master.write(0x08, 0x0002009F)
     await tb.config_ahb_master.write(0x08, 0x0002039F)
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     ID = await tb.config_ahb_master.read(0x10,4)
     return int(ID[0]['data'],16)
@@ -71,17 +84,20 @@ async def SET_QPI_MODE(dut,tb):
     await tb.config_ahb_master.write(0x08, 0x00000038)
     await tb.config_ahb_master.write(0x08, 0x00000138)
 
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
 
 async def LEAVE_QPI_MODE(dut, tb):
     await tb.config_ahb_master.write(0x08, 0x000000FF)
     await tb.config_ahb_master.write(0x08, 0x000001FF)
 
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
 
 async def QPI_READ_JEDIC(dut, tb):
     await tb.config_ahb_master.write(0x08, 0x000220AF)
     await tb.config_ahb_master.write(0x08, 0x000223AF)
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     ID = await tb.config_ahb_master.read(0x10,4)
     return int(ID[0]['data'],16)
@@ -90,24 +106,28 @@ async def SPI_WRITE_ENABLE(dut, tb):
     await tb.config_ahb_master.write(0x08, 0x00000006)
     await tb.config_ahb_master.write(0x08, 0x00000106)
 
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
  
 async def SPI_WRITE_DISABLE(dut, tb):
     await tb.config_ahb_master.write(0x08, 0x00000004)
     await tb.config_ahb_master.write(0x08, 0x00000104)
 
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
        
 async def SPI_CLR_PROTECTION(dut, tb):
     await tb.config_ahb_master.write(0x08, 0x00000098)
     await tb.config_ahb_master.write(0x08, 0x00000198)
 
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
    
 async def SPI_CHIP_ERASE(dut, tb):
     await tb.config_ahb_master.write(0x08, 0x000000C7)
     await tb.config_ahb_master.write(0x08, 0x000001C7)
 
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
 
 async def SPI_BLOCK_ERASE(dut, tb):
@@ -117,6 +137,7 @@ async def SPI_BLOCK_ERASE(dut, tb):
     await tb.config_ahb_master.write(0x08, 0x000008D8)
     await tb.config_ahb_master.write(0x08, 0x000009D8)
 
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     for _ in range(1000):
         SPI_STAT = await SPI_READ_STAT_REG(dut, tb)
@@ -129,6 +150,7 @@ async def SPI_BLOCK_ERASE(dut, tb):
 async def SPI_READ_STAT_REG(dut,tb):
     await tb.config_ahb_master.write(0x08, 0x00002005)
     await tb.config_ahb_master.write(0x08, 0x00002305)
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     data = await tb.config_ahb_master.read(0x10,4)
     return (int(data[0]['data'],16))
@@ -136,6 +158,7 @@ async def SPI_READ_STAT_REG(dut,tb):
 async def QPI_READ_STAT_REG(dut,tb):
     await tb.config_ahb_master.write(0x08, 0x00002005)
     await tb.config_ahb_master.write(0x08, 0x00002305)
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     data = await tb.config_ahb_master.read(0x10,4)
     return (int(data[0]['data'],16))
@@ -147,6 +170,7 @@ async def SPI_READ_SLOW(dut, tb):
 
     await tb.config_ahb_master.write(0x08, 0x00001003)
     await tb.config_ahb_master.write(0x08, 0x00001303)
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     rData = await tb.config_ahb_master.read(0x10,4)
     print(rData)
@@ -182,6 +206,7 @@ async def QPI_READ_WORDS(dut,tb, addr =0, n_words=1, cont_read = False):
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
 
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
 
     apb_r_addrs=[0x10, 0x14, 0x18, 0x1C]
@@ -221,9 +246,10 @@ async def QPI_READ_BYTES(dut,tb, addr =0, n_bytes=1, cont_read = False):
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
-    
+
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
-        
+
     rData = []
     for i in range(0,n_bytes):
         rData_temp = await tb.config_ahb_master.read(0x10+i,1)
@@ -253,9 +279,10 @@ async def SPI_READ_WORDS(dut,tb, addr =0, n_words=1):
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
-    
+
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
-        
+
     apb_r_addrs=[0x10, 0x14, 0x18, 0x1C]
     rData = []
     for i in range(0,n_words):
@@ -287,7 +314,7 @@ async def SPI_READ_WORDS_SLOW(dut,tb, addr =0, n_words=1):
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
 
-    await poll_busy_set(dut, tb)
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
 
     apb_r_addrs=[0x10, 0x14, 0x18, 0x1C]
@@ -320,7 +347,8 @@ async def SPI_ADDR_TO_IDLE(dut,tb, addr =0, n_words=1):
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
-    
+
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     return
 
@@ -347,7 +375,8 @@ async def SPI_DUMMY_TO_IDLE(dut,tb, addr =0, n_words=1):
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
-    
+
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     return
 
@@ -374,7 +403,8 @@ async def SPI_DUMMY_TO_DATAO(dut,tb, addr =0, n_words=1):
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
-    
+
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     return
 
@@ -400,7 +430,8 @@ async def SPI_WRITE_STATUS(dut,tb):
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
-    
+
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     return
 
@@ -431,7 +462,8 @@ async def SPI_MODE_TO_IDLE(dut,tb, addr =0, n_words=1):
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
-    
+
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     return
 
@@ -462,7 +494,8 @@ async def SPI_MODE_TO_DATA(dut,tb, addr =0, write=1, read=0):
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
-    
+
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     return
 
@@ -493,7 +526,8 @@ async def QPI_PAGE_PROGRAM(dut, tb, addr = 0, words=0, n_words = 1):
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
     QSPI_INSTR = QSPI_INSTR ^ (1<<8)
     await tb.config_ahb_master.write(0x08, QSPI_INSTR)
-    
+
+    await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
     for _ in range(10000):
         SPI_STAT = await QPI_READ_STAT_REG(dut, tb)
