@@ -60,16 +60,17 @@ async def SPI_RESET(dut,tb):
     # and gives enough margin for the synchronisers.
     await tb.config_ahb_master.write(0x34, 0x00000005)
 
-    # Ensure controller is in SPI mode (clears QIO_MODE, CONT_READ, NO_CMD)
-    await tb.config_ahb_master.write(0x00, 0x00000000)
-
-    # Send RSTQIO (0xFF) to exit QPI mode on the flash if a previous test
-    # left it in QPI mode.  In SPI mode this is harmless (ignored by flash).
+    # Send RSTQIO (0xFF) in QPI mode first, in case the flash was left in QPI
+    # by a previous test.  Set QIO_MODE=1 so the controller encodes it correctly.
+    await tb.config_ahb_master.write(0x00, 0x00000001)  # QIO_MODE=1
     await tb.config_ahb_master.write(0x08, 0x000000FF)
     await tb.config_ahb_master.write(0x08, 0x000001FF)
 
     await wait_for_irq(dut,tb)
     await poll_busy_clear(dut, tb)
+
+    # Now switch controller to SPI mode (clears QIO_MODE, CONT_READ, NO_CMD)
+    await tb.config_ahb_master.write(0x00, 0x00000000)
 
     # RSTEN (0x66)
     await tb.config_ahb_master.write(0x08, 0x00000066)
