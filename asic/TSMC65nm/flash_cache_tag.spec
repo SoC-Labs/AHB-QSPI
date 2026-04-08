@@ -1,0 +1,33 @@
+# user spec file, compiler rf_sp_hdf_hvt_rvt, version r0p0
+
+activity_factor = 20
+back_biasing = off
+bits = 11
+bmux = off
+bus_notation = on
+check_instname = on
+corners = ff_1p32v_1p32v_125c,ff_1p32v_1p32v_m40c,ss_1p08v_1p08v_125c,ss_1p08v_1p08v_m40c,tt_1p20v_1p20v_25c
+cust_comment = 
+diodes = on
+drive = 6
+ema = on
+frequency = 250
+instname = flash_cache_tag
+left_bus_delim = [
+libertyviewstyle = nldm
+libname = FLASH_CACHE_TAG
+mux = 8
+mvt = 
+name_case = upper
+power_type = otc
+prefix = 
+pwr_gnd_rename = vddpe:VDD,vddce:VDD,vsse:VSS
+retention = on
+right_bus_delim = ]
+ser = none
+site_def = off
+top_layer = m5-m10
+words = 256
+wp_size = 1
+write_mask = on
+write_thru = off
