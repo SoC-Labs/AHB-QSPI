@@ -1080,15 +1080,18 @@ async def test_ahb_xip_read(dut):
     await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
     await SPI_WRITE_DISABLE(dut, tb)
 
-    # Configure AHB command register BEFORE enabling XIP (matches QSPI_READ_TESTS)
-    QSPI_AHB_CMD_REG = (4 << 12) + 0x0B  # fast read, 4 dummy cycles
-    await tb.config_ahb_master.write(0x30, QSPI_AHB_CMD_REG)
+    # Use fast clock for cache initialization (matches QSPI_READ_TESTS)
+    await tb.config_ahb_master.write(0x34, 0x00)
 
     # Enable XIP mode — read-modify-write to preserve QIO_MODE
     QSPI_CTRL_REG = await tb.config_ahb_master.read(0x00, 4)
     QSPI_CTRL_REG = int(QSPI_CTRL_REG[0]['data'], 16)
     QSPI_CTRL_REG |= (1 << 8)  # XIP_ACTIVE=1
     await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
+
+    # Configure AHB command register (fast read 0x0B, 4 dummy cycles)
+    QSPI_AHB_CMD_REG = (4 << 12) + 0x0B
+    await tb.config_ahb_master.write(0x30, QSPI_AHB_CMD_REG)
 
     # Enable cache
     await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
@@ -1387,11 +1390,17 @@ async def test_xip_multiple_addresses(dut):
         await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
         await SPI_WRITE_DISABLE(dut, tb)
 
-    # Enable XIP mode
-    QSPI_CTRL_REG = 0x01  # QIO_MODE=1
+    # Use fast clock for cache initialization (matches QSPI_READ_TESTS)
+    await tb.config_ahb_master.write(0x34, 0x00)
+
+    # Configure AHB command register
+    await tb.config_ahb_master.write(0x30, (4 << 12) + 0x0B)
+
+    # Enable XIP mode — read-modify-write to preserve QIO_MODE
+    QSPI_CTRL_REG = await tb.config_ahb_master.read(0x00, 4)
+    QSPI_CTRL_REG = int(QSPI_CTRL_REG[0]['data'], 16)
     QSPI_CTRL_REG |= (1 << 8)  # XIP_ACTIVE=1
     await tb.config_ahb_master.write(0x00, QSPI_CTRL_REG)
-    await tb.config_ahb_master.write(0x30, (4 << 12) + 0x0B)
 
     # Enable cache
     await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
@@ -1400,6 +1409,7 @@ async def test_xip_multiple_addresses(dut):
         cache_status = int(status_tmp[0]['data'], 16)
         if (cache_status & 0x3) == 2:
             break
+        status_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
         await Timer(time=10, units='us')
 
     # Read from each address via AHB, then re-read in reverse order
