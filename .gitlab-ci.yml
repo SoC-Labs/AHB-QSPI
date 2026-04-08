@@ -1,5 +1,6 @@
 # AHB QSPI GitLab CI Pipeline
-# Runs lint, CDC analysis, cocotb regression (8 tests), coverage merge.
+# Runs lint, CDC analysis, cocotb regression (8 tests), coverage merge,
+# and ASIC synthesis (TSMC 65nm).
 #
 # Stages:
 #   1. setup      - Clone repo, validate tool paths, fetch dependencies
@@ -7,7 +8,8 @@
 #   3. cdc        - SpyGlass CDC analysis
 #   4. regression - Cocotb regression with VCS code coverage
 #   5. coverage   - Merge VCS coverage and generate report
-#   6. cleanup    - Remove workspace
+#   6. synthesis  - ASIC synthesis with Design Compiler (TSMC 65nm)
+#   7. cleanup    - Remove workspace
 
 stages:
   - setup
@@ -15,6 +17,7 @@ stages:
   - cdc
   - regression
   - coverage
+  - synthesis
   - cleanup
 
 variables:
@@ -26,6 +29,7 @@ variables:
   VCS_HOME: /eda/synopsys/2022-23/RHELx86/VCS_2022.06-SP2
   VERDI_HOME: /eda/synopsys/2022-23/RHELx86/VERDI_2022.06-SP2
   SPYGLASS_HOME: /eda/synopsys/2022-23/RHELx86/SPYGLASS_2022.06-SP2/SPYGLASS_HOME
+  DC_HOME: /eda/synopsys/2022-23/RHELx86/SYN_2022.12
   # ARM IP library path (Corstone-101, CG092 flash cache)
   ARM_IP_LIBRARY_PATH: /research/AAA/ip_library
   # Simulator selection for cocotb
@@ -88,12 +92,14 @@ preflight:
       check_dir "VCS_HOME"       "$VCS_HOME"
       check_dir "VERDI_HOME"     "$VERDI_HOME"
       check_dir "SPYGLASS_HOME"  "$SPYGLASS_HOME"
+      check_dir "DC_HOME"        "$DC_HOME"
 
       echo ""
       echo "-- IP Libraries -------------------------"
       check_dir "ARM_IP_LIBRARY_PATH"              "$ARM_IP_LIBRARY_PATH"
       check_dir "Corstone-101 (cmsdk_ahb_to_apb)"  "$ARM_IP_LIBRARY_PATH/latest/Corstone-101/logical/cmsdk_ahb_to_apb"
       check_dir "CG092 Flash Cache"                 "$ARM_IP_LIBRARY_PATH/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0"
+      check_dir "Precompiled SRAM (TSMC65)"         "/research/precompiled_mems/TSMC65"
 
       echo ""
       echo "-- Workspace ----------------------------"
@@ -101,8 +107,9 @@ preflight:
 
       echo ""
       echo "-- Tool Binaries (with PATH set) --------"
-      export PATH="$VCS_HOME/bin:$VERDI_HOME/bin:$PATH"
+      export PATH="$VCS_HOME/bin:$VERDI_HOME/bin:$DC_HOME/bin:$PATH"
       check_bin "vcs"             "vcs"
+      check_bin "dc_shell"        "dc_shell"
       check_bin "verilator"       "verilator"
       check_bin "python3"         "python3"
       check_bin "cocotb-config"   "cocotb-config"
@@ -342,7 +349,63 @@ coverage-report:
     expire_in: 30 days
 
 # ============================================================================
-# Stage 6: Cleanup
+# Stage 6: ASIC Synthesis (TSMC 65nm)
+# ============================================================================
+
+dc-synth-tsmc65:
+  stage: synthesis
+  needs: [clone, preflight]
+  tags:
+    - vcs
+  script:
+    - export PATH="$DC_HOME/bin:$PATH"
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    - echo "Design Compiler version:" && dc_shell -version 2>&1 | head -3
+    - mkdir -p "$WORK_DIR/imp/ASIC"
+    - |
+      cd "$WORK_DIR/asic/TSMC65nm"
+      dc_shell -f dc_synthesis_core.tcl 2>&1 | tee dc_synth.log
+      DC_EXIT=$?
+      if [ $DC_EXIT -ne 0 ]; then
+        echo "ERROR: dc_shell exited with code $DC_EXIT"
+        exit 1
+      fi
+    # Check that gate-level netlist was produced
+    - |
+      if [ ! -f "$WORK_DIR/imp/ASIC/top_ahb_qspi_gates.v" ]; then
+        echo "ERROR: Gate-level netlist not generated"
+        exit 1
+      fi
+      echo "Gate-level netlist size: $(wc -l < "$WORK_DIR/imp/ASIC/top_ahb_qspi_gates.v") lines"
+    # Print timing summary
+    - |
+      echo ""
+      echo "========================================"
+      echo " Synthesis Reports Summary"
+      echo "========================================"
+      if [ -f "$WORK_DIR/imp/ASIC/top_ahb_qspi_qor.rep" ]; then
+        echo "-- QoR Report ---------------------------"
+        cat "$WORK_DIR/imp/ASIC/top_ahb_qspi_qor.rep"
+      fi
+  after_script:
+    - cp "$WORK_DIR/asic/TSMC65nm/dc_synth.log" . 2>/dev/null || true
+    - cp "$WORK_DIR/imp/ASIC/top_ahb_qspi_area.rep" . 2>/dev/null || true
+    - cp "$WORK_DIR/imp/ASIC/top_ahb_qspi_power.rep" . 2>/dev/null || true
+    - cp "$WORK_DIR/imp/ASIC/top_ahb_qspi_timing.rep" . 2>/dev/null || true
+    - cp "$WORK_DIR/imp/ASIC/top_ahb_qspi_qor.rep" . 2>/dev/null || true
+  artifacts:
+    when: always
+    paths:
+      - dc_synth.log
+      - top_ahb_qspi_area.rep
+      - top_ahb_qspi_power.rep
+      - top_ahb_qspi_timing.rep
+      - top_ahb_qspi_qor.rep
+    expire_in: 30 days
+
+# ============================================================================
+# Stage 7: Cleanup
 # ============================================================================
 
 cleanup:

@@ -7,10 +7,18 @@ set_host_options -max_cores 8
 set top_module top_ahb_qspi
 set report_path $env(SOCLABS_AHB_QSPI_DIR)/imp/ASIC/
 
-## Library setup - standard cells only (no IO pads)
+## Library setup - standard cells + precompiled memory macros
 set search_path [list . $search_path /research/AAA/phys_ip_library/arm/tsmc/cln65lp/sc12_base_rvt/r0p0/db]
 set target_library "sc12_cln65lp_base_rvt_ss_typical_max_0p90v_125c.db"
-set link_library "* sc12_cln65lp_base_rvt_ss_typical_max_0p90v_125c.db"
+
+## Precompiled SRAM macro timing libraries (ss corner to match standard cells)
+set SRAM_LIB_DIR "/research/precompiled_mems/TSMC65"
+set sram_libs [list \
+    ${SRAM_LIB_DIR}/flash_cache_data/flash_cache_data_ss_1p08v_1p08v_125c.lib \
+    ${SRAM_LIB_DIR}/flash_cache_tag/flash_cache_tag_ss_1p08v_1p08v_125c.lib \
+]
+
+set link_library "* sc12_cln65lp_base_rvt_ss_typical_max_0p90v_125c.db $sram_libs"
 
 ## Include path for CG092 IP
 set CG092_VLOG_DIR $env(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/p_flash_cache_f0/verilog
@@ -36,9 +44,11 @@ analyze -format verilog -lib WORK [list \
     $env(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/models/modules/generic/static_reg.v \
 ]
 
-## CG092 generic RAM model
-analyze -format verilog -lib WORK \
-    $env(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/testbench/execution_tb/verilog/p_flash_cache_f0_sp_ram.v
+## Precompiled SRAM macro Verilog models (flash cache data & tag register files)
+analyze -format verilog -lib WORK [list \
+    ${SRAM_LIB_DIR}/flash_cache_data/flash_cache_data.v \
+    ${SRAM_LIB_DIR}/flash_cache_tag/flash_cache_tag.v \
+]
 
 ##-----------------------------------------------------------------------------
 ## Read Corstone-101 IP
@@ -55,7 +65,7 @@ analyze -format verilog -lib WORK [list \
     $env(SOCLABS_AHB_QSPI_DIR)/logical/qspi_controller/logical/qspi_controller_mux.v \
     $env(SOCLABS_AHB_QSPI_DIR)/logical/qspi_controller/logical/qspi_clock_div.v \
     $env(SOCLABS_AHB_QSPI_DIR)/logical/cache_subsytem/logical/cache_subsystem.v \
-    $env(SOCLABS_AHB_QSPI_DIR)/logical/cache_models/generic/cache_ram.v \
+    $env(SOCLABS_AHB_QSPI_DIR)/logical/cache_models/tsmc65/cache_ram.v \
 ]
 
 ##-----------------------------------------------------------------------------
