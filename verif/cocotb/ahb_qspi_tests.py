@@ -1617,3 +1617,411 @@ async def test_continuous_read_to_normal(dut):
     assert rdata4 == data, "Normal read mismatch after leaving continuous mode"
 
     tb.log.info("Continuous/normal mode transitions verified")
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for the DATA_O "extra clock" hardware bug
+#
+# Background: During the data-output phase of a Page Program (or any SPI
+# write), the controller's FSM has a counter-initialization guard cycle
+# where byte_counter=0x1F. In the original RTL, the negedge shift-register
+# logic ran unconditionally during this guard cycle, producing one extra
+# SPI clock with one extra bit/nibble of data shifted onto MOSI before the
+# real data payload.
+#
+# The simulation flash model (SST26VF064B) was tolerant of this timing
+# quirk, so write-then-read round-trips cancelled out and existing tests
+# passed. A real Micron N25Q256A (PmodSF3) on the PYNQ-Z2 board rejected
+# every Page Program: WEL stayed set, WIP never asserted.
+#
+# The tests below verify SPI bus behaviour directly by counting QSPI_SCLK
+# cycles and edges during each FSM phase — independent of any flash model
+# response. They would have caught the bug on the original RTL.
+# ---------------------------------------------------------------------------
+
+
+async def _count_spi_clocks_in_cs_window(dut, timeout_ns=500_000):
+    """Wait for CS low, count QSPI_SCLK rising edges until CS goes high.
+
+    Returns the total number of rising edges observed while CS was
+    asserted. Times out if CS stays high for the whole window.
+    """
+    from cocotb.triggers import Edge, First, Timer
+    # Wait for CS to go low (start of SPI frame)
+    t_start = Timer(time=timeout_ns, units='ns')
+    while dut.QSPI_nCS.value == 1:
+        trig = await First(Edge(dut.QSPI_nCS), t_start)
+        if trig is t_start:
+            raise AssertionError("Timed out waiting for QSPI_nCS to assert")
+    # Count rising SCLK edges until CS rises
+    n_edges = 0
+    last_sclk = int(dut.QSPI_SCLK.value)
+    t_frame = Timer(time=timeout_ns, units='ns')
+    while True:
+        trig = await First(
+            Edge(dut.QSPI_SCLK),
+            Edge(dut.QSPI_nCS),
+            t_frame,
+        )
+        if trig is t_frame:
+            raise AssertionError("SPI frame did not end within timeout")
+        if dut.QSPI_nCS.value == 1:
+            return n_edges
+        new_sclk = int(dut.QSPI_SCLK.value)
+        if last_sclk == 0 and new_sclk == 1:
+            n_edges += 1
+        last_sclk = new_sclk
+
+
+@cocotb.test()
+async def test_spi_write_clock_count(dut):
+    """Verify exactly 8 + 24 + 8*N_bytes SPI clocks for a SPI PP.
+
+    This is the regression test that would have caught the DATA_O
+    extra-clock bug. Any count higher than expected indicates the bug
+    has regressed.
+
+    For PAGE_PROGRAM (0x02) in SPI mode with addr_en and N bytes of data:
+      opcode  = 8 clocks
+      address = 24 clocks (3 bytes)
+      data    = 8 * N clocks
+      total   = 32 + 8*N clocks
+    """
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+    await SPI_WRITE_ENABLE(dut, tb)
+    await SPI_CLR_PROTECTION(dut, tb)
+
+    # Set up a PP of 4 bytes in SPI mode (QIO_MODE=0)
+    await tb.config_ahb_master.write(0x00, 0x00000000)  # CTRL = SPI mode
+    await SPI_WRITE_ENABLE(dut, tb)
+    addr = 0x1234
+    n_bytes = 4
+    await tb.config_ahb_master.write(0x0C, addr)
+    await tb.config_ahb_master.write(0x20, 0xDEADBEEF)  # WDATA0
+
+    QSPI_INSTR = 0x02            # CMD
+    QSPI_INSTR |= (1 << 10)      # WRITE
+    QSPI_INSTR |= (1 << 11)      # ADDR_EN
+    QSPI_INSTR |= ((n_bytes - 1) << 16)  # N_RW_BYTES
+
+    # Kick off the clock counter concurrently, then trigger the command
+    expected = 8 + 24 + 8 * n_bytes
+    counter = cocotb.start_soon(_count_spi_clocks_in_cs_window(dut))
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR | (1 << 8))
+    await wait_for_irq(dut, tb)
+    await poll_busy_clear(dut, tb)
+
+    n_clocks = await counter
+    tb.log.info("SPI PP clock count: observed=%d expected=%d", n_clocks, expected)
+    assert n_clocks == expected, (
+        f"SPI PP generated {n_clocks} SCLK edges, expected {expected}. "
+        f"Excess clocks indicate the DATA_O extra-bit bug has regressed."
+    )
+
+
+@cocotb.test()
+async def test_qpi_write_clock_count(dut):
+    """Verify exactly 2 + 6 + 2*N_bytes SPI clocks for a QPI PP.
+
+    In QPI mode 4 bits go over the bus per clock:
+      opcode  = 2 clocks  (8 bits / 4 bits-per-clock)
+      address = 6 clocks  (3 bytes * 2 clocks-per-byte)
+      data    = 2 * N clocks
+      total   = 8 + 2*N clocks
+    """
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+    await SET_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x01)  # QIO_MODE=1
+    await SPI_WRITE_ENABLE(dut, tb)
+    await SPI_CLR_PROTECTION(dut, tb)
+
+    addr = 0x2000
+    n_bytes = 4
+    await SPI_WRITE_ENABLE(dut, tb)
+    await tb.config_ahb_master.write(0x0C, addr)
+    await tb.config_ahb_master.write(0x20, 0xCAFEBABE)
+
+    QSPI_INSTR = 0x02
+    QSPI_INSTR |= (1 << 10)
+    QSPI_INSTR |= (1 << 11)
+    QSPI_INSTR |= ((n_bytes - 1) << 16)
+
+    expected = 2 + 6 + 2 * n_bytes
+    counter = cocotb.start_soon(_count_spi_clocks_in_cs_window(dut))
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR | (1 << 8))
+    await wait_for_irq(dut, tb)
+    await poll_busy_clear(dut, tb)
+
+    n_clocks = await counter
+    tb.log.info("QPI PP clock count: observed=%d expected=%d", n_clocks, expected)
+    assert n_clocks == expected, (
+        f"QPI PP generated {n_clocks} SCLK edges, expected {expected}. "
+        f"Excess clocks indicate the DATA_O extra-bit bug has regressed."
+    )
+
+
+@cocotb.test()
+async def test_spi_write_single_byte_clock_count(dut):
+    """Verify a 1-byte SPI PP generates exactly 40 clocks (8 op + 24 addr + 8 data).
+
+    The 1-byte case is the tightest stress on the DATA_O exit condition —
+    if there's any off-by-one in the counter handling, it shows here.
+    """
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+    await SPI_WRITE_ENABLE(dut, tb)
+    await SPI_CLR_PROTECTION(dut, tb)
+
+    await tb.config_ahb_master.write(0x00, 0x00000000)
+    await SPI_WRITE_ENABLE(dut, tb)
+
+    await tb.config_ahb_master.write(0x0C, 0x3000)
+    await tb.config_ahb_master.write(0x20, 0x000000A5)  # 1 data byte = 0xA5
+
+    # PP, WRITE=1, ADDR_EN=1, N_RW_BYTES=0 (1 byte)
+    QSPI_INSTR = 0x02 | (1 << 10) | (1 << 11) | (0 << 16)
+
+    expected = 8 + 24 + 8   # = 40
+    counter = cocotb.start_soon(_count_spi_clocks_in_cs_window(dut))
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR)
+    await tb.config_ahb_master.write(0x08, QSPI_INSTR | (1 << 8))
+    await wait_for_irq(dut, tb)
+    await poll_busy_clear(dut, tb)
+
+    n_clocks = await counter
+    tb.log.info("Single-byte SPI PP clock count: observed=%d expected=%d",
+                n_clocks, expected)
+    assert n_clocks == expected, (
+        f"1-byte SPI PP generated {n_clocks} SCLK edges, expected {expected}. "
+        f"Excess = DATA_O extra-bit bug. Deficit = counter exit fires too early."
+    )
+
+
+@cocotb.test()
+async def test_write_then_read_roundtrip_exact(dut):
+    """Write a known pattern, read it back, assert bit-exact match.
+
+    This is the end-to-end canary for silent write corruption. If the
+    DATA_O extra-bit bug is present, the flash receives shifted data
+    and the readback will not match what was written.
+    """
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+    await SPI_WRITE_ENABLE(dut, tb)
+    await SPI_CLR_PROTECTION(dut, tb)
+    await SET_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x01)
+
+    # Erase and program with a pattern that has non-trivial bit structure
+    # (no all-0 or all-1 bytes; any bit shift will produce a visible diff)
+    await SPI_WRITE_ENABLE(dut, tb)
+    addr = 0x5000
+    data = [0xA5A5A5A5, 0x5A5A5A5A, 0xDEADBEEF, 0xCAFEBABE]
+
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+
+    await SPI_WRITE_DISABLE(dut, tb)
+    rdata = await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4)
+
+    tb.log.info("Round-trip: wrote %s, read %s",
+                [hex(x) for x in data], [hex(x) for x in rdata])
+    for i in range(4):
+        assert rdata[i] == data[i], (
+            f"Word {i}: wrote 0x{data[i]:08x}, read 0x{rdata[i]:08x} -- "
+            f"DATA_O extra-bit bug corrupts writes"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Targeted test for the XiP AHB lockup bug
+#
+# Background: ahb_qspi_interface.sv has a WAIT_READ state that waits for
+# qspi_ready (which depends on AHB_QSPI_ENABLE_ACK and AHB_QSPI_BUSY
+# propagating through 2-FF CDC synchronizers). There is no timeout:
+#
+#     WAIT_READ: if(qspi_ready) next_state = IDLE;
+#                else           next_state = WAIT_READ;
+#
+# HREADYOUT is tied to qspi_ready, so if qspi_ready never asserts, the
+# AHB bus stalls indefinitely. On the PYNQ-Z2 board this appears as a
+# kernel hang when Python does `mmio.read(0x40000000)`: the AXI-AHB
+# bridge blocks, the PS CPU waits for the bus response, interrupts stop
+# being serviced, and the network stack dies.
+#
+# This test demonstrates the hang in simulation by forcing the
+# synchronized QSPI_BUSY signal to stay asserted, mimicking what happens
+# in hardware when a CDC pulse is lost or the controller's FSM gets
+# stuck. It verifies that HREADYOUT never rises within a generous
+# window — proving the lockup can occur and measuring how long it
+# persists.
+#
+# Once a timeout-watchdog fix lands in ahb_qspi_interface.sv, this test
+# should be updated to assert that HREADYOUT rises with HRESP=ERROR
+# within the watchdog period.
+# ---------------------------------------------------------------------------
+
+
+async def _drive_busy_sync_forever(ahb_if, hclk, value=1):
+    """Continuously deposit a value onto ahb_qspi_busy_sync every HCLK.
+
+    Needed because .value = X is a deposit that gets overwritten by the
+    reg's driver on the next posedge. We re-deposit on every falling edge
+    so the value is observed during the following rising edge.
+    """
+    from cocotb.triggers import FallingEdge
+    while True:
+        await FallingEdge(hclk)
+        ahb_if.ahb_qspi_busy_sync.value = value
+        ahb_if.ahb_qspi_busy_meta.value = value
+
+
+@cocotb.test(timeout_time=500, timeout_unit='us')
+async def test_xip_hang_on_stuck_busy(dut):
+    """Demonstrate the AHB XiP lockup by forcing the CDC-synchronised BUSY
+    signal to stay asserted.
+
+    Models the real-world failure: if AHB_QSPI_ENABLE_ACK is lost in the
+    CDC synchroniser (brief pulse drops during the race between HCLK and
+    QSPI_SCLK_i), qspi_started never sets, qspi_ready never rises, and
+    HREADYOUT stays low forever. The AXI-AHB bridge then hangs, the PS
+    CPU blocks on its read, interrupts stop being serviced, and the
+    Linux network stack dies — the observed hardware lockup.
+
+    Methodology:
+      1. Enable XiP mode (CTRL.XIP_ACTIVE = 1) so the interface routes
+         AHB reads to the QSPI controller rather than returning HRESP=ERR.
+      2. Spawn a background coroutine that re-deposits
+         ahb_qspi_busy_sync=1 every HCLK falling edge. This defeats the
+         reg's normal driver and simulates the controller permanently
+         appearing busy — the exact condition that causes the hang.
+      3. Fire an AHB XiP read in the background; observe HREADY on the
+         bus for a window that fits inside cocotbext.ahb's internal
+         timeout (5000 HCLK cycles).
+
+    Expected on the current (buggy) RTL: HREADY stays low for every
+    cycle after the interface enters WAIT_READ. The test PASSes to
+    confirm the bug exists. When the timeout-watchdog fix lands, this
+    test will start FAILing — switch to test_xip_timeout_recovery then.
+    """
+    from cocotb.triggers import RisingEdge, Timer
+
+    tb = TB(dut)
+    await tb.cycle_reset()
+
+    await tb.config_ahb_master.write(0x00, 0x00000100)  # XIP_ACTIVE=1
+    await tb.config_ahb_master.write(0x30, 0x0000800B)  # FAST_READ + 8 dummy
+
+    ahb_if = dut.u_ahb_qspi_pads.u_top_ahb_qspi.u_ahb_qspi_interface
+
+    # Start the continuous-force coroutine BEFORE issuing the read so the
+    # BUSY sync signal is pinned high from the very first WAIT_READ cycle.
+    force_task = cocotb.start_soon(
+        _drive_busy_sync_forever(ahb_if, dut.HCLK, value=1))
+
+    # Fire the read in the background. cocotbext.ahb times out internally
+    # at ~5000 HCLK cycles; we observe within that window.
+    read_task = cocotb.start_soon(tb.data_ahb_master.read(0x00, 4))
+
+    # Wait a few cycles for the FSM to actually enter WAIT_READ
+    for _ in range(10):
+        await RisingEdge(dut.HCLK)
+
+    # Now sample HREADY while the transaction is in-flight. Window must
+    # stay under 5000 HCLK to avoid the cocotbext.ahb internal timeout.
+    low_cycles = 0
+    saw_wait_read = False
+    SAMPLES = 2000
+    for _ in range(SAMPLES):
+        await RisingEdge(dut.HCLK)
+        if int(ahb_if.current_state.value) == 1:   # WAIT_READ ordinal
+            saw_wait_read = True
+        if int(dut.data_HREADY.value) == 0:
+            low_cycles += 1
+
+    # Stop continuously-forcing and let the read task die naturally
+    force_task.kill()
+    ahb_if.ahb_qspi_busy_sync.value = 0
+    ahb_if.ahb_qspi_busy_meta.value = 0
+    try:
+        read_task.kill()
+    except Exception:
+        pass
+
+    tb.log.info(
+        "XiP hang probe: saw_wait_read=%s  HREADY_low_cycles=%d/%d",
+        saw_wait_read, low_cycles, SAMPLES)
+    assert saw_wait_read, "FSM never entered WAIT_READ — setup failed"
+
+    # With BUSY pinned high, WAIT_READ has no exit. Expect almost every
+    # sampled cycle to have HREADY=0. Allow a handful of cycles of slack
+    # for the first entry transition.
+    assert low_cycles > (SAMPLES - 20), (
+        f"HREADY was only low for {low_cycles}/{SAMPLES} cycles "
+        f"(>={SAMPLES-20} expected). Either the timeout watchdog is now "
+        f"in place (switch to test_xip_timeout_recovery), or the "
+        f"continuous-force coroutine didn't pin busy_sync."
+    )
+    tb.log.info(
+        "HANG CONFIRMED: data_HREADY stayed low for %d of %d HCLK cycles "
+        "with ahb_qspi_busy_sync pinned high. Without a watchdog in "
+        "ahb_qspi_interface.sv, the AHB bus wedges indefinitely — "
+        "exactly what happens on the PYNQ-Z2 board during xip_torture.",
+        low_cycles, SAMPLES)
+
+
+@cocotb.test(timeout_time=500, timeout_unit='us')
+async def test_xip_timeout_recovery(dut):
+    """Verify the AHB interface recovers cleanly when BUSY is stuck.
+
+    This test EXPECTS the timeout watchdog in ahb_qspi_interface.sv.
+    With the fix in place, a stuck BUSY signal should cause the FSM to
+    transition to ERR, raise HRESP=1, and release HREADYOUT=1 within the
+    watchdog period (~1.3ms at 50 MHz HCLK with a 16-bit counter).
+
+    This test is expected to FAIL on the current (buggy) RTL because
+    there is no timeout. Once the Layer 1 fix lands, this test should
+    pass and test_xip_hang_on_stuck_busy above should be retired.
+    """
+    from cocotb.triggers import Timer, First
+
+    tb = TB(dut)
+    await tb.cycle_reset()
+
+    await tb.config_ahb_master.write(0x00, 0x00000100)  # XIP_ACTIVE=1
+    await tb.config_ahb_master.write(0x30, 0x0000800B)
+
+    ahb_if = dut.u_ahb_qspi_pads.u_top_ahb_qspi.u_ahb_qspi_interface
+    ahb_if.ahb_qspi_busy_sync.value = 1
+
+    read_task = cocotb.start_soon(tb.data_ahb_master.read(0x00, 4))
+    # Give the watchdog plenty of time (watchdog should be ~65k HCLK cycles
+    # = ~1.3ms at 50 MHz; allow 2ms to catch any slower variants).
+    timer = Timer(2000, units='us')
+    winner = await First(read_task, timer)
+
+    if winner is timer:
+        read_task.kill()
+        ahb_if.ahb_qspi_busy_sync.value = 0
+        assert False, (
+            "AHB watchdog did not fire within 2ms. The timeout watchdog "
+            "fix has not been applied to ahb_qspi_interface.sv — the AHB "
+            "bus remains wedged. See test_xip_hang_on_stuck_busy for the "
+            "bug demonstration.")
+
+    # Read completed. Verify it came back via the error path, not a real
+    # completion (which would be impossible with BUSY stuck).
+    hresp_observed = int(dut.data_HRESP.value)
+    ahb_if.ahb_qspi_busy_sync.value = 0
+    tb.log.info("Watchdog fired: AHB read completed with HRESP=%d", hresp_observed)
+    assert hresp_observed == 1, (
+        f"Expected HRESP=1 (error) from watchdog, saw HRESP={hresp_observed}. "
+        "The read must have returned via the error path, not normal completion.")

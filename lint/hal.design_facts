@@ -2,7 +2,7 @@ halstruct(64): 22.03-s005: (c) Copyright 1995-2022 Cadence Design Systems, Inc.
 
 
 
-Design facts for top module: top_ahb_qspi
+Design facts for top module: qspi_controller
 -----------------------------------------
 
   1. Primary inputs used as flip-flop
@@ -10,15 +10,13 @@ Design facts for top module: top_ahb_qspi
                                             Number Of single-bit
      Primary Input                    : Flipflops/latches controlled
      -------------                      ----------------------------
-     HCLK                             : 549 FFs
-     PCLK                             : 302 FFs
+     QSPI_SCLK_i                      : 379 FFs
 
   2. Gated primary input used as flip-flop
      clocks and latch enables         :
                                             Number Of single-bit
      Gated primary signal             : Flipflops/latches controlled
      -------------------                ----------------------------
-     top_ahb_qspi.u_qspi_clock_div.QSPI_SCLK_i : 382 FFs
 
   3. Internally generated signals used as flip-flop
      clocks and latch enables         :
@@ -29,7 +27,6 @@ Design facts for top module: top_ahb_qspi
   4. Primary inputs used as async
      set/reset
                                       : HRESETn
-                                      : PRESETn
 
      Primary inputs used as sync
      set/reset
@@ -54,8 +51,8 @@ Design facts for the complete design:
 
   1. Number of tops in hierarchy : 1
 
-  2. Number of single-bit flip-flops in hierarchy : 1233
-    -- (i)  Number of single-bit D flip-flops in hierarchy : 1233
+  2. Number of single-bit flip-flops in hierarchy : 379
+    -- (i)  Number of single-bit D flip-flops in hierarchy : 379
     -- (ii) Number of single-bit JK flip-flops in hierarchy : 0
 
   3. Number of single-bit latches in hierarchy : 0

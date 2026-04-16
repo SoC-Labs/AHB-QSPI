@@ -14,8 +14,8 @@ set target_library "sc12_cln65lp_base_rvt_ss_typical_max_0p90v_125c.db"
 ## Precompiled SRAM macro timing libraries (ss corner to match standard cells)
 set SRAM_LIB_DIR "/research/precompiled_mems/TSMC65"
 set sram_libs [list \
-    ${SRAM_LIB_DIR}/flash_cache_data/flash_cache_data_ss_1p08v_1p08v_125c.lib \
-    ${SRAM_LIB_DIR}/flash_cache_tag/flash_cache_tag_ss_1p08v_1p08v_125c.lib \
+    ${SRAM_LIB_DIR}/flash_cache_data/flash_cache_data_ss_1p08v_1p08v_125c.db \
+    ${SRAM_LIB_DIR}/flash_cache_tag/flash_cache_tag_ss_1p08v_1p08v_125c.db \
 ]
 
 set link_library "* sc12_cln65lp_base_rvt_ss_typical_max_0p90v_125c.db $sram_libs"

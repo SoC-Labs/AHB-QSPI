@@ -1,0 +1,280 @@
+#-----------------------------------------------------------------------------
+# AHB QSPI Subsystem - Synchronous controller helpers for stress tests
+# A joint work commissioned on behalf of SoC Labs, under Arm Academic Access license.
+#
+# Contributors
+#
+# David Mapstone (d.a.mapstone@soton.ac.uk)
+#
+# Copyright (C) 2026, SoC Labs (www.soclabs.org)
+#-----------------------------------------------------------------------------
+# Direct, synchronous QSPI controller wrapper for the stress test runner.
+# Distinct from qspi_ahb_shim - that module mimics the cocotb async API for
+# replaying simulation tests; this one is plain blocking calls because the
+# stress tests are written natively for hardware and have no need to look
+# like cocotb.
+#-----------------------------------------------------------------------------
+
+import time
+
+# APB register offsets (from src/rdl/apb_qspi_regs.rdl)
+REG_CTRL          = 0x00
+REG_STATUS        = 0x04
+REG_SPI_CMD       = 0x08
+REG_SPI_ADDR      = 0x0C
+REG_RDATA         = (0x10, 0x14, 0x18, 0x1C)
+REG_WDATA         = (0x20, 0x24, 0x28, 0x2C)
+REG_AHB_SPI_SETUP = 0x30
+REG_CLK_DIV       = 0x34
+
+# CTRL bit positions
+CTRL_QIO_MODE     = 0
+CTRL_XIP_ACTIVE   = 8
+CTRL_MODE_CODE_SH = 16
+CTRL_CONT_READ    = 24
+CTRL_NO_CMD       = 25
+
+# STATUS bit positions
+STATUS_BUSY       = 0
+STATUS_IRQ_CLR    = 8
+
+# SPI_CMD bit positions
+CMD_ENABLE        = 8
+CMD_READ          = 9
+CMD_WRITE         = 10
+CMD_ADDR_EN       = 11
+CMD_DUMMY_SH      = 12
+CMD_N_RW_BYTES_SH = 16
+
+# Standard SPI flash opcodes (vendor-agnostic)
+OP_WREN           = 0x06
+OP_WRDI           = 0x04
+OP_RDSR           = 0x05
+OP_RDID_SPI       = 0x9F
+OP_FAST_READ      = 0x0B
+OP_PAGE_PROGRAM   = 0x02
+OP_SECTOR_ERASE_4K  = 0x20
+OP_SECTOR_ERASE_64K = 0xD8
+OP_BULK_ERASE     = 0xC7
+
+# Flash status register bits
+SR_WIP            = 1 << 0   # Write in progress
+SR_WEL            = 1 << 1   # Write enable latch
+
+# Flash geometry (PmodSF3 / N25Q256A: 32 MB)
+SECTOR_SIZE       = 64 * 1024
+PAGE_SIZE         = 256
+TOTAL_SECTORS     = 256       # only the lower 16 MB is reachable via SPI_ADDR[21:0]
+
+
+class QspiTimeout(Exception):
+    pass
+
+
+class QspiHw:
+    """Thin synchronous wrapper around the QSPI APB register bank.
+
+    Constructed from a `QspiOverlay` instance. All methods block until the
+    transaction completes; raises `QspiTimeout` if BUSY does not clear or
+    the flash WIP bit stays set within the configured deadline.
+    """
+
+    def __init__(self, overlay, timeout_s=2.0):
+        self.overlay = overlay
+        self.apb     = overlay.apb
+        self.ahb     = overlay.ahb
+        self.timeout = timeout_s
+
+    # ---- low-level register access ----------------------------------------
+
+    def reset_controller(self):
+        """Soft reset - put every writable register back to a known idle."""
+        self.apb.write(REG_CTRL,          0)
+        self.apb.write(REG_STATUS,        1 << STATUS_IRQ_CLR)
+        self.apb.write(REG_SPI_CMD,       0)
+        self.apb.write(REG_SPI_ADDR,      0)
+        self.apb.write(REG_AHB_SPI_SETUP, 0)
+        self.apb.write(REG_CLK_DIV,       5)
+
+    def set_clk_div(self, n):
+        if not 0 <= n <= 31:
+            raise ValueError("CLK_DIV out of range [0, 31]")
+        self.apb.write(REG_CLK_DIV, n & 0x1F)
+
+    def set_ctrl(self, *, qio=0, xip_active=0, mode_code=0, cont_read=0, no_cmd=0):
+        v = ((qio        & 1) << CTRL_QIO_MODE)     \
+          | ((xip_active & 1) << CTRL_XIP_ACTIVE)   \
+          | ((mode_code  & 0xFF) << CTRL_MODE_CODE_SH) \
+          | ((cont_read  & 1) << CTRL_CONT_READ)    \
+          | ((no_cmd     & 1) << CTRL_NO_CMD)
+        self.apb.write(REG_CTRL, v)
+
+    def get_status(self):
+        return self.apb.read(REG_STATUS)
+
+    def is_busy(self):
+        return bool(self.get_status() & (1 << STATUS_BUSY))
+
+    def clear_irq(self):
+        self.apb.write(REG_STATUS, 1 << STATUS_IRQ_CLR)
+
+    def wait_busy_clear(self, timeout=None):
+        deadline = time.monotonic() + (timeout if timeout is not None else self.timeout)
+        while time.monotonic() < deadline:
+            if not self.is_busy():
+                return
+        raise QspiTimeout("controller BUSY did not clear")
+
+    # ---- generic SPI command issue ----------------------------------------
+
+    def spi_cmd(self, opcode, *, read=0, write=0, addr_en=0, dummy=0, n_bytes=1):
+        """Issue a single SPI/QPI command. n_bytes = data phase length in bytes (1..16).
+
+        The data phase length register field is N-1; pass the actual byte count
+        and we encode it for you. For opcode-only commands (e.g. WREN) pass
+        read=write=0 and n_bytes=1 - the field is ignored when neither READ
+        nor WRITE is set.
+        """
+        if not 1 <= n_bytes <= 16:
+            raise ValueError("n_bytes must be in [1, 16]")
+        if not 0 <= dummy <= 15:
+            raise ValueError("dummy must be in [0, 15]")
+        flags = (read    << CMD_READ)        \
+              | (write   << CMD_WRITE)       \
+              | (addr_en << CMD_ADDR_EN)     \
+              | (dummy   << CMD_DUMMY_SH)    \
+              | ((n_bytes - 1) << CMD_N_RW_BYTES_SH)
+        base = (opcode & 0xFF) | flags
+        # Two-write pattern: configure descriptor, then strobe ENABLE.
+        self.apb.write(REG_SPI_CMD, base)
+        self.apb.write(REG_SPI_CMD, base | (1 << CMD_ENABLE))
+        self.wait_busy_clear()
+        self.clear_irq()
+
+    def write_addr(self, addr):
+        self.apb.write(REG_SPI_ADDR, addr & 0x3FFFFF)
+
+    def write_wdata(self, data_bytes):
+        """Pack up to 16 bytes into WDATA0..3 (big-endian word order).
+
+        The controller sends bits [31:24] of WDATA0 first on the SPI bus,
+        then [23:16], [15:8], [7:0], then WDATA1[31:24], etc. This is
+        big-endian byte order within each word — matching RDATA packing.
+        """
+        if len(data_bytes) > 16:
+            raise ValueError("max 16 bytes per WDATA load")
+        padded = bytes(data_bytes) + b'\x00' * (16 - len(data_bytes))
+        for i, off in enumerate(REG_WDATA):
+            self.apb.write(off, int.from_bytes(padded[i*4:(i+1)*4], 'big'))
+
+    def read_rdata_words(self):
+        """Read all four RDATA registers as raw 32-bit words."""
+        return [self.apb.read(off) for off in REG_RDATA]
+
+    def read_rdata(self, n_bytes):
+        """Read n_bytes (1..16) from RDATA0..3.
+
+        The QSPI controller packs SPI bytes big-endian within each 32-bit
+        word: the first byte received goes to bits [31:24] of RDATA0, the
+        second to [23:16], etc. The cocotb tests confirm this by checking
+        e.g. `RDATA0 & (1 << 24)` for the WIP bit of the first status byte.
+        """
+        if not 1 <= n_bytes <= 16:
+            raise ValueError("n_bytes must be in [1, 16]")
+        words = self.read_rdata_words()
+        raw = b''.join(w.to_bytes(4, 'big') for w in words)
+        return raw[:n_bytes]
+
+    # ---- flash operations -------------------------------------------------
+
+    def write_enable(self):
+        self.spi_cmd(OP_WREN)
+
+    def write_disable(self):
+        self.spi_cmd(OP_WRDI)
+
+    def read_status(self):
+        """Read flash status register. Returns the raw SR byte.
+
+        Matches the cocotb pattern: reads 3 bytes (N_RW_BYTES=2) so the
+        status byte lands at RDATA0[31:24] = raw byte 0 with big-endian
+        extraction.
+        """
+        self.spi_cmd(OP_RDSR, read=1, n_bytes=3)
+        return self.read_rdata(1)[0]
+
+    def jedec_id(self):
+        """Return 24-bit JEDEC ID (manufacturer | type | density)."""
+        self.spi_cmd(OP_RDID_SPI, read=1, n_bytes=3)
+        raw = self.read_rdata(3)
+        return (raw[0] << 16) | (raw[1] << 8) | raw[2]
+
+    def wait_flash_idle(self, timeout=None):
+        """Poll the flash status register until WIP clears."""
+        deadline = time.monotonic() + (timeout if timeout is not None else self.timeout)
+        while time.monotonic() < deadline:
+            if not (self.read_status() & SR_WIP):
+                return
+        raise QspiTimeout("flash WIP did not clear")
+
+    def sector_erase_64k(self, addr, timeout=None):
+        """Erase one 64KB sector. Blocks until the flash reports idle."""
+        self.write_enable()
+        self.write_addr(addr)
+        self.spi_cmd(OP_SECTOR_ERASE_64K, addr_en=1)
+        self.wait_flash_idle(timeout if timeout is not None else 1.0)
+
+    def page_program_chunk(self, addr, data_bytes):
+        """Program up to 16 bytes at `addr`. Caller must keep within one page."""
+        if (addr & 0xFF) + len(data_bytes) > PAGE_SIZE:
+            raise ValueError("chunk crosses a 256B page boundary")
+        self.write_enable()
+        self.write_addr(addr)
+        self.write_wdata(data_bytes)
+        self.spi_cmd(OP_PAGE_PROGRAM, write=1, addr_en=1, n_bytes=len(data_bytes))
+        self.wait_flash_idle()
+
+    def page_program(self, addr, data_bytes):
+        """Program an arbitrary-length buffer starting at `addr`.
+
+        Splits the buffer into 16-byte controller-sized chunks and into 256-byte
+        flash-page boundaries. Caller is responsible for the sector being
+        already erased.
+        """
+        i = 0
+        while i < len(data_bytes):
+            page_off  = (addr + i) & 0xFF
+            chunk_max = min(16, PAGE_SIZE - page_off, len(data_bytes) - i)
+            self.page_program_chunk(addr + i, data_bytes[i:i+chunk_max])
+            i += chunk_max
+
+    def read_chunk(self, addr, n_bytes, dummy=8):
+        """Read up to 16 bytes via APB FAST_READ (opcode 0x0B)."""
+        if not 1 <= n_bytes <= 16:
+            raise ValueError("n_bytes must be in [1, 16]")
+        self.write_addr(addr)
+        self.spi_cmd(OP_FAST_READ, read=1, addr_en=1, dummy=dummy, n_bytes=n_bytes)
+        return self.read_rdata(n_bytes)
+
+    def read_buffer(self, addr, n_bytes):
+        """Read an arbitrary-length buffer starting at `addr` via APB."""
+        out = bytearray()
+        while len(out) < n_bytes:
+            chunk = min(16, n_bytes - len(out))
+            out.extend(self.read_chunk(addr + len(out), chunk))
+        return bytes(out)
+
+    # ---- AHB XiP path -----------------------------------------------------
+
+    def xip_setup(self, opcode=OP_FAST_READ, dummy=8, qio=0):
+        """Configure the AHB XiP path. CTRL.XIP_ACTIVE is set inside.
+
+        The cache subsystem at +0x1000 is not touched - leave the user to
+        enable/disable it via cache_subsystem.v's APB-mapped registers if
+        they care.
+        """
+        self.apb.write(REG_AHB_SPI_SETUP, (opcode & 0xFF) | (((dummy - 1) & 0xF) << 12))
+        self.set_ctrl(qio=qio, xip_active=1)
+
+    def xip_disable(self):
+        self.set_ctrl()

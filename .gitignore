@@ -65,3 +65,8 @@ xcelium.d
 lint/*.xml
 lint/*.log
 .hal-irun.history
+
+*.pyc
+*stack_trace*.txt
+crte*.txt
+work_qc

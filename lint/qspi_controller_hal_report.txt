@@ -1,0 +1,134 @@
+══════════════════════════════════════════════════════════
+  HAL Lint Report: qspi_controller
+  Source: qspi_controller_hal.log
+══════════════════════════════════════════════════════════
+
+── Summary ─────────────────────────────────────────────
+halcheck: Total errors   = 0.
+halcheck: Total warnings = 40.
+halcheck: Total errors   = 0.
+halcheck: Total warnings = 40.
+halsynth: Total errors   = 0.
+halsynth: Total warnings = 2.
+halsynth: Total errors   = 0.
+halsynth: Total warnings = 2.
+halstruct: Total errors   = 0.
+halstruct: Total warnings = 35.
+halstruct: Total errors   = 0.
+halstruct: Total warnings = 35.
+
+── Errors (AHB QSPI RTL) ────────────────────────────────
+  (none)
+
+── Warnings (AHB QSPI RTL) ──────────────────────────────
+halcheck: *W,BITUNS (../logical/qspi_controller/logical/qspi_controller.sv,326|0): Not all bits of constant '4'b0' are explicitly specified.
+halcheck: *W,IFSMCD (../logical/qspi_controller/logical/qspi_controller.sv,87|0): Condition 'QSPI_enable_sync == 1'b1' is present in all the branches of if/if-else statement.
+halcheck: *W,ULRELE (../logical/qspi_controller/logical/qspi_controller.sv,188|0): Unequal length operands in relational operator (padding produces incorrect result) in module/design-unit qspi_controller -- LHS operand is 4 bits, RHS operand is 32 bits.
+halcheck: *W,UELOPR (../logical/qspi_controller/logical/qspi_controller.sv,188|0): Unequal length operand in bit/arithmetic operator MINUS in module/design-unit qspi_controller.
+halcheck: *W,ULCMPE (../logical/qspi_controller/logical/qspi_controller.sv,231|0): Unequal length operands in equality operator encountered (padding produces incorrect result) in module/design-unit qspi_controller. LHS operand is 4 bits, RHS operand is 5 bits.
+halcheck: *W,IMPTYP (../logical/qspi_controller/logical/qspi_controller.sv,351|0): Expression 'op_counter + 1' implicitly converted to type 'register' from type 'integer'.
+halcheck: *W,UELOPR (../logical/qspi_controller/logical/qspi_controller.sv,351|0): Unequal length operand in bit/arithmetic operator PLUS in module/design-unit qspi_controller.
+halcheck: *W,IMPTYP (../logical/qspi_controller/logical/qspi_controller.sv,357|0): Expression 'data_counter + 1' implicitly converted to type 'register' from type 'integer'.
+halcheck: *W,UELOPR (../logical/qspi_controller/logical/qspi_controller.sv,357|0): Unequal length operand in bit/arithmetic operator PLUS in module/design-unit qspi_controller.
+halcheck: *W,IMPTYP (../logical/qspi_controller/logical/qspi_controller.sv,359|0): Expression 'byte_counter + 1' implicitly converted to type 'register' from type 'integer'.
+halcheck: *W,UELOPR (../logical/qspi_controller/logical/qspi_controller.sv,359|0): Unequal length operand in bit/arithmetic operator PLUS in module/design-unit qspi_controller.
+halcheck: *W,IMPTYP (../logical/qspi_controller/logical/qspi_controller.sv,362|0): Expression 'byte_counter + 1' implicitly converted to type 'register' from type 'integer'.
+halcheck: *W,UELOPR (../logical/qspi_controller/logical/qspi_controller.sv,362|0): Unequal length operand in bit/arithmetic operator PLUS in module/design-unit qspi_controller.
+halcheck: *W,IMPTYP (../logical/qspi_controller/logical/qspi_controller.sv,371|0): Expression 'dummy_counter + 1' implicitly converted to type 'register' from type 'integer'.
+halcheck: *W,UELOPR (../logical/qspi_controller/logical/qspi_controller.sv,371|0): Unequal length operand in bit/arithmetic operator PLUS in module/design-unit qspi_controller.
+halcheck: *W,IMPTYP (../logical/qspi_controller/logical/qspi_controller.sv,377|0): Expression 'addr_counter + 1' implicitly converted to type 'register' from type 'integer'.
+halcheck: *W,UELOPR (../logical/qspi_controller/logical/qspi_controller.sv,377|0): Unequal length operand in bit/arithmetic operator PLUS in module/design-unit qspi_controller.
+halcheck: *W,IMPTYP (../logical/qspi_controller/logical/qspi_controller.sv,385|0): Expression 'mode_counter + 1' implicitly converted to type 'register' from type 'integer'.
+halcheck: *W,UELOPR (../logical/qspi_controller/logical/qspi_controller.sv,385|0): Unequal length operand in bit/arithmetic operator PLUS in module/design-unit qspi_controller.
+halcheck: *W,ULCMPE (../logical/qspi_controller/logical/qspi_controller.sv,392|0): Unequal length operands in equality operator encountered (padding produces incorrect result) in module/design-unit qspi_controller. LHS operand is 5 bits, RHS operand is 32 bits.
+halcheck: *W,UELOPR (../logical/qspi_controller/logical/qspi_controller.sv,392|0): Unequal length operand in bit/arithmetic operator PLUS in module/design-unit qspi_controller.
+halcheck: *W,ULCMPE (../logical/qspi_controller/logical/qspi_controller.sv,395|0): Unequal length operands in equality operator encountered (padding produces incorrect result) in module/design-unit qspi_controller. LHS operand is 5 bits, RHS operand is 32 bits.
+halcheck: *W,UELOPR (../logical/qspi_controller/logical/qspi_controller.sv,395|0): Unequal length operand in bit/arithmetic operator PLUS in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,406|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,407|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,408|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,409|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,410|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,411|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,412|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,413|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,414|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,415|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,416|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,417|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,418|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,419|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,420|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,UELCIT (../logical/qspi_controller/logical/qspi_controller.sv,421|0): Unequal length in case item comparison (selector is 5 bits, case tag expression is 4 bits) in module/design-unit qspi_controller.
+halcheck: *W,MXUANS (../logical/qspi_controller/logical/qspi_controller.sv,426|0): Expression '(QSPI_enable_syn...' in module/design-unit qspi_controller has both signed and unsigned variables/constants.
+    *W,BITUNS : 1
+    *W,IMPTYP : 7
+    *W,UELCIT : 16
+    *W,UELOPR : 10
+    *W,ULCMPE : 3
+    *W,ULRELE : 1
+    *W,IFSMCD : 1
+    *W,MXUANS : 1
+halsynth: *W,EDGMIX (../logical/qspi_controller/logical/qspi_controller.sv,59|0): Both edges of clock signal 'QSPI_SCLK_i' used in module 'qspi_controller'.
+halsynth: *W,NOSTAN: The specified FSM cannot be analyzed for terminal and unreachable states.
+    *W,EDGMIX : 1
+    *W,NOSTAN : 1
+halstruct: *W,IOCOMB (../logical/qspi_controller/logical/qspi_controller.sv,2|0): Combinational path detected between top-level input 'qspi_controller.QSPI_SCLK_i' and top-level output 'qspi_controller.QSPI_SCLK'.
+halstruct: *W,IOCOMB (../logical/qspi_controller/logical/qspi_controller.sv,2|0): Combinational path detected between top-level input 'qspi_controller.QSPI_SPI_MODE[1]' and top-level output 'qspi_controller.QSPI_SCLK'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,318|0): 'D Type' type flip-flop/latch 'qspi_controller.QSPI_SCLK_e' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,318|0): Flip-flop 'QSPI_SCLK_e' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,313|0): 'D Type' type flip-flop/latch 'qspi_controller.QSPI_IO_o_reg[0]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,313|0): Flip-flop 'QSPI_IO_o_reg[0]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,313|0): 'D Type' type flip-flop/latch 'qspi_controller.QSPI_IO_o_reg[3:1]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,313|0): Flip-flop 'QSPI_IO_o_reg[3:1]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,321|0): 'D Type' type flip-flop/latch 'qspi_controller.QSPI_IO_e_int' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,321|0): Flip-flop 'QSPI_IO_e_int' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,272|0): 'D Type' type flip-flop/latch 'qspi_controller.op_code[0]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,272|0): Flip-flop 'op_code[0]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,275|0): 'D Type' type flip-flop/latch 'qspi_controller.op_code[3:1]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,275|0): Flip-flop 'op_code[3:1]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,275|0): 'D Type' type flip-flop/latch 'qspi_controller.op_code[7:4]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,275|0): Flip-flop 'op_code[7:4]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,311|0): 'D Type' type flip-flop/latch 'qspi_controller.addr_code[0]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,311|0): Flip-flop 'addr_code[0]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,314|0): 'D Type' type flip-flop/latch 'qspi_controller.addr_code[3:1]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,314|0): Flip-flop 'addr_code[3:1]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,314|0): 'D Type' type flip-flop/latch 'qspi_controller.addr_code[21:4]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,314|0): Flip-flop 'addr_code[21:4]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,314|0): 'D Type' type flip-flop/latch 'qspi_controller.addr_code[23:22]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,314|0): Flip-flop 'addr_code[23:22]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,50|0): 'D Type' type flip-flop/latch 'qspi_controller.qspi_mode_reg[3:0]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,50|0): Flip-flop 'qspi_mode_reg[3:0]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,50|0): 'D Type' type flip-flop/latch 'qspi_controller.qspi_mode_reg[7:4]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,50|0): Flip-flop 'qspi_mode_reg[7:4]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,308|0): 'D Type' type flip-flop/latch 'qspi_controller.QSPI_WDATA_reg[123:0]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,308|0): Flip-flop 'QSPI_WDATA_reg[123:0]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,308|0): 'D Type' type flip-flop/latch 'qspi_controller.QSPI_WDATA_reg[126:124]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,308|0): Flip-flop 'QSPI_WDATA_reg[126:124]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,FFNMOD (../logical/qspi_controller/logical/qspi_controller.sv,308|0): 'D Type' type flip-flop/latch 'qspi_controller.QSPI_WDATA_reg[127]' should have a separate level of hierarchy.
+halstruct: *W,NEFLOP (../logical/qspi_controller/logical/qspi_controller.sv,308|0): Flip-flop 'QSPI_WDATA_reg[127]' is triggered at the negative edge of clock 'QSPI_SCLK_i'.
+halstruct: *W,CLKUCL (../logical/qspi_controller/logical/qspi_controller.sv,2|0): The clock 'qspi_controller.QSPI_SCLK_i' drives a combinational logic. Depth '1' exceeded at 'qspi_controller.QSPI_SCLK'.
+    *W,NEFLOP : 16
+    *W,FFNMOD : 16
+    *W,CLKUCL : 1
+    *W,IOCOMB : 2
+
+── Warning Breakdown (AHB QSPI RTL) ─────────────────────
+     17 UELCIT
+     17 NEFLOP
+     17 FFNMOD
+     11 UELOPR
+      8 IMPTYP
+      4 ULCMPE
+      3 IOCOMB
+      2 ULRELE
+      2 NOSTAN
+      2 MXUANS
+      2 IFSMCD
+      2 EDGMIX
+      2 CLKUCL
+      2 BITUNS
+
+── Warnings (External IP) ───────────────────────────────
+  1 warnings (suppressed — third-party IP)
+

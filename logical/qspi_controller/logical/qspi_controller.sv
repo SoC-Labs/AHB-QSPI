@@ -281,13 +281,26 @@ always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
     end else if(current_state == DATA_O) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
-        // DATA_O: WDATA_reg is shifted out, NOT reloaded
+        // DATA_O: WDATA_reg is shifted out, NOT reloaded.
+        //
+        // SPI-mode bug workaround: during the counter-overflow guard cycle
+        // (byte_counter==0x1F on the first DATA_O cycle), the shift-out
+        // logic previously ran unconditionally, producing one spurious
+        // extra bit on MOSI before the real payload. The flash rejected
+        // the resulting Page Program as malformed. Gating the shift (and
+        // clock) on byte_counter != 0x1F suppresses that spurious bit.
+        //
+        // QPI mode behaves differently: its counter rolls over every
+        // cycle (data_counter >= 1), so what looks like a guard cycle is
+        // actually the first legitimate nibble shift — do NOT suppress.
         if(QSPI_QIO_MODE==1'b1) begin
             QSPI_IO_o_reg <= QSPI_WDATA_reg[3:0];
             QSPI_WDATA_reg <= {4'h0, QSPI_WDATA_reg[127:4]};
-        end else begin
+        end else if(byte_counter != 5'h1F) begin
             QSPI_IO_o_reg[0] <= QSPI_WDATA_reg[0];
             QSPI_WDATA_reg <= {1'b0, QSPI_WDATA_reg[127:1]};
+        end else begin
+            QSPI_SCLK_e <= 1'b0;  // suppress the spurious SPI-mode clock
         end
     end else if(current_state == ADDR) begin
         QSPI_IO_e_int <= 1'b1;
