@@ -110,16 +110,21 @@ def test_soak(hw, ctx):
 XIP_WINDOW_KB = 64   # set up cost = ~17 s. Bump to 1024 for full coverage.
 
 
-def test_xip_torture(hw, ctx, rng=None):
+def test_xip_torture(hw, ctx, rng=None, sleep_us=0):
     """Program a window of flash with PRBS, then random-read via AHB XiP.
 
     Setup: pick the next sector (so we don't trample the soak test's data),
     erase it, program it with PRBS bytes seeded by absolute address.
     Main loop: random 4-byte aligned reads from the AHB XiP MMIO region,
     compared against the same PRBS seed.
+
+    `sleep_us`: optional microsecond delay between reads. Used to test
+    whether sustained high-frequency AHB traffic is what's wedging the PS.
+    0 (default) = no delay, full-rate reads.
     """
     if rng is None:
         rng = random.Random(0xCAFE)
+    sleep_s = sleep_us * 1e-6 if sleep_us > 0 else 0
 
     # Setup window: one or more sectors
     rot = SectorRotator()
@@ -148,12 +153,25 @@ def test_xip_torture(hw, ctx, rng=None):
     miscompares  = 0
     window_bytes = n_sectors * SECTOR_SIZE
 
+    # Log progress so when the PS wedges we can see exactly how many
+    # reads made it through. Flushed by line-buffered stdout. Tight
+    # PROGRESS_EVERY=10 so we pin the hang to within ~10 reads.
+    PROGRESS_EVERY = 10
+    next_progress  = 1                  # also log the VERY first read
+
+    # Duration threshold to flag a stalled read (most are ~20μs).
+    STALL_S = 0.010
+
     while time.monotonic() < ctx.deadline:
-        # Burst 1024 reads then re-check the deadline (cuts loop overhead)
         for _ in range(1024):
             offset = rng.randrange(0, window_bytes - 4) & ~0x3
             phys   = base_addr + offset
+            t0     = time.monotonic()
             actual = hw.ahb.read(phys)        # 32-bit MMIO read
+            dt     = time.monotonic() - t0
+            if dt > STALL_S:
+                log.warning("[xip] slow read #%d phys=0x%06x took %.3f s",
+                            reads_done + 1, phys, dt)
             exp    = int.from_bytes(expected_for(phys, 4), 'little')
             if actual != exp:
                 miscompares += 1
@@ -161,6 +179,12 @@ def test_xip_torture(hw, ctx, rng=None):
                     f'miscompare @ 0x{phys:06x}',
                     expected=f'0x{exp:08x}', actual=f'0x{actual:08x}')
             reads_done += 1
+            if reads_done >= next_progress:
+                log.info("[xip] progress: %d reads (last phys=0x%06x val=0x%08x)",
+                         reads_done, phys, actual)
+                next_progress = reads_done + PROGRESS_EVERY
+            if sleep_s:
+                time.sleep(sleep_s)
         if time.monotonic() >= ctx.deadline:
             break
 

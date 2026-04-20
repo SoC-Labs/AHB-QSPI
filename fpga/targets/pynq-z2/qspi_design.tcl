@@ -56,6 +56,11 @@ proc create_root_design { parentCell } {
 
     # Debug / activity signals for board LEDs
     create_bd_port -dir O          irq_qspi_finished
+    create_bd_port -dir O          dbg_xip_active
+    create_bd_port -dir O          dbg_soft_reset
+    # HCLK exported so the board wrapper can run a free-standing heartbeat
+    # counter in the same clock domain as the QSPI IP (see qspi_design_wrapper.v).
+    create_bd_port -dir O          hclk_out
 
     # DDR and Fixed IO (Zynq PS)
     create_bd_intf_port -mode Master -vlnv xilinx.com:interface:ddrx_rtl:1.0 DDR
@@ -168,7 +173,8 @@ proc create_root_design { parentCell } {
                    [get_bd_pins axi_ahb/s_axi_aclk] \
                    [get_bd_pins axi_apb/s_axi_aclk] \
                    [get_bd_pins qspi_ip_0/HCLK] \
-                   [get_bd_pins qspi_ip_0/PCLK]
+                   [get_bd_pins qspi_ip_0/PCLK] \
+                   [get_bd_ports hclk_out]
 
     #-- Reset fan-out (active-low). Each bridge has a single ARESETN.
     connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] \
@@ -204,6 +210,10 @@ proc create_root_design { parentCell } {
     connect_bd_net [get_bd_pins qspi_ip_0/IRQ_QSPI_FINISHED] \
                    [get_bd_pins processing_system7_0/IRQ_F2P] \
                    [get_bd_ports irq_qspi_finished]
+
+    #-- Debug wires to external LED ports
+    connect_bd_net [get_bd_pins qspi_ip_0/DBG_XIP_ACTIVE] [get_bd_ports dbg_xip_active]
+    connect_bd_net [get_bd_pins qspi_ip_0/DBG_SOFT_RESET] [get_bd_ports dbg_soft_reset]
 
     #-- QSPI pads to external ports
     connect_bd_net [get_bd_pins qspi_ip_0/QSPI_SCLK] [get_bd_ports qspi_sclk]

@@ -49,13 +49,25 @@ class XorShift32:
 def expected_for(addr, n_bytes):
     """Deterministic bytes for `addr..addr+n_bytes` independent of prior calls.
 
-    Seeds the PRBS with `addr | PRBS_KEY` so each read can verify in isolation.
-    Pads addresses to 4-byte alignment internally so sub-word reads work too.
+    CRITICAL CONTRACT: the byte at any given flash address X must be
+    the same regardless of which query range asked for it. Callers
+    rely on this when they page-program with one range and verify
+    with another (e.g. programs the whole 256-byte page, then reads
+    random 4-byte chunks from it).
+
+    Implementation: seed the PRBS PER 4-BYTE BLOCK so the byte at
+    address X is fully determined by (X & ~0x3 | PRBS_KEY) and the
+    offset within that block. This means any query that touches X
+    will produce the same byte there.
     """
-    word_addr  = addr & ~0x3
-    byte_off   = addr & 0x3
-    pad_bytes  = byte_off + n_bytes
-    pad_align  = (pad_bytes + 3) & ~0x3
-    rng        = XorShift32(word_addr | PRBS_KEY)
-    blob       = rng.next_bytes(pad_align)
-    return blob[byte_off:byte_off + n_bytes]
+    word_addr = addr & ~0x3
+    byte_off  = addr & 0x3
+
+    out          = bytearray()
+    total_needed = byte_off + n_bytes
+    current_word = word_addr
+    while len(out) < total_needed:
+        rng = XorShift32(current_word | PRBS_KEY)
+        out.extend(rng.next_bytes(4))
+        current_word += 4
+    return bytes(out[byte_off:byte_off + n_bytes])

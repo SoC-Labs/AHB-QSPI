@@ -234,10 +234,30 @@ always @(*) begin
     endcase
 end
 
-assign PREADY =  1'b1; //(PSEL & PENABLE & PWRITE) | (PSEL & ~PWRITE);
+// Assert ready only during the APB ACCESS phase (PSEL & PENABLE). This is
+// the standard APB-slave idiom; hardcoding 1'b1 happened to work through
+// the CMSDK APB mux (which gates on PSEL itself), but other bridges or
+// fabric IP may rely on PREADY being 0 outside ACCESS.
+assign PREADY  = PSEL & PENABLE;
 assign PSLVERR = 1'b0;
 
 //Interrupt generation
+//
+// IRQ_QSPI_FINISHED fires on each QSPI_BUSY falling edge. Historical
+// design served command-driven APB flows, where software clears the IRQ
+// after each `spi_cmd()` via reg1[8]=1.
+//
+// XIP mode turns every AHB read into a separate SPI transaction, so
+// QSPI_BUSY toggles at the XIP read rate (can be kHz). None of those
+// toggles are cleared because the XIP path doesn't go through the APB
+// command flow. The IRQ line pins high for the duration of XIP traffic,
+// and since it's routed level-high to PS7 IRQ_F2P with no Linux handler
+// installed, the GIC re-triggers the CPU continuously — the PS locks up
+// within seconds.
+//
+// Fix: suppress IRQ generation while XIP_ACTIVE=1 and force-clear any
+// pending IRQ on the XIP-enable transition so software re-entering
+// command-driven mode starts clean.
 always @(posedge PCLK or negedge PRESETn) begin
     if(~PRESETn) begin
         qspi_finished <= 1'b0;
@@ -245,9 +265,13 @@ always @(posedge PCLK or negedge PRESETn) begin
     end else begin
         qspi_busy_last <= qspi_busy_sync;
 
-        if(qspi_busy_last&(~qspi_busy_sync)) begin
+        if(XIP_ACTIVE) begin
+            // No IRQs on XIP-driven busy toggles; keep the line cleared so
+            // PS GIC doesn't see a spurious persistent assertion.
+            qspi_finished <= 1'b0;
+        end else if(qspi_busy_last & (~qspi_busy_sync)) begin
             qspi_finished <= 1'b1;
-        end else if((reg1[8])) begin
+        end else if(reg1[8]) begin
             qspi_finished <= 1'b0;
         end
     end

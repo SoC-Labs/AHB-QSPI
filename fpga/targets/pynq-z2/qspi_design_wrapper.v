@@ -80,19 +80,47 @@ module qspi_design_wrapper (
     endgenerate
 
     //=========================================================================
-    // Debug LEDs — accent active-high, accent accent accent
+    // Debug LEDs — accent active-high.
     //
-    // LD0 (R14): ~CS_n        — lit whenever SPI chip-select is active
-    // LD1 (P14): QSPI_SCLK   — blinks/glows during SPI clock activity
-    // LD2 (N16): IRQ_FINISHED — pulses on each transaction complete
-    // LD3 (M14): tied low     — reserved
+    // LD0 (R14): 1 Hz heartbeat — free-running HCLK divider. The whole point
+    //            is that this keeps blinking even if the PS / Linux wedges,
+    //            so at a glance you can tell whether the PL clock is alive.
+    //            Stops blinking only if HCLK itself dies or PL is held in
+    //            reset.
+    // LD1 (P14): ~qspi_cs_n    — lit whenever CS# is asserted low, so it
+    //            flickers through every SPI/QSPI transaction.
+    // LD2 (N16): xip_active    — high while CTRL.XIP_ACTIVE=1 (XiP torture
+    //            phase of the stress test etc).
+    // LD3 (M14): watchdog_fired (sticky) — latch set on any pulse of
+    //            DBG_SOFT_RESET (driven by the AHB watchdog timeout).
+    //            Cleared only by HRESETn, so if you ever see it lit after
+    //            a run, the watchdog fired at least once.
     //=========================================================================
     wire irq_qspi_finished;
+    wire dbg_xip_active;
+    wire dbg_soft_reset;
+    wire hclk_out;   // 50 MHz HCLK from the block design's clock wizard
 
-    assign led0 = ~qspi_cs_n;
-    assign led1 = qspi_sclk;
-    assign led2 = irq_qspi_finished;
-    assign led3 = 1'b0;
+    // Heartbeat counter: HCLK is nominally 50 MHz, so bit 24 toggles at
+    // ~1.5 Hz (a comfortable blink). Entirely PL-side, no PS dependency —
+    // this is exactly what lets us tell PS lockup apart from PL death.
+    reg [24:0] heartbeat_cnt = 25'd0;
+    always @(posedge hclk_out) begin
+        heartbeat_cnt <= heartbeat_cnt + 25'd1;
+    end
+
+    // Sticky watchdog latch — any pulse on dbg_soft_reset sets it high
+    // until the next bitstream reload / power-on (no sync reset here, so
+    // the LED stays lit for the session to preserve post-mortem state).
+    reg watchdog_fired_sticky = 1'b0;
+    always @(posedge hclk_out) begin
+        if (dbg_soft_reset) watchdog_fired_sticky <= 1'b1;
+    end
+
+    assign led0 = heartbeat_cnt[24];
+    assign led1 = ~qspi_cs_n;
+    assign led2 = dbg_xip_active;
+    assign led3 = watchdog_fired_sticky;
 
     //=========================================================================
     // Block Design Instance
@@ -131,7 +159,10 @@ module qspi_design_wrapper (
         .qspi_io_e         (qspi_io_e),
 
         // Debug
-        .irq_qspi_finished (irq_qspi_finished)
+        .irq_qspi_finished (irq_qspi_finished),
+        .dbg_xip_active    (dbg_xip_active),
+        .dbg_soft_reset    (dbg_soft_reset),
+        .hclk_out          (hclk_out)
     );
 
 endmodule

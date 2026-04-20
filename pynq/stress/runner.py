@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import traceback
 
@@ -83,9 +84,58 @@ class StressContext:
 
 
 def _setup_logging(verbose):
-    fmt = '%(asctime)s %(name)s %(levelname)s %(message)s'
+    # Include ms in the timestamp so serial-log correlation works at
+    # sub-second resolution. Force line-buffered stdout too: when the
+    # board hangs, we want every print up to the hang moment visible in
+    # our captured log, not stuck in Python's stdout buffer.
+    fmt = '%(asctime)s.%(msecs)03d %(name)s %(levelname)s %(message)s'
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO,
-                        format=fmt)
+                        format=fmt, datefmt='%H:%M:%S')
+    try:
+        sys.stdout.reconfigure(line_buffering=True)   # py3.7+
+    except Exception:
+        pass
+
+
+class _Heartbeat(threading.Thread):
+    """Prints a timestamped heartbeat every N seconds so the serial log
+    shows something was alive right up to the hang. Also dumps a snapshot
+    of the three most interesting APB regs so we can see what was in
+    flight (CTRL, STATUS, SPI_CMD) at hang time.
+
+    Notes:
+      - The stop event attribute MUST NOT be called `_stop`: that name
+        clashes with threading.Thread's internal `_stop()` method, which
+        made earlier runs die with "TypeError: 'Event' object is not
+        callable" when the runtime tried to call it during join().
+      - When the hw bus is AHB-busy (XIP mode), background APB reads
+        from this thread contend with the AHB reads on the PS M_AXI_GP0
+        master in a way that has been observed to wedge the PYNQ.
+        Callers should explicitly opt in with `enable=True`; the default
+        is off.
+    """
+    def __init__(self, hw, interval_s=1.0):
+        super().__init__(daemon=True)
+        self.hw           = hw
+        self.interval     = interval_s
+        self._stop_event  = threading.Event()
+
+    def run(self):
+        hb_log = logging.getLogger('stress.hb')
+        beat   = 0
+        while not self._stop_event.wait(self.interval):
+            try:
+                ctrl   = self.hw.apb.read(0x00)
+                status = self.hw.apb.read(0x04)
+                cmd    = self.hw.apb.read(0x08)
+                hb_log.info("HB#%d ctrl=0x%08x status=0x%08x cmd=0x%08x",
+                            beat, ctrl, status, cmd)
+            except Exception as e:                    # noqa: BLE001
+                hb_log.error("HB#%d read failed: %s", beat, e)
+            beat += 1
+
+    def stop(self):
+        self._stop_event.set()
 
 
 def _load_overlay(bitfile):
@@ -140,6 +190,16 @@ def main():
                     help='Reset persistent sector cursor to 0 before starting')
     ap.add_argument('--seed', type=int, default=None,
                     help='Override RNG seed (currently used by xip_torture)')
+    ap.add_argument('--heartbeat', action='store_true',
+                    help='Enable background APB-register heartbeat thread. '
+                         'Off by default because concurrent APB reads during '
+                         'AHB-heavy (XIP) phases have been observed to wedge '
+                         'the PS.')
+    ap.add_argument('--xip-sleep-us', type=int, default=0,
+                    help='Insert a sleep between each XIP read in '
+                         'xip_torture to test whether the hang is caused by '
+                         'sustained high-frequency AHB traffic. Default 0 '
+                         '(no sleep, full-rate reads).')
     ap.add_argument('-v', '--verbose', action='store_true')
     args = ap.parse_args()
 
@@ -173,7 +233,7 @@ def main():
 
     for name in args.tests:
         log.info("=" * 68)
-        log.info("Running: %s  (budget %.0fs)", name, budgets[name])
+        log.info("PHASE_BEGIN name=%s budget=%.0fs", name, budgets[name])
         log.info("=" * 68)
         ctx = StressContext(name, budgets[name], fail_log_path=args.fail_log)
         # Reset the controller between tests so a stuck FSM in one doesn't
@@ -182,13 +242,31 @@ def main():
             hw.reset_controller()
         except QspiTimeout as e:
             log.error("inter-test reset failed: %s", e)
+        # Optional background heartbeat — off by default. The APB reads
+        # this thread issues contend with the test's AHB traffic on the
+        # PS M_AXI_GP0 master, which has been observed to hang the PS
+        # during XIP-heavy phases. Rely on phase markers + stdout
+        # line-buffering + serial capture for telemetry instead.
+        hb = _Heartbeat(hw) if args.heartbeat else None
+        if hb is not None:
+            hb.start()
         try:
-            ALL_TESTS[name](hw, ctx)
+            # Forward per-test kwargs that only some tests understand.
+            kwargs = {}
+            if name == 'xip_torture' and args.xip_sleep_us:
+                kwargs['sleep_us'] = args.xip_sleep_us
+            ALL_TESTS[name](hw, ctx, **kwargs)
         except Exception as e:                      # noqa: BLE001
             log.error("[%s] runner caught unhandled %s: %s",
                       name, type(e).__name__, e)
             log.debug(traceback.format_exc())
             ctx.fail(name, f'unhandled {type(e).__name__}', exc=str(e))
+        finally:
+            if hb is not None:
+                hb.stop()
+                hb.join(timeout=2.0)
+        log.info("PHASE_END name=%s elapsed=%.1fs failures=%d",
+                 name, ctx.elapsed, len(ctx.failures))
         overall_summary[name] = dict(
             elapsed_s=round(ctx.elapsed, 2),
             budget_s=ctx.budget_s,

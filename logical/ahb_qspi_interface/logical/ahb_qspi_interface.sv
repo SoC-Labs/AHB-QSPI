@@ -1,7 +1,16 @@
 
 module ahb_qspi_interface #(
     parameter ADDR_W = 32,
-    parameter DATA_W = 32
+    parameter DATA_W = 32,
+    // Width of the WAIT_READ watchdog counter. Default 12 bits gives
+    // 4096 HCLK cycles (~82 us at 50 MHz HCLK) which is:
+    //   - ~2x margin over worst-case transaction at CLK_DIV=5 (~1700 HCLK)
+    //   - ~1.5x over CLK_DIV=13 (covers practical range)
+    //   - Well inside the cocotbext.ahb master's default 5000-cycle timeout
+    //     so hang-recovery tests observe HRESP=1 before the master gives up
+    // Override to smaller values for tight simulation loops, larger for
+    // flows using CLK_DIV > 15.
+    parameter WATCHDOG_WIDTH = 12
     )(
     input  wire                 HCLK,
     input  wire                 HRESETn,
@@ -32,9 +41,15 @@ module ahb_qspi_interface #(
 
     input  wire                 AHB_QSPI_ENABLE_ACK,
     input  wire                 AHB_QSPI_BUSY,
-    input  wire [127:0]         AHB_QSPI_RDATA
+    input  wire [127:0]         AHB_QSPI_RDATA,
 
-
+    // Soft-reset request to the QSPI controller. Pulsed high for several
+    // HCLK cycles when the WAIT_READ watchdog expires, so the downstream
+    // controller FSM returns to IDLE instead of remaining wedged in
+    // whatever state caused the hang. Without this, a hang survivor
+    // would see the watchdog release the AHB bus but the next XiP read
+    // would immediately hang again.
+    output reg                  SOFT_RESET
 );
 
 assign AHB_QSPI_ADDR_EN = 1'b1;
@@ -76,6 +91,22 @@ wire [127:0] AHB_QSPI_RDATA_i = {AHB_QSPI_RDATA_W3,AHB_QSPI_RDATA_W0, AHB_QSPI_R
 
 // AHB FSM
 enum {IDLE, WAIT_READ, ERR} current_state, next_state;
+
+// Watchdog timeout (Layer 1 fix for the XiP lockup bug).
+//
+// Without this timer, any fault that prevents qspi_ready from rising —
+// CDC pulse loss, downstream FSM wedge, upstream reset glitch — leaves
+// HREADYOUT stuck low forever. That propagates back through the AXI-AHB
+// bridge to the PS CPU, which blocks indefinitely on the MMIO read, and
+// the kernel hangs.
+//
+// Sizing: worst-case XiP transaction at CLK_DIV=31 is ~10k HCLK cycles.
+// The default 16-bit counter (65k HCLK ~= 1.3 ms at 50 MHz) gives ~6x
+// margin — any longer and something is genuinely wrong; raise HRESP=1,
+// release the bus, and let the OS recover.
+reg  [WATCHDOG_WIDTH-1:0] watchdog_cnt;
+wire                       watchdog_expired =
+                               (watchdog_cnt == {WATCHDOG_WIDTH{1'b1}});
 
 // AHB lite last regs
 reg                 last_HSEL;
@@ -122,18 +153,61 @@ always_comb begin
                                 next_state = ERR;
                             else if(HSELx & HWRITE)
                                 next_state = ERR;
-                            else 
+                            else
                                 next_state = WAIT_READ;
-                        end 
+                        end
                         else
                             next_state = IDLE;
         ERR:            next_state = IDLE;
         WAIT_READ:      if(qspi_ready)
                             next_state = IDLE;
+                        else if(watchdog_expired)
+                            next_state = ERR;
                         else
                             next_state = WAIT_READ;
         default:        next_state = IDLE;
     endcase
+end
+
+always @(posedge HCLK or negedge HRESETn) begin
+    if(~HRESETn) begin
+        watchdog_cnt <= {WATCHDOG_WIDTH{1'b0}};
+    end else begin
+        if(current_state == WAIT_READ && !watchdog_expired)
+            watchdog_cnt <= watchdog_cnt + 1'b1;
+        else
+            watchdog_cnt <= {WATCHDOG_WIDTH{1'b0}};
+    end
+end
+
+// Soft-reset pulse generator.
+//
+// When the watchdog expires, the FSM transitions WAIT_READ -> ERR for
+// one cycle and then back to IDLE. Meanwhile the downstream QSPI
+// controller may still be stuck in DATA_I / DATA_O / DUMMY waiting for
+// counter-driven exit conditions that will never fire. Hold SOFT_RESET
+// high for a few HCLK cycles once watchdog fires — long enough for the
+// 2-FF synchroniser inside the controller to propagate the reset even
+// at the slowest practical QSPI_SCLK_i (CLK_DIV=31 -> QSPI_SCLK_i =
+// HCLK/62, so 128 HCLK gives us ~2 QSPI_SCLK_i cycles of margin).
+localparam SOFT_RESET_HCLK_CYCLES = 8'd128;
+reg [7:0] soft_reset_cnt;
+always @(posedge HCLK or negedge HRESETn) begin
+    if(~HRESETn) begin
+        soft_reset_cnt <= 8'd0;
+        SOFT_RESET     <= 1'b0;
+    end else begin
+        if(watchdog_expired) begin
+            // Watchdog just fired this cycle — start the soft-reset pulse
+            soft_reset_cnt <= SOFT_RESET_HCLK_CYCLES;
+            SOFT_RESET     <= 1'b1;
+        end else if (soft_reset_cnt != 8'd0) begin
+            soft_reset_cnt <= soft_reset_cnt - 8'd1;
+            SOFT_RESET     <= 1'b1;
+        end else begin
+            SOFT_RESET     <= 1'b0;
+        end
+    end
 end
 
 always @(posedge HCLK or negedge HRESETn) begin

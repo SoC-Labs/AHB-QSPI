@@ -27,6 +27,15 @@ REG_WDATA         = (0x20, 0x24, 0x28, 0x2C)
 REG_AHB_SPI_SETUP = 0x30
 REG_CLK_DIV       = 0x34
 
+# ARM CG092 p_flash_cache_f0 register block — lives at APB offset 0x1000
+# within the same APB window as the QSPI regs (block-design mux port 1).
+# Must be enabled and polled-for-ready before any AHB XIP read, or the
+# cache won't respond and the PS will wedge on the MMIO load.
+REG_CACHE_CONFIG  = 0x1000
+REG_CACHE_STATUS  = 0x1004
+CACHE_STATUS_READY_MASK = 0x3
+CACHE_STATUS_READY_VAL  = 0x2
+
 # CTRL bit positions
 CTRL_QIO_MODE     = 0
 CTRL_XIP_ACTIVE   = 8
@@ -155,17 +164,23 @@ class QspiHw:
         self.apb.write(REG_SPI_ADDR, addr & 0x3FFFFF)
 
     def write_wdata(self, data_bytes):
-        """Pack up to 16 bytes into WDATA0..3 (big-endian word order).
+        """Pack up to 16 bytes into WDATA0..3 (little-endian word order).
 
-        The controller sends bits [31:24] of WDATA0 first on the SPI bus,
-        then [23:16], [15:8], [7:0], then WDATA1[31:24], etc. This is
-        big-endian byte order within each word — matching RDATA packing.
+        The apb_qspi_regs module applies a per-byte bit-reversal transform
+        to WDATA before feeding the shift register, and the shift register
+        emits LSB-first. Net effect: the byte at WDATA0[7:0] is the FIRST
+        byte stored at flash[addr+0], WDATA0[15:8] goes to flash[addr+1],
+        and so on.
+
+        So `bytes[0]` (first byte to store) goes at WDATA0[7:0], which
+        means packing with 'little' — the byte-order `int.from_bytes`
+        would produce if you wrote WDATA0 as the 32-bit int.
         """
         if len(data_bytes) > 16:
             raise ValueError("max 16 bytes per WDATA load")
         padded = bytes(data_bytes) + b'\x00' * (16 - len(data_bytes))
         for i, off in enumerate(REG_WDATA):
-            self.apb.write(off, int.from_bytes(padded[i*4:(i+1)*4], 'big'))
+            self.apb.write(off, int.from_bytes(padded[i*4:(i+1)*4], 'little'))
 
     def read_rdata_words(self):
         """Read all four RDATA registers as raw 32-bit words."""
@@ -174,15 +189,20 @@ class QspiHw:
     def read_rdata(self, n_bytes):
         """Read n_bytes (1..16) from RDATA0..3.
 
-        The QSPI controller packs SPI bytes big-endian within each 32-bit
-        word: the first byte received goes to bits [31:24] of RDATA0, the
-        second to [23:16], etc. The cocotb tests confirm this by checking
-        e.g. `RDATA0 & (1 << 24)` for the WIP bit of the first status byte.
+        The apb_qspi_regs module byte-swaps the raw 128-bit RDATA on
+        register read (see apb_qspi_regs.v:211), so from software's
+        perspective the first byte received from flash ends up at
+        RDATA0[7:0]. Extract bytes little-endian to get them in the
+        order they were read from flash (addr+0, +1, +2, ...).
+
+        Verified by diag.py round-trip: write 0xDEADBEEF to WDATA0,
+        read back 0xDEADBEEF from RDATA0. For the stress PRBS, bytes
+        stored at flash[addr+N] must come back in the same order.
         """
         if not 1 <= n_bytes <= 16:
             raise ValueError("n_bytes must be in [1, 16]")
         words = self.read_rdata_words()
-        raw = b''.join(w.to_bytes(4, 'big') for w in words)
+        raw = b''.join(w.to_bytes(4, 'little') for w in words)
         return raw[:n_bytes]
 
     # ---- flash operations -------------------------------------------------
@@ -196,11 +216,18 @@ class QspiHw:
     def read_status(self):
         """Read flash status register. Returns the raw SR byte.
 
-        Matches the cocotb pattern: reads 3 bytes (N_RW_BYTES=2) so the
-        status byte lands at RDATA0[31:24] = raw byte 0 with big-endian
-        extraction.
+        Uses a 4-byte read (N_RW_BYTES=3). The flash returns SR
+        continuously while CS is low, so all four received bytes are
+        copies of SR. read_rdata(1) returns the first byte in flash
+        order (LSB of RDATA0 after little-endian extract), which is SR.
+
+        Rationale: short reads (N_RW<3) land data at RDATA0's MSB due
+        to a different mux path, and the DATA_I exit-condition timing
+        for single-byte reads has proved fragile in testing. N_RW=3
+        exercises the same well-tested full-word DATA_I path as our
+        FAST_READ calls, so we reuse that path rather than special-case.
         """
-        self.spi_cmd(OP_RDSR, read=1, n_bytes=3)
+        self.spi_cmd(OP_RDSR, read=1, n_bytes=4)
         return self.read_rdata(1)[0]
 
     def jedec_id(self):
@@ -266,15 +293,54 @@ class QspiHw:
 
     # ---- AHB XiP path -----------------------------------------------------
 
-    def xip_setup(self, opcode=OP_FAST_READ, dummy=8, qio=0):
-        """Configure the AHB XiP path. CTRL.XIP_ACTIVE is set inside.
+    def cache_enable(self, timeout=5.0, verbose=True):
+        """Enable the ARM CG092 flash cache and poll until it reports ready.
 
-        The cache subsystem at +0x1000 is not touched - leave the user to
-        enable/disable it via cache_subsystem.v's APB-mapped registers if
-        they care.
+        Without this, the cache keeps the AHB XIP bus wedged on the first
+        read and the PS deadlocks on the MMIO load. See
+        verif/cocotb/ahb_qspi_tests.py:326 for the canonical init sequence.
+        """
+        import logging
+        log = logging.getLogger('stress.cache')
+        pre_cfg    = self.apb.read(REG_CACHE_CONFIG)
+        pre_status = self.apb.read(REG_CACHE_STATUS)
+        if verbose:
+            log.info("cache_enable pre: CFG=0x%08x STATUS=0x%08x", pre_cfg, pre_status)
+        self.apb.write(REG_CACHE_CONFIG, 0x1)
+        deadline = time.monotonic() + timeout
+        polls    = 0
+        while time.monotonic() < deadline:
+            polls += 1
+            status = self.apb.read(REG_CACHE_STATUS)
+            if (status & CACHE_STATUS_READY_MASK) == CACHE_STATUS_READY_VAL:
+                cfg_now = self.apb.read(REG_CACHE_CONFIG)
+                if verbose:
+                    log.info("cache_enable ready after %d polls: CFG=0x%08x STATUS=0x%08x",
+                             polls, cfg_now, status)
+                return status
+            if verbose and polls in (1, 10, 100, 1000):
+                log.info("cache_enable poll %d: STATUS=0x%08x (want (& 0x3)==0x2)",
+                         polls, status)
+            time.sleep(0.001)
+        last_cfg    = self.apb.read(REG_CACHE_CONFIG)
+        last_status = self.apb.read(REG_CACHE_STATUS)
+        raise QspiTimeout(
+            "cache did not become ready within %.2fs (CFG=0x%08x STATUS=0x%08x polls=%d)"
+            % (timeout, last_cfg, last_status, polls))
+
+    def cache_disable(self):
+        """Quiesce the cache — writes CONFIG=0. Useful in teardown so a
+        subsequent APB-only test doesn't leave the cache enabled."""
+        self.apb.write(REG_CACHE_CONFIG, 0x0)
+
+    def xip_setup(self, opcode=OP_FAST_READ, dummy=8, qio=0):
+        """Configure the AHB XiP path. Enables the CG092 cache (required
+        for AHB reads to complete) and sets CTRL.XIP_ACTIVE=1.
         """
         self.apb.write(REG_AHB_SPI_SETUP, (opcode & 0xFF) | (((dummy - 1) & 0xF) << 12))
         self.set_ctrl(qio=qio, xip_active=1)
+        self.cache_enable()
 
     def xip_disable(self):
         self.set_ctrl()
+        self.cache_disable()

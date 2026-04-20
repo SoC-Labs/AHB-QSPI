@@ -70,7 +70,11 @@ module qspi_vivado_wrapper (
     // Interrupt (to PS IRQ_F2P)
     (* X_INTERFACE_INFO = "xilinx.com:signal:interrupt:1.0 irq INTERRUPT" *)
     (* X_INTERFACE_PARAMETER = "SENSITIVITY LEVEL_HIGH" *)
-    output wire        IRQ_QSPI_FINISHED
+    output wire        IRQ_QSPI_FINISHED,
+
+    // Debug / LED wiring
+    output wire        DBG_XIP_ACTIVE,
+    output wire        DBG_SOFT_RESET
 );
 
     top_ahb_qspi u_top_ahb_qspi (
@@ -109,7 +113,10 @@ module qspi_vivado_wrapper (
         .QSPI_IO_i  (QSPI_IO_i),
         .QSPI_IO_e  (QSPI_IO_e),
 
-        .IRQ_QSPI_FINISHED (IRQ_QSPI_FINISHED)
+        .IRQ_QSPI_FINISHED (IRQ_QSPI_FINISHED),
+
+        .DBG_XIP_ACTIVE    (DBG_XIP_ACTIVE),
+        .DBG_SOFT_RESET    (DBG_SOFT_RESET)
     );
 
 endmodule

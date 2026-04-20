@@ -70,3 +70,9 @@ lint/*.log
 *stack_trace*.txt
 crte*.txt
 work_qc
+
+# PYNQ board discovery output
+pynq/board.json
+
+# PYNQ debug-run logs
+pynq/logs/
