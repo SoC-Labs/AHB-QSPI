@@ -1,0 +1,82 @@
+# fpgahub manifest for ahb_qspi
+#
+# Standalone QSPI-controller FPGA flow — no CPU, no firmware. Minimal
+# surface: build, program, deploy, and a stress-test.
+
+schema_version = 1
+project        = "ahb_qspi"
+description    = "AHB + APB QSPI controller with CG092 XiP cache — standalone FPGA bring-up"
+
+# No identity block — this design has no ethernet MAC.
+
+[artefacts.bitstream]
+kind = "bitstream"
+path = "../imp/fpga/output/pynq-z2/qspi.bit"
+
+[artefacts.bitstream_bin]
+kind = "bitstream"
+path = "../imp/fpga/output/pynq-z2/qspi.bin"
+
+[artefacts.hwh]
+kind = "other"
+path = "../imp/fpga/output/pynq-z2/qspi.hwh"
+description = "Vivado hardware handoff, consumed by the pynq Overlay wrapper."
+
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+
+[[actions]]
+id        = "build"
+title     = "Build bitstream (package_ip + build_design)"
+command   = ["make", "-C", "fpga", "build_design"]
+produces  = ["bitstream_built"]
+timeout_s = 3600
+
+[[actions]]
+id          = "program"
+title       = "Program Pynq-Z2 bitstream (JTAG)"
+description = "Uses program_bitstream.tcl against a local Vivado Hardware Manager."
+command     = ["make", "-C", "fpga", "program"]
+requires    = ["bitstream_built"]
+produces    = ["bitstream_loaded"]
+timeout_s   = 300
+
+[[actions]]
+id          = "deploy"
+title       = "Deploy overlay to PYNQ Linux (fpga_manager)"
+command     = ["make", "-C", "fpga", "deploy",
+               "PYNQ_HOST={host.ssh}",
+               "PYNQ_PROXY={host.proxy}"]
+secret_env  = { PYNQ_PASSWORD = "pynq.ssh_password" }
+requires    = ["bitstream_built"]
+produces    = ["bitstream_loaded"]
+timeout_s   = 600
+
+[[actions]]
+id          = "stress_test"
+title       = "Run QSPI stress/benchmark on PYNQ"
+description = """
+Runs the pynq/stress runner that lives on the board after deploy. Assumes
+key-based SSH + NOPASSWD sudo for the stress-runner command (configure once
+per PYNQ image).
+"""
+command   = ["ssh",
+             "-o", "StrictHostKeyChecking=no",
+             "-o", "ConnectTimeout=10",
+             "-o", "ServerAliveInterval=15",
+             "-o", "ProxyJump={host.proxy}",
+             "{host.ssh}",
+             "cd /home/xilinx/qspi_overlay && sudo -n python3 -m stress.runner --budget 300"]
+requires  = ["bitstream_loaded"]
+timeout_s = 900
+
+# ---------------------------------------------------------------------------
+# Composite
+# ---------------------------------------------------------------------------
+
+[[actions]]
+id        = "ci_full"
+title     = "Full CI: build → deploy → stress"
+steps     = ["build", "deploy", "stress_test"]
+timeout_s = 0
