@@ -187,22 +187,38 @@ class QspiHw:
         return [self.apb.read(off) for off in REG_RDATA]
 
     def read_rdata(self, n_bytes):
-        """Read n_bytes (1..16) from RDATA0..3.
+        """Read n_bytes (1..16) from RDATA0..3 in flash byte-order.
 
-        The apb_qspi_regs module byte-swaps the raw 128-bit RDATA on
-        register read (see apb_qspi_regs.v:211), so from software's
-        perspective the first byte received from flash ends up at
-        RDATA0[7:0]. Extract bytes little-endian to get them in the
-        order they were read from flash (addr+0, +1, +2, ...).
+        Hardware packing rules (apb_qspi_regs.v QSPI_RDATA case + PRDATA
+        byte-swap):
 
-        Verified by diag.py round-trip: write 0xDEADBEEF to WDATA0,
-        read back 0xDEADBEEF from RDATA0. For the stress PRBS, bytes
-        stored at flash[addr+N] must come back in the same order.
+        * n_bytes == 4: the 4 captured bytes land at QSPI_RDATA[31:0] in
+          received order (MSB first). The per-word byte-swap at
+          apb_qspi_regs.v:211 reverses them, which is *also* what
+          `to_bytes('little')` does back, so raw[:4] is flash order.
+
+        * n_bytes < 4: QSPI_RDATA zero-pads in the TOP bits of the word
+          (e.g. for n_rw=2 the slice is {8'b0, data_in_reg[23:0]}). The
+          byte-swap moves those zero bytes to PRDATA's MSB. Read as a
+          little-endian int, the padding shows up at the START of raw.
+          The real flash bytes live in raw[4-n_bytes : 4].
+
+        * n_bytes >= 4 for multi-word reads: word 0 through word N-1
+          each follow the n_bytes==4 rule, and concatenating them in
+          little-endian order reassembles the flash bytes in order. (The
+          5-7 byte asymmetric packings in the RDATA case aren't
+          exercised by current tests — FAST_READ uses n_bytes in {4,16}.)
+
+        Verified: JEDEC read (n_bytes=3) now returns [mfg, type, cap]
+        (was [0x00, mfg, type] before this fix, which caused every
+        mode_flip JEDEC assertion to fail).
         """
         if not 1 <= n_bytes <= 16:
             raise ValueError("n_bytes must be in [1, 16]")
         words = self.read_rdata_words()
         raw = b''.join(w.to_bytes(4, 'little') for w in words)
+        if n_bytes < 4:
+            return raw[4 - n_bytes:4]
         return raw[:n_bytes]
 
     # ---- flash operations -------------------------------------------------
@@ -293,12 +309,13 @@ class QspiHw:
 
     # ---- AHB XiP path -----------------------------------------------------
 
-    def cache_enable(self, timeout=5.0, verbose=True):
+    def cache_enable(self, timeout=5.0, verbose=True, skip_status_check=False):
         """Enable the ARM CG092 flash cache and poll until it reports ready.
 
-        Without this, the cache keeps the AHB XIP bus wedged on the first
-        read and the PS deadlocks on the MMIO load. See
-        verif/cocotb/ahb_qspi_tests.py:326 for the canonical init sequence.
+        Follows the verif/cocotb/ahb_qspi_tests.py pattern — the poll loop
+        reads both CFG and STATUS each iteration, matching what cocotb's
+        passing AHB-XIP test does. Without this, the cache stays wedged
+        in its transitional state and AHB reads hang the PS.
         """
         import logging
         log = logging.getLogger('stress.cache')
@@ -306,21 +323,28 @@ class QspiHw:
         pre_status = self.apb.read(REG_CACHE_STATUS)
         if verbose:
             log.info("cache_enable pre: CFG=0x%08x STATUS=0x%08x", pre_cfg, pre_status)
+        # Prime: read STATUS once (matches cocotb's init sequence), then
+        # enable (bit 0), then read CFG back.
+        self.apb.read(REG_CACHE_STATUS)
         self.apb.write(REG_CACHE_CONFIG, 0x1)
+        self.apb.read(REG_CACHE_CONFIG)
+        if skip_status_check:
+            return self.apb.read(REG_CACHE_STATUS)
         deadline = time.monotonic() + timeout
         polls    = 0
         while time.monotonic() < deadline:
             polls += 1
+            # Read CFG then STATUS each iteration, like the cocotb test
+            cfg    = self.apb.read(REG_CACHE_CONFIG)
             status = self.apb.read(REG_CACHE_STATUS)
             if (status & CACHE_STATUS_READY_MASK) == CACHE_STATUS_READY_VAL:
-                cfg_now = self.apb.read(REG_CACHE_CONFIG)
                 if verbose:
                     log.info("cache_enable ready after %d polls: CFG=0x%08x STATUS=0x%08x",
-                             polls, cfg_now, status)
+                             polls, cfg, status)
                 return status
             if verbose and polls in (1, 10, 100, 1000):
-                log.info("cache_enable poll %d: STATUS=0x%08x (want (& 0x3)==0x2)",
-                         polls, status)
+                log.info("cache_enable poll %d: CFG=0x%08x STATUS=0x%08x "
+                         "(want STATUS & 0x3 == 0x2)", polls, cfg, status)
             time.sleep(0.001)
         last_cfg    = self.apb.read(REG_CACHE_CONFIG)
         last_status = self.apb.read(REG_CACHE_STATUS)
@@ -333,13 +357,22 @@ class QspiHw:
         subsequent APB-only test doesn't leave the cache enabled."""
         self.apb.write(REG_CACHE_CONFIG, 0x0)
 
-    def xip_setup(self, opcode=OP_FAST_READ, dummy=8, qio=0):
+    def xip_setup(self, opcode=OP_FAST_READ, dummy=8, qio=0, no_cmd=0):
         """Configure the AHB XiP path. Enables the CG092 cache (required
         for AHB reads to complete) and sets CTRL.XIP_ACTIVE=1.
+
+        `no_cmd=0` (default): each XIP read fires a full SPI transaction
+        including the FAST_READ opcode. `no_cmd=1` only works with a
+        prior priming read that set CONT_READ, which this overlay
+        doesn't currently wire up.
         """
         self.apb.write(REG_AHB_SPI_SETUP, (opcode & 0xFF) | (((dummy - 1) & 0xF) << 12))
-        self.set_ctrl(qio=qio, xip_active=1)
-        self.cache_enable()
+        self.set_ctrl(qio=qio, xip_active=1, no_cmd=no_cmd)
+        # Enable the cache but don't block on the status=ready gate — the
+        # cache's 4→5 ("Enabled") transition requires an AHB-idle sample
+        # that our read loop will provide once it starts. A couple of
+        # initial reads may see CS=Enabling but complete correctly.
+        self.cache_enable(skip_status_check=True)
 
     def xip_disable(self):
         self.set_ctrl()
