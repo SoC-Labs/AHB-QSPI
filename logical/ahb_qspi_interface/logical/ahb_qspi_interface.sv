@@ -90,7 +90,17 @@ wire [31:0] AHB_QSPI_RDATA_W3 = {AHB_QSPI_RDATA[103:96],AHB_QSPI_RDATA[111:104],
 wire [127:0] AHB_QSPI_RDATA_i = {AHB_QSPI_RDATA_W3,AHB_QSPI_RDATA_W0, AHB_QSPI_RDATA_W1, AHB_QSPI_RDATA_W2};
 
 // AHB FSM
-enum {IDLE, WAIT_READ, ERR} current_state, next_state;
+//
+// ERR is split into two states (ERR1 -> ERR2) to emit a spec-compliant
+// two-cycle AHB-Lite error response:
+//   ERR1: HREADYOUT=0, HRESP=1   (error phase 1)
+//   ERR2: HREADYOUT=1, HRESP=1   (error phase 2, master samples)
+// A single-cycle "HREADYOUT=1 & HRESP=1" pulse is accepted by the
+// cocotbext.ahb model but rejected by Xilinx's axi_ahblite_bridge 3.0 on
+// real hardware — without the split, a watchdog-driven recovery fires on
+// the FPGA but the AXI side never accepts the error and stays stuck,
+// wedging the PS. See AMBA AHB-Lite spec §5.1.3.
+enum {IDLE, WAIT_READ, ERR1, ERR2} current_state, next_state;
 
 // Watchdog timeout (Layer 1 fix for the XiP lockup bug).
 //
@@ -119,8 +129,8 @@ reg [2:0]           last_HSIZE;
 reg         qspi_ready;
 reg         qspi_started;
 
-assign HREADYOUT = ((current_state==IDLE && last_HTRANS[1]==1'b0)||(current_state==ERR)) ? 1'b1: qspi_ready;
-assign HRESP = (current_state == ERR) ? 1'b1 : 1'b0;
+assign HREADYOUT = ((current_state==IDLE && last_HTRANS[1]==1'b0)||(current_state==ERR2)) ? 1'b1: qspi_ready;
+assign HRESP = (current_state == ERR1 || current_state == ERR2) ? 1'b1 : 1'b0;
 
 always @(posedge HCLK or negedge HRESETn) begin
     if(~HRESETn) begin
@@ -150,19 +160,20 @@ always_comb begin
                             next_state = IDLE;
                         else if(HSELx) begin
                             if(~XIP_ACTIVE)
-                                next_state = ERR;
+                                next_state = ERR1;
                             else if(HSELx & HWRITE)
-                                next_state = ERR;
+                                next_state = ERR1;
                             else
                                 next_state = WAIT_READ;
                         end
                         else
                             next_state = IDLE;
-        ERR:            next_state = IDLE;
+        ERR1:           next_state = ERR2;
+        ERR2:           next_state = IDLE;
         WAIT_READ:      if(qspi_ready)
                             next_state = IDLE;
                         else if(watchdog_expired)
-                            next_state = ERR;
+                            next_state = ERR1;
                         else
                             next_state = WAIT_READ;
         default:        next_state = IDLE;
@@ -182,8 +193,8 @@ end
 
 // Soft-reset pulse generator.
 //
-// When the watchdog expires, the FSM transitions WAIT_READ -> ERR for
-// one cycle and then back to IDLE. Meanwhile the downstream QSPI
+// When the watchdog expires, the FSM transitions WAIT_READ -> ERR1 ->
+// ERR2 -> IDLE. Meanwhile the downstream QSPI
 // controller may still be stuck in DATA_I / DATA_O / DUMMY waiting for
 // counter-driven exit conditions that will never fire. Hold SOFT_RESET
 // high for a few HCLK cycles once watchdog fires — long enough for the
