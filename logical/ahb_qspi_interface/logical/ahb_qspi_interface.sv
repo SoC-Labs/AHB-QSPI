@@ -119,7 +119,7 @@ reg [2:0]           last_HSIZE;
 reg         qspi_ready;
 reg         qspi_started;
 
-assign HREADYOUT = ((current_state==IDLE && last_HTRANS[1]==1'b0)||(current_state==ERR)) ? 1'b1: qspi_ready; //(current_state==IDLE)? 1'b1 : qspi_ready;
+assign HREADYOUT = ((current_state==IDLE && last_HTRANS[1]==1'b0)||(current_state==ERR)) ? 1'b1: qspi_ready;
 assign HRESP = (current_state == ERR) ? 1'b1 : 1'b0;
 
 always @(posedge HCLK or negedge HRESETn) begin

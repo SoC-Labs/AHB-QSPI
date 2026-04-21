@@ -76,3 +76,4 @@ pynq/board.json
 
 # PYNQ debug-run logs
 pynq/logs/
+.claude/

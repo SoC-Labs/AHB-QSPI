@@ -357,22 +357,22 @@ class QspiHw:
         subsequent APB-only test doesn't leave the cache enabled."""
         self.apb.write(REG_CACHE_CONFIG, 0x0)
 
-    def xip_setup(self, opcode=OP_FAST_READ, dummy=8, qio=0, no_cmd=0):
-        """Configure the AHB XiP path. Enables the CG092 cache (required
-        for AHB reads to complete) and sets CTRL.XIP_ACTIVE=1.
+    def xip_setup(self, opcode=OP_FAST_READ, dummy=8, qio=0, no_cmd=0, enable_cache=False):
+        """Configure the AHB XiP path. Sets CTRL.XIP_ACTIVE=1.
 
-        `no_cmd=0` (default): each XIP read fires a full SPI transaction
-        including the FAST_READ opcode. `no_cmd=1` only works with a
-        prior priming read that set CONT_READ, which this overlay
-        doesn't currently wire up.
+        `enable_cache` defaults to False because the CG092 cache's
+        enable FSM gets stuck at CS=01 ("Enabling") on the real PS due
+        to Xilinx axi_ahblite_bridge HREADY behaviour — every AHB read
+        wedges the PS if cache is enabled. With CCR.EN=0 the cache
+        stays at state 0 ("Disabled") which is a simple pass-through:
+        AHB reads flow straight to ahb_qspi_interface. Slower than
+        cached XIP but functional. Set enable_cache=True to try the
+        cached path (known-broken on PS Linux as of 2026-04-21).
         """
         self.apb.write(REG_AHB_SPI_SETUP, (opcode & 0xFF) | (((dummy - 1) & 0xF) << 12))
         self.set_ctrl(qio=qio, xip_active=1, no_cmd=no_cmd)
-        # Enable the cache but don't block on the status=ready gate — the
-        # cache's 4→5 ("Enabled") transition requires an AHB-idle sample
-        # that our read loop will provide once it starts. A couple of
-        # initial reads may see CS=Enabling but complete correctly.
-        self.cache_enable(skip_status_check=True)
+        if enable_cache:
+            self.cache_enable(skip_status_check=True)
 
     def xip_disable(self):
         self.set_ctrl()
