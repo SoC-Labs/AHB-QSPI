@@ -35,18 +35,31 @@ module qspi_vivado_wrapper (
     input  wire        PRESETn,
 
     // AHB-Lite slave (XiP data path)
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB SEL" *)       input  wire        S_AHB_HSEL,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HADDR" *)     input  wire [31:0] S_AHB_HADDR,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HPROT" *)     input  wire  [3:0] S_AHB_HPROT,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HTRANS" *)    input  wire  [1:0] S_AHB_HTRANS,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HSIZE" *)     input  wire  [2:0] S_AHB_HSIZE,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HWRITE" *)    input  wire        S_AHB_HWRITE,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HBURST" *)    input  wire  [2:0] S_AHB_HBURST,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HWDATA" *)    input  wire [31:0] S_AHB_HWDATA,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HRDATA" *)    output wire [31:0] S_AHB_HRDATA,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HRESP" *)     output wire        S_AHB_HRESP,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HREADY_IN" *) input  wire        S_AHB_HREADY_IN,
-    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HREADY_OUT" *) output wire       S_AHB_HREADY_OUT,
+    //
+    // The xilinx.com:interface:ahblite:2.0 interface definition lists HSEL
+    // and HREADY_IN as required slave sub-signals, but Xilinx's matching
+    // masters (axi_ahblite_bridge 3.0) deliberately omit both — they assume
+    // a single-slave bus where the slave is always selected and where the
+    // slave's HREADY_OUT is the only HREADY on the wire. If we expose HSEL
+    // and HREADY_IN through the interface annotation, Vivado auto-connect
+    // leaves them unconnected (CRITICAL WARNING [BD 41-759]) and ties them
+    // to 0 — the slave is then NEVER selected and every XiP read hangs the
+    // PS.
+    //
+    // Fix: keep those two pins INTERNAL (no X_INTERFACE_INFO), hard-wire
+    // HSEL=1 and feed HREADY_OUT back into HREADY_IN inside the wrapper.
+    // Only expose HREADY_OUT as the single bus HREADY via sub-signal
+    // "HREADY" so the bridge's m_ahb_hready input connects to it.
+    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HADDR" *)      input  wire [31:0] S_AHB_HADDR,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HPROT" *)      input  wire  [3:0] S_AHB_HPROT,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HTRANS" *)     input  wire  [1:0] S_AHB_HTRANS,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HSIZE" *)      input  wire  [2:0] S_AHB_HSIZE,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HWRITE" *)     input  wire        S_AHB_HWRITE,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HBURST" *)     input  wire  [2:0] S_AHB_HBURST,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HWDATA" *)     input  wire [31:0] S_AHB_HWDATA,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HRDATA" *)     output wire [31:0] S_AHB_HRDATA,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HRESP" *)      output wire        S_AHB_HRESP,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:ahblite:2.0 S_AHB HREADY" *)     output wire        S_AHB_HREADY,
 
     // APB slave (register config path)
     (* X_INTERFACE_INFO = "xilinx.com:interface:apb:1.0 apb_interface PADDR" *)   input  wire [31:0] apb_interface_PADDR,
@@ -77,6 +90,13 @@ module qspi_vivado_wrapper (
     output wire        DBG_SOFT_RESET
 );
 
+    // Bridge-driven AHB-Lite has no HSEL (single-slave — always selected)
+    // and no shared HREADY (the bridge *reads* HREADY from us). Self-loop
+    // HREADY so the slave's "previous transfer done" input matches its own
+    // "this transfer done" output — correct for a 1-slave bus.
+    wire s_ahb_hready_internal;
+    assign S_AHB_HREADY = s_ahb_hready_internal;
+
     top_ahb_qspi u_top_ahb_qspi (
         .HCLK       (HCLK),
         .HRESETn    (HRESETn),
@@ -90,10 +110,10 @@ module qspi_vivado_wrapper (
         .HBURST     (S_AHB_HBURST),
         .HPROT      (S_AHB_HPROT),
         .HWDATA     (S_AHB_HWDATA),
-        .HSELx      (S_AHB_HSEL),
+        .HSELx      (1'b1),
         .HRDATA     (S_AHB_HRDATA),
-        .HREADY     (S_AHB_HREADY_IN),
-        .HREADYOUT  (S_AHB_HREADY_OUT),
+        .HREADY     (s_ahb_hready_internal),
+        .HREADYOUT  (s_ahb_hready_internal),
         .HRESP      (S_AHB_HRESP),
 
         .PADDR      (apb_interface_PADDR[15:0]),

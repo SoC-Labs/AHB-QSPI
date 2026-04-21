@@ -130,10 +130,17 @@ proc create_root_design { parentCell } {
 
     #------------------------------------------------------------------
     # AXI4-Lite -> APB bridge (config registers)
+    #
+    # C_M_APB_PROTOCOL=apb4 enables PPROT and PSTRB on the master-side
+    # APB interface. Without this, those pins are disabled in the bridge
+    # and Vivado ties our slave's apb_interface_PPROT / apb_interface_PSTRB
+    # to 0 with a CRITICAL WARNING — which in turn disables the
+    # PPROT[0]=1 CG092 cache-write workaround and breaks CCR writes.
     #------------------------------------------------------------------
     set axi_apb [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_apb_bridge:3.0 axi_apb]
     set_property -dict [list \
         CONFIG.C_APB_NUM_SLAVES {1} \
+        CONFIG.C_M_APB_PROTOCOL {apb4} \
     ] $axi_apb
 
     #------------------------------------------------------------------
