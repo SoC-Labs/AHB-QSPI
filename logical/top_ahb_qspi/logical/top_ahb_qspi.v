@@ -23,7 +23,12 @@
 
 module top_ahb_qspi #(
     parameter ADDR_W = 32,
-    parameter DATA_W = 32
+    parameter DATA_W = 32,
+    // Propagated to ahb_qspi_interface's watchdog counter. Default 16
+    // bits (~1.3 ms at 50 MHz HCLK) covers worst-case CLK_DIV=31 XIP
+    // reads. Override to smaller values only for simulation harnesses
+    // whose AHB master timeout is shorter than the default watchdog.
+    parameter WATCHDOG_WIDTH = 16
     )(
     input  wire                 HCLK,
     input  wire                 HRESETn,
@@ -397,7 +402,8 @@ apb_qspi_regs u_apb_qspi_regs(
 
 ahb_qspi_interface #(
     .ADDR_W(22),
-    .DATA_W(128)
+    .DATA_W(128),
+    .WATCHDOG_WIDTH(WATCHDOG_WIDTH)
     ) u_ahb_qspi_interface (
         .HCLK(HCLK),
         .HRESETn(HRESETn),

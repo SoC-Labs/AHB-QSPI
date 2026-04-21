@@ -2,15 +2,19 @@
 module ahb_qspi_interface #(
     parameter ADDR_W = 32,
     parameter DATA_W = 32,
-    // Width of the WAIT_READ watchdog counter. Default 12 bits gives
-    // 4096 HCLK cycles (~82 us at 50 MHz HCLK) which is:
-    //   - ~2x margin over worst-case transaction at CLK_DIV=5 (~1700 HCLK)
-    //   - ~1.5x over CLK_DIV=13 (covers practical range)
-    //   - Well inside the cocotbext.ahb master's default 5000-cycle timeout
-    //     so hang-recovery tests observe HRESP=1 before the master gives up
-    // Override to smaller values for tight simulation loops, larger for
-    // flows using CLK_DIV > 15.
-    parameter WATCHDOG_WIDTH = 12
+    // Width of the WAIT_READ watchdog counter. Default 16 bits gives
+    // 65536 HCLK cycles (~1.3 ms at 50 MHz HCLK) which is:
+    //   - ~6x margin over worst-case transaction at CLK_DIV=31
+    //     (168 SCLK * 62 HCLK/SCLK = 10416 HCLK)
+    //   - Headroom for any reasonable XIP operation across the full
+    //     CLK_DIV=[0..31] range
+    // A 12-bit (4096 HCLK, ~82 us) counter is too tight — it fires on
+    // any CLK_DIV >= 12, where the legitimate FAST_READ transaction
+    // already takes 4032+ HCLK cycles, causing the Xilinx bridge to
+    // return AXI SLVERR (bus error / SIGBUS) mid-stress-test.
+    // Override to smaller values for tight simulation loops (the
+    // cocotbext.ahb master has a 5000-cycle internal timeout).
+    parameter WATCHDOG_WIDTH = 16
     )(
     input  wire                 HCLK,
     input  wire                 HRESETn,

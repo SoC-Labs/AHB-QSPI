@@ -92,7 +92,9 @@ wire QSPI_SCLK;
 wire QSPI_nCS;
 wire [3:0] QSPI_IO;
 
-ahb_qspi_pads u_ahb_qspi_pads(
+// Use a shorter watchdog in sim so tests stay under cocotbext.ahb's
+// internal 5000-cycle master timeout. Production default is 16 bits.
+ahb_qspi_pads #(.WATCHDOG_WIDTH(12)) u_ahb_qspi_pads(
     .HCLK(HCLK),
     .HRESETn(HRESETn),
     .PCLK(HCLK),

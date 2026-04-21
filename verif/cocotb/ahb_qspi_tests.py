@@ -2022,10 +2022,10 @@ async def test_xip_timeout_recovery(dut):
     read_task = cocotb.start_soon(tb.data_ahb_master.read(0x00, 4))
 
     # Watch for the FSM to enter ERR state (the watchdog has fired).
-    # Default watchdog is 12 bits = 4096 HCLK cycles (~41 us at 50 MHz).
-    # Sample up to 5000 HCLK (just under cocotbext.ahb master's internal
-    # 5000-cycle timeout) so we observe ERR before the master gives up
-    # with an exception that would fail our test for the wrong reason.
+    # The cocotb testbench overrides WATCHDOG_WIDTH=12 on ahb_qspi_pads
+    # so the watchdog fires at 4096 HCLK (~41 us at 50 MHz), keeping the
+    # test inside cocotbext.ahb's 5000-cycle master timeout. Production
+    # default is 16 bits (~1.3 ms) — giving headroom for CLK_DIV=31 on PS.
     WATCHDOG_MAX_HCLK = 4900
     saw_err = False
     hresp_during_err = 0

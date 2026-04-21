@@ -369,7 +369,7 @@ class QspiHw:
         cached XIP but functional. Set enable_cache=True to try the
         cached path (known-broken on PS Linux as of 2026-04-21).
         """
-        self.apb.write(REG_AHB_SPI_SETUP, (opcode & 0xFF) | (((dummy - 1) & 0xF) << 12))
+        self.apb.write(REG_AHB_SPI_SETUP, (opcode & 0xFF) | ((dummy & 0xF) << 12))
         self.set_ctrl(qio=qio, xip_active=1, no_cmd=no_cmd)
         if enable_cache:
             self.cache_enable(skip_status_check=True)
