@@ -105,9 +105,23 @@ class QspiHw:
         self.apb.write(REG_AHB_SPI_SETUP, 0)
         self.apb.write(REG_CLK_DIV,       5)
 
-    def set_clk_div(self, n):
+    # CLK_DIV lower bound. At HCLK=50 MHz, CLK_DIV=n gives QSPI_SCLK=50/(2n) MHz.
+    # CLK_DIV=0 -> 50 MHz, CLK_DIV=1 -> 25 MHz. The PmodSF3 (N25Q family) specs
+    # 108 MHz max for dedicated DTR modes but only ~50 MHz in SDR SPI mode with
+    # the margins we're running; empirically CLK_DIV < 2 produces wrong data
+    # from FAST_READ (not a hang — bytes just come back scrambled). Enforce
+    # CLK_DIV >= 2 at the Python API boundary so callers don't silently corrupt
+    # data. Override by passing force=True if you're deliberately exercising
+    # the failing edge (e.g. to characterise flash timing margins).
+    CLK_DIV_MIN_SAFE = 2
+
+    def set_clk_div(self, n, *, force=False):
         if not 0 <= n <= 31:
             raise ValueError("CLK_DIV out of range [0, 31]")
+        if n < self.CLK_DIV_MIN_SAFE and not force:
+            raise ValueError(
+                f"CLK_DIV={n} exceeds PmodSF3 SPI-mode timing "
+                f"(need >= {self.CLK_DIV_MIN_SAFE}); pass force=True to override")
         self.apb.write(REG_CLK_DIV, n & 0x1F)
 
     def set_ctrl(self, *, qio=0, xip_active=0, mode_code=0, cont_read=0, no_cmd=0):
@@ -357,17 +371,17 @@ class QspiHw:
         subsequent APB-only test doesn't leave the cache enabled."""
         self.apb.write(REG_CACHE_CONFIG, 0x0)
 
-    def xip_setup(self, opcode=OP_FAST_READ, dummy=8, qio=0, no_cmd=0, enable_cache=False):
+    def xip_setup(self, opcode=OP_FAST_READ, dummy=8, qio=0, no_cmd=0, enable_cache=True):
         """Configure the AHB XiP path. Sets CTRL.XIP_ACTIVE=1.
 
-        `enable_cache` defaults to False because the CG092 cache's
-        enable FSM gets stuck at CS=01 ("Enabling") on the real PS due
-        to Xilinx axi_ahblite_bridge HREADY behaviour — every AHB read
-        wedges the PS if cache is enabled. With CCR.EN=0 the cache
-        stays at state 0 ("Disabled") which is a simple pass-through:
-        AHB reads flow straight to ahb_qspi_interface. Slower than
-        cached XIP but functional. Set enable_cache=True to try the
-        cached path (known-broken on PS Linux as of 2026-04-21).
+        `enable_cache=True` (default) turns on the CG092 flash cache for
+        significantly faster re-reads. The earlier "cache stuck at CS=01
+        Enabling" bug was actually a consequence of the APB bridge
+        dropping PPROT[0]=0 writes and the AXI bridge never accepting
+        single-cycle AHB errors — both fixed in the RTL + BD. With those
+        in place, CCR.EN=1 reliably transitions to CS=10 Enabled and
+        cached AHB reads work. Pass `enable_cache=False` to exercise the
+        pass-through path explicitly.
         """
         self.apb.write(REG_AHB_SPI_SETUP, (opcode & 0xFF) | ((dummy & 0xF) << 12))
         self.set_ctrl(qio=qio, xip_active=1, no_cmd=no_cmd)
