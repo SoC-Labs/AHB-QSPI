@@ -1139,6 +1139,396 @@ async def test_ahb_xip_read(dut):
 
 
 # ============================================================================
+# XIP Line-Fill Regressions — minimum-delta variants of test_ahb_xip_read
+# that isolate the QPI / NO_CMD / cont_read / plain-SPI axes.
+# ============================================================================
+#
+# The known-passing baseline is `test_ahb_xip_read`, which runs in QPI mode
+# with CTRL |= NO_CMD | CONT_READ and a prior APB "cont_read=True" warmup.
+# Downstream consumers (nanosoc stage-0 etc.) want to know which of those
+# knobs are load-bearing, and whether plain-SPI XIP works at all.
+#
+# Empirical summary at 2026-04-23:
+#   ✓  Plain-SPI slow-read (0x03, 0 dummy), no NO_CMD, no warmup   — PASS
+#   ✓  Plain-SPI fast-read (0x0B, 8 dummy), no NO_CMD, no warmup   — PASS
+#   ✓  QPI + NO_CMD + cont_read warmup                             — PASS (baseline)
+#   ✓  QPI + no NO_CMD + cont_read warmup                          — PASS
+#   ✗  QPI + NO_CMD + NO warmup                                    — FAIL (flash isn't in CR)
+#   ✗  QPI + no NO_CMD + NO warmup                                 — FAIL (QPI needs prior SPI→QPI handoff)
+#
+# Critical sequencing detail (learned the hard way): the CG092 cache reaches
+# STATUS=READY only if the following APB sequence runs around the enable:
+#   1. read  CACHE_CONFIG + 0x04  (STATUS) — pre-read
+#   2. write CACHE_CONFIG = 1               — enable
+#   3. read  CACHE_CONFIG                   — post-read CONFIG
+#   4. poll: read CACHE_CONFIG, read CACHE_CONFIG + 0x04; break on STATUS & 3 == 2
+# Omitting any of steps 1/3/4 leaves STATUS stuck at 0x1 (transitioning). We
+# don't know why today — it feels like a read-side ACK handshake in the
+# CG092 reg block. `_xip_baseline_minus()` encapsulates the working sequence.
+# ============================================================================
+
+
+async def _xip_baseline_minus(dut, tb, *, opcode, dummy_cycles, qio_mode,
+                              no_cmd, cont_read_warmup, addr=0xA000,
+                              clk_div=2):
+    """Parameterised variant of test_ahb_xip_read. Reports which axes are
+    enabled so failures are easy to triage. Programs 4 known words then
+    reads them back through the AHB XIP path."""
+    tb.log.info(
+        "XIP variant: opcode=0x%02x dummy=%d qio=%d no_cmd=%d "
+        "cont_read_warmup=%d clk_div=%d",
+        opcode, dummy_cycles, qio_mode, no_cmd, cont_read_warmup, clk_div)
+
+    await init_qpi(dut, tb)
+
+    data = [0xDECAFE00, 0xDECAFE01, 0xDECAFE02, 0xDECAFE03]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    if not qio_mode:
+        await LEAVE_QPI_MODE(dut, tb)
+        await tb.config_ahb_master.write(0x00, 0x0)  # clear QIO_MODE
+
+    await tb.config_ahb_master.write(0x34, clk_div)
+
+    if cont_read_warmup:
+        # The baseline test's "dummy APB read to exercise the controller".
+        # In QPI mode it also primes the flash into continuous-read mode
+        # and leaves MODE_CODE=0xA0 + CONT_READ=1 in CTRL. Those bits are
+        # LOAD-BEARING — without them, the next APB read to flash after
+        # XIP enable sends the wrong continuation sequence and the cache
+        # never reaches READY. PRESERVE them via read-modify-write below.
+        await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=True)
+
+    # Read-modify-write CTRL so the MODE_CODE and CONT_READ bits set by
+    # the warmup survive. Without this the XIP path deadlocks even if
+    # NO_CMD is asserted (see test_xip_baseline_sanity — same args, full
+    # overwrite, fails; same args, RMW, passes).
+    r = await tb.config_ahb_master.read(0x00, 4)
+    ctrl = int(r[0]['data'], 16)
+    if qio_mode:
+        ctrl |= (1 << 0)
+    else:
+        ctrl &= ~(1 << 0)
+    if no_cmd:
+        ctrl |= (1 << 25)
+    else:
+        ctrl &= ~(1 << 25)
+    ctrl |= (1 << 8)       # XIP_ACTIVE
+    await tb.config_ahb_master.write(0x00, ctrl)
+
+    await tb.config_ahb_master.write(0x30, (dummy_cycles << 12) | opcode)
+
+    # Match the reference sequence exactly: pre-read STATUS, write
+    # CACHE_CONFIG=1, post-read CONFIG, then poll STATUS AND CONFIG per
+    # iteration. Empirically some of these reads are load-bearing; until
+    # we know which, mirror the baseline verbatim.
+    await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
+    await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
+    for _ in range(500):
+        await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
+        status_tmp = await tb.config_ahb_master.read(
+            CACHE_CONFIG_ADDR + 0x04, 4)
+        if (int(status_tmp[0]['data'], 16) & 0x3) == 2:
+            break
+        await Timer(time=10, units='us')
+    else:
+        # Dump STATUS for diagnosis and tear down cleanly before raising.
+        status_tmp = await tb.config_ahb_master.read(
+            CACHE_CONFIG_ADDR + 0x04, 4)
+        cs = int(status_tmp[0]['data'], 16)
+        await tb.config_ahb_master.write(0x00, 0x0)
+        await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x0)
+        raise AssertionError(
+            f"Cache did not reach READY (STATUS & 0x3 stuck at "
+            f"0x{cs & 3:x})")
+
+    got = []
+    for i in range(4):
+        r = await tb.data_ahb_master.read(addr + i * 4, 4)
+        got.append(int(r[0]['data'], 16))
+        tb.log.info("  AHB XIP [%d] @ 0x%08x = 0x%08x (expect 0x%08x)",
+                    i, addr + i * 4, got[-1], data[i])
+
+    await tb.config_ahb_master.write(0x00, 0x0)
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x0)
+    await tb.config_ahb_master.write(0x34, 0x05)
+
+    mismatches = [(i, g, e) for i, (g, e) in enumerate(zip(got, data))
+                  if g != e]
+    assert not mismatches, (
+        f"Line-fill mismatch ({len(mismatches)} word(s)): "
+        + ", ".join(f"[{i}] got=0x{g:08x} exp=0x{e:08x}"
+                    for i, g, e in mismatches))
+
+
+@cocotb.test()
+async def test_xip_baseline_sanity(dut):
+    """Bit-for-bit clone of test_ahb_xip_read but using _xip_baseline_minus
+    with the same arg values. If this passes but the variants above fail,
+    the failure is in the arg combination, not in our helper. If this
+    FAILS but test_ahb_xip_read passes, there is a small sequencing
+    detail in the helper that matters and needs to be traced down."""
+    tb = TB(dut)
+    await _xip_baseline_minus(dut, tb, opcode=0x0B, dummy_cycles=4,
+                              qio_mode=True, no_cmd=True,
+                              cont_read_warmup=True, clk_div=1)
+
+
+@cocotb.test()
+async def test_xip_qpi_no_cont_read_no_nocmd(dut):
+    """Baseline minus BOTH cont_read warmup AND NO_CMD — i.e. the cache
+    issues a full opcode+addr+data on every line fill, with the flash
+    in QPI but not continuous-read mode. This is the 'straightforward'
+    mode you'd expect from any off-the-shelf SPI-cache combination.
+
+    If this passes, the combination of NO_CMD + cont_read_warmup is just
+    a performance optimisation and the generic path works. If it fails,
+    the cache line-fill sequencer is broken in the simple case too.
+    """
+    tb = TB(dut)
+    await _xip_baseline_minus(dut, tb, opcode=0x0B, dummy_cycles=4,
+                              qio_mode=True, no_cmd=False,
+                              cont_read_warmup=False)
+
+
+@cocotb.test()
+async def test_xip_qpi_no_cont_read_warmup(dut):
+    """Baseline minus the cont_read APB warmup.
+
+    Keep QPI mode and NO_CMD, but skip the APB warmup that puts the flash
+    into continuous-read. If this passes, the warmup is incidental; if it
+    fails, the warmup is load-bearing and stage-0 needs to synthesise one.
+    """
+    tb = TB(dut)
+    await _xip_baseline_minus(dut, tb, opcode=0x0B, dummy_cycles=4,
+                              qio_mode=True, no_cmd=True,
+                              cont_read_warmup=False)
+
+
+@cocotb.test()
+async def test_xip_qpi_no_nocmd(dut):
+    """Baseline minus NO_CMD.
+
+    Still QPI, still does the cont_read warmup, but with NO_CMD=0 so the
+    controller re-issues the opcode on every cache line fill. If this
+    fails, the controller's repeated-command path is broken.
+    """
+    tb = TB(dut)
+    await _xip_baseline_minus(dut, tb, opcode=0x0B, dummy_cycles=4,
+                              qio_mode=True, no_cmd=False,
+                              cont_read_warmup=True)
+
+
+@cocotb.test()
+async def test_xip_plain_spi_no_flash_write(dut):
+    """Plain-SPI XIP on an un-programmed flash (default 0xFF pattern).
+
+    Skips the SPI_WRITE_ENABLE / QPI_PAGE_PROGRAM / SPI_WRITE_DISABLE
+    sequence so the flash stays in its fresh-power-on state (SPI mode,
+    all 0xFF). That matches how `nanosoc-ethernet-flash-system`'s
+    `cocotb/soc_boot_flash` preloads the flash via `$readmemh` — no SPI
+    traffic ever touches the part before the XIP read starts. If this
+    passes, the other plain-SPI tests are failing because
+    SPI_WRITE_ENABLE / QPI_PAGE_PROGRAM left flash in a state the cache
+    can't talk to.
+    """
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+
+    # Flash defaults to all-0xFF after power-on (per SST26VF064B model
+    # initial block). Expected read value is 0xFFFFFFFF for every word.
+    addr = 0x1000
+    expected = 0xFFFFFFFF
+
+    # Plain-SPI XIP setup.
+    await tb.config_ahb_master.write(0x34, 0x02)  # CLK_DIV=2
+    await tb.config_ahb_master.write(0x30, (0 << 12) | 0x03)  # slow read
+    await tb.config_ahb_master.write(0x00, (1 << 8))  # XIP only
+
+    # Enable cache + wait for READY.
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
+    for _ in range(500):
+        s = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
+        if (int(s[0]['data'], 16) & 0x3) == 2:
+            break
+        await Timer(time=10, units='us')
+    else:
+        s = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
+        await tb.config_ahb_master.write(0x00, 0x0)
+        await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x0)
+        raise AssertionError(
+            f"Cache did not reach READY (STATUS & 0x3 stuck at "
+            f"0x{int(s[0]['data'], 16) & 3:x})")
+
+    got = []
+    for i in range(4):
+        r = await tb.data_ahb_master.read(addr + i * 4, 4)
+        got.append(int(r[0]['data'], 16))
+        tb.log.info("  AHB XIP [%d] = 0x%08x (expect 0x%08x)",
+                    i, got[-1], expected)
+
+    await tb.config_ahb_master.write(0x00, 0x0)
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x0)
+
+    mismatches = [(i, g) for i, g in enumerate(got) if g != expected]
+    assert not mismatches, (
+        "Read-0xFF line fill mismatch: "
+        + ", ".join(f"[{i}] got=0x{g:08x}" for i, g in mismatches))
+
+
+@cocotb.test()
+async def test_xip_plain_spi_minimum(dut):
+    """The minimum configuration stage-0 needs: plain SPI, no NO_CMD, no
+    cont_read warmup, slow-read opcode. This is the exact pattern that
+    returned magic + zeros in nanosoc-ethernet-flash-system.
+    """
+    tb = TB(dut)
+    await _xip_baseline_minus(dut, tb, opcode=0x03, dummy_cycles=0,
+                              qio_mode=False, no_cmd=False,
+                              cont_read_warmup=False)
+
+
+@cocotb.test()
+async def test_xip_plain_spi_fast_read(dut):
+    """Same as above but with fast-read (0x0B) + 8 dummy cycles — the
+    standard SPI-mode read that most SPI flashes support."""
+    tb = TB(dut)
+    await _xip_baseline_minus(dut, tb, opcode=0x0B, dummy_cycles=8,
+                              qio_mode=False, no_cmd=False,
+                              cont_read_warmup=False)
+
+
+
+#
+# Downstream nanosoc-ethernet-flash-system's stage-0 bootrom originally used
+# the AHB XIP + cache path with a plain SPI read opcode (0x03 or 0x0B) and
+# WITHOUT NO_CMD / continuous-read. In that mode the first word of a cache
+# line (16 B) returned the correct bytes but subsequent words read zero,
+# forcing stage-0 to fall back to APB-driven single-word reads at a 30x
+# perf cost. These regressions exercise exactly that mode so the fix
+# (wherever it ends up — qspi_controller byte-counter / nCS gating, cache
+# line fill sequencer, or ahb_qspi_interface handshake) has a permanent
+# check against a repeat of that regression.
+# ============================================================================
+
+
+async def _xip_plain_spi_fill_body(dut, tb, *, opcode, dummy_cycles,
+                                   addr=0xA000):
+    """Shared body for the plain-SPI XIP regression: program 4 known words,
+    leave the flash in SPI mode, configure AHB XIP with `opcode` + `dummy
+    cycles`, enable cache, read the 4 words back via the AHB data master
+    and assert they match.
+    """
+    await init_qpi(dut, tb)
+
+    # Program 4 known, distinctive words that make word-index errors easy
+    # to spot if the cache returns the wrong line offset.
+    data = [0xA5A50001, 0xA5A50002, 0xA5A50003, 0xA5A50004]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    # Leave QPI — the whole point is to read back over plain SPI.
+    await LEAVE_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x0)  # CTRL: QIO_MODE=0
+
+    # CLK_DIV=2 (HCLK/4=25 MHz) — inside SST26 fast-read spec, ≥2 per
+    # enforcement added in commit 62a0b94.
+    await tb.config_ahb_master.write(0x34, 0x02)
+
+    # Program AHB_SPI_SETUP for the SPI opcode under test.
+    await tb.config_ahb_master.write(0x30, (dummy_cycles << 12) | opcode)
+
+    # Enable XIP WITHOUT NO_CMD or CONT_READ — the plain-SPI path.
+    await tb.config_ahb_master.write(0x00, (1 << 8))
+
+    # Enable cache and wait until it reports ready.
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
+    for _ in range(1000):
+        status_tmp = await tb.config_ahb_master.read(
+            CACHE_CONFIG_ADDR + 0x04, 4)
+        if (int(status_tmp[0]['data'], 16) & 0x3) == 2:
+            break
+        await Timer(time=10, units='us')
+    else:
+        raise AssertionError("Cache did not become ready")
+
+    # Read 4 consecutive words — all four live in the same 16-B cache line.
+    # This is the specific access pattern that triggered the downstream bug:
+    # stage-0 did a `ldr r0, [hdr+0]; ldr r1, [hdr+4]` and got magic + 0.
+    got = []
+    for i in range(4):
+        rdata = await tb.data_ahb_master.read(addr + i * 4, 4)
+        val = int(rdata[0]['data'], 16)
+        got.append(val)
+        tb.log.info("XIP read [%d] @ 0x%08x = 0x%08x (expected 0x%08x)",
+                    i, addr + i * 4, val, data[i])
+
+    # Clean up — back to a neutral state for the next test.
+    await tb.config_ahb_master.write(0x00, 0x00)  # XIP off, QIO off
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x0)
+    await tb.config_ahb_master.write(0x34, 0x05)
+
+    # Assert AFTER cleanup so a failure doesn't leave the controller in
+    # XIP mode and tripping up the next test via test-order coupling.
+    mismatches = [i for i, (g, e) in enumerate(zip(got, data)) if g != e]
+    assert not mismatches, (
+        f"Plain-SPI XIP line fill returned wrong data: "
+        f"word(s) {mismatches} mismatched. got={[hex(g) for g in got]}, "
+        f"expected={[hex(e) for e in data]}"
+    )
+
+
+@cocotb.test()
+async def test_xip_plain_spi_fast_read_line_fill(dut):
+    """XIP line fill via plain-SPI 0x0B fast-read (8 dummy cycles).
+
+    Regression: without NO_CMD + continuous-read the cache fetched the
+    first word correctly but returned 0 for words 1-3 of the 16-B line.
+    """
+    tb = TB(dut)
+    await _xip_plain_spi_fill_body(dut, tb, opcode=0x0B, dummy_cycles=8)
+
+
+@cocotb.test()
+async def test_xip_plain_spi_slow_read_line_fill(dut):
+    """XIP line fill via plain-SPI 0x03 slow-read (0 dummy cycles).
+
+    Same regression on the simplest possible opcode — 0x03 requires no
+    dummy cycles and is the lowest-common-denominator SPI read. If even
+    this fails the issue isn't in the dummy-cycle path but in the cache
+    line-fill sequencing proper.
+    """
+    tb = TB(dut)
+    await _xip_plain_spi_fill_body(dut, tb, opcode=0x03, dummy_cycles=0)
+
+
+@cocotb.test()
+async def test_xip_plain_spi_line_fill_clkdiv_sweep(dut):
+    """Run the plain-SPI XIP line-fill across CLK_DIV values to catch any
+    CDC-race corner where the line-fill sequencer exits before all four
+    words have been shifted in. CLK_DIV ≥ 2 is required by the controller
+    post-62a0b94; stop at 16 to keep runtime bounded.
+
+    Uses `_xip_baseline_minus` so the cache-enable APB sequence matches
+    the baseline. Prior versions of this test open-coded a shorter
+    sequence and hit the cache-stuck-at-0x1 symptom described in
+    `test_xip_baseline_sanity`.
+    """
+    tb = TB(dut)
+    for clk_div in (2, 4, 8, 16):
+        tb.log.info("--- CLK_DIV = %d ---", clk_div)
+        await _xip_baseline_minus(
+            dut, tb, opcode=0x0B, dummy_cycles=8,
+            qio_mode=False, no_cmd=False, cont_read_warmup=False,
+            addr=0xB000 + clk_div * 0x100, clk_div=clk_div)
+
+
+# ============================================================================
 # Additional Tests for Bug Hunting
 # ============================================================================
 
