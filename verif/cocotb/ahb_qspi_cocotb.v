@@ -38,7 +38,20 @@ end
 wire [3:0]       config_HPROT;
 wire [3:0]       data_HPROT;
 assign config_HPROT = 4'b0010;
-assign data_HPROT = 4'b1000;
+// Set by +HPROT_DATA=N plusarg for bug-hunting. Default 4'b1000 matches
+// the prior verif expectation (cacheable opcode). 4'b0001 matches what
+// PL230 drives for DMA-230 source reads in nanoSoC stage-0 (non-cacheable
+// data) — used to probe the DMA-master-port cache regression.
+reg  [3:0]       data_HPROT_reg = 4'b1000;
+assign data_HPROT = data_HPROT_reg;
+initial begin
+    integer hprot_val;
+    if ($value$plusargs("HPROT_DATA=%d", hprot_val)) begin
+        data_HPROT_reg = hprot_val[3:0];
+        $display("[tb] data_HPROT overridden to %b via +HPROT_DATA plusarg",
+                 data_HPROT_reg);
+    end
+end
 wire [15:0]          PADDR;
 wire [2:0]           PPROT;
 wire                 PSEL;
