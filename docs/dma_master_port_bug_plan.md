@@ -20,20 +20,22 @@ for (uint32_t w = 0; w < n_words; ++w) {
 ```
 
 The original plan sat on top of a DMA-copy version of stage-0 and a
-symptom of "IMEM left at X after stage-0". That pattern is still
-reproducible **if** stage-0 is switched back to DMA-copy: PL230
-programming lands (APB writes to `0x50000008` → `0x50000004` →
-`0x50000028`), but the poll `while (CHNL_ENABLE_SET & 0x1)` never
-clears and the CPU hangs. The CPU-copy version side-steps this and
-ships working stage-0 today; re-enabling DMA-copy inside stage-0
-is filed as a follow-up in
+symptom of "IMEM left at X after stage-0". **Post the §1.3 firmware
++ generator fixes** (register-map off-by-one + `dma230_req_w`
+wiring, both landed 2026-04-24) the symptom has shifted: stage-0
+PL230 no longer hangs on `CHNL_ENABLE_SET` — the channel now
+enables, starts issuing master-port reads, copies part of the
+payload, then stalls mid-burst. See the data points below under
+"Phase 1 data collected". The CPU-copy version still ships working
+stage-0 today; re-enabling DMA-copy is filed as a follow-up in
 `nanosoc-ethernet-flash-system/docs/PROJECT_COMPLETION_TODO.md §1.3`.
 
 ## What's been ruled out
 
 Documented with direct probe evidence from
-`test_cache_config_write_probe` (in-tree debug machinery added this
-session — unpolished, uncommitted).
+`test_stage0_boot_path_probe` in
+`nanosoc-ethernet-flash-system/cocotb/soc_boot_flash/test_soc_boot_flash.py`
+(committed as `b05d2fc` on master — reusable diagnostic infra).
 
 - **CACHE_CONFIG APB write works.** A probe at CG092's register-
   block APB input showed the complete write cycle reaching the
@@ -123,6 +125,60 @@ narrow enough to open in Verdi.
    - Descriptor-table reads: any HADDR near `0x18000200` on the
      PL230 master port; compare HRDATA against what the CPU wrote
      into DMEM
+
+#### Phase 1 data collected (2026-04-24)
+
+Partial execution of Phase 1 step 1 (local main.c revert to
+DMA-copy, then run `test_boot_flash_dma_copy_and_banner`) yielded
+three data points before rolling back:
+
+| Stage-0 PL230 config                        | IMEM result  |
+|---------------------------------------------|--------------|
+| `CYCLE_AUTO`, no SW_REQ                     | 0/241 words  |
+| `CYCLE_BASIC`, `R_POWER_4`, 1× SW_REQ       | 4/241 words  |
+| `CYCLE_BASIC`, `R_POWER_10`, 1× SW_REQ      | 177/241 words |
+
+What each row tells us:
+
+- **AUTO: 0 words.** Self-request still doesn't fire in stage-0
+  context even post-§1.3. Confirms AUTO mode is not a viable path;
+  the `dma230_req_w` tieoff fix didn't revive it. Likely needs a
+  separate investigation into PL230's request-masking state at
+  pre-REMAP / BOOTROM-executing time.
+- **BASIC + R_POWER_4 + 1× SW_REQ: 4 words.** Exactly one
+  arbitration unit (2²=4), then stalls waiting for the next
+  request. **This is the positive control**: channel enable + APB
+  register-map + `dma230_req_w` wiring + SW_REQ are all working
+  end-to-end now. Matches PL230 TRM behaviour. Rules out the
+  channel-never-starts hypotheses.
+- **BASIC + R_POWER_10 + 1× SW_REQ: 177 words.** Real progress
+  through the cache — then stalls at word 177 (dest
+  `IMEM+0x2C4`). Since R_POWER_10 gives 1024 transfers per
+  arbitration, one SW_REQ **should** cover all 241 words in a
+  single arbitration unit. The mid-burst stall is the new open
+  bug. 177 isn't cache-line-aligned (177 % 4 = 1), which rules
+  out some obvious theories.
+
+The revert is clean; the user's CPU-copy stage-0 still passes
+end-to-end. Three most promising next probes for the 177-word
+stall (all require Phase 1 step 3 instrumentation):
+
+1. **AHB watchdog interaction.** `ahb_qspi` ships a 16-bit AHB
+   watchdog (commit `e72d160`); long plain-SPI line-fills under
+   DMA pressure might trip it. A watchdog ERR aborts the in-flight
+   transaction; PL230 would see HRESP=ERROR and could halt the
+   channel. Instrument the watchdog's ERR signal alongside PL230
+   master-port HRESP.
+2. **Cache line-fill backpressure during DMA burst.** DMA issues
+   NSEQ reads faster than the cache can fill lines at `CLK_DIV=5`.
+   If the cache's HREADY rises out of phase with DMA's pipelined
+   address phase, data is sampled on the wrong cycle. Instrument
+   HREADY relative to HTRANS transitions.
+3. **Descriptor-table re-fetch / update.** PL230 writes the
+   descriptor back to DMEM after each arbitration per the TRM. If
+   the write races with anything reading DMEM, subsequent PL230
+   state is corrupted. Instrument HADDR on the PL230 master port
+   for accesses in the `0x18000200` region.
 
 ### Phase 2 — diff stage-0 vs stage-1 PL230 runs
 
