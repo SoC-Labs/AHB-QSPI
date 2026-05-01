@@ -3,6 +3,13 @@ module qspi_controller (
     input  wire         HCLK,
     input  wire         HRESETn,
 
+    // Soft reset from the AHB watchdog (HCLK domain). Asserted level-high
+    // when the AHB interface's WAIT_READ timeout fires. Synchronised into
+    // the QSPI_SCLK_i domain below and used as a synchronous reset on the
+    // FSM and its counters to recover from a wedged state without
+    // requiring a full system reset.
+    input  wire         SOFT_RESET,
+
     input  wire         QSPI_SCLK_i,
 
     input  wire [1:0]   QSPI_SPI_MODE, // {CPOL, CPHA}
@@ -52,14 +59,154 @@ reg [3:0]   QSPI_IO_o_reg;
 reg [127:0] data_in_reg;
 reg [21:0]  last_QSPI_ADDR;
 
+// 3-FF CDC synchronizer for QSPI_ENABLE (HCLK/PCLK -> QSPI_SCLK_i domain).
+//
+// Why 3-FF for ENABLE when the control bus (QSPI_READ, QSPI_WRITE,
+// QSPI_N_RW_BYTES, etc.) is only 2-FF:
+//
+// Software writes control regs at PCLK cycle T and enable at cycle T+1 —
+// separate APB transactions. Both sets of signals then cross into
+// QSPI_SCLK_i via independent 2-FF synchronisers whose metastability
+// resolution is independent. If the enable chain resolves one SCLK cycle
+// earlier than the control chain (legal under the CDC contract), the
+// latch at QSPI_enable_sync_rise fires while qspi_xxx_sync still holds
+// the previous value — silent miscapture of N_RW_BYTES / READ / WRITE /
+// QIO mode, and a wrong-shaped operation on the bus.
+//
+// Giving ENABLE one extra pipeline stage forces its observed rising edge
+// to appear >=1 SCLK cycle after the control-bus 2-FF chain has had time
+// to settle, removing the race without any software protocol changes.
+reg QSPI_enable_sync_meta;
+reg QSPI_enable_sync_s2;
 reg QSPI_enable_sync;
+reg QSPI_enable_sync_prev;
 
 always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
-    if(~HRESETn)begin
-        QSPI_enable_sync <= 1'b0;
-    end else begin 
-        QSPI_enable_sync <= QSPI_ENABLE;
-    end 
+    if(~HRESETn) begin
+        QSPI_enable_sync_meta <= 1'b0;
+        QSPI_enable_sync_s2   <= 1'b0;
+        QSPI_enable_sync      <= 1'b0;
+        QSPI_enable_sync_prev <= 1'b0;
+    end else begin
+        QSPI_enable_sync_meta <= QSPI_ENABLE;
+        QSPI_enable_sync_s2   <= QSPI_enable_sync_meta;
+        QSPI_enable_sync      <= QSPI_enable_sync_s2;
+        QSPI_enable_sync_prev <= QSPI_enable_sync;
+    end
+end
+wire QSPI_enable_sync_rise = QSPI_enable_sync & ~QSPI_enable_sync_prev;
+
+// 2-FF CDC synchroniser for SOFT_RESET (HCLK -> QSPI_SCLK_i).
+// SOFT_RESET is held high for multiple HCLK cycles by the AHB watchdog,
+// so a 2-FF sync is adequate and we don't need async-assert handling
+// (SOFT_RESET is a synchronous reset, not an async one).
+reg soft_reset_sync_meta;
+reg soft_reset_sync;
+always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
+    if(~HRESETn) begin
+        soft_reset_sync_meta <= 1'b0;
+        soft_reset_sync      <= 1'b0;
+    end else begin
+        soft_reset_sync_meta <= SOFT_RESET;
+        soft_reset_sync      <= soft_reset_sync_meta;
+    end
+end
+
+// ============================================================
+// Control-bus CDC sync + edge-triggered latch (Bug A fix)
+// ============================================================
+// Every HCLK-domain control signal is passed through its own 2-FF
+// synchroniser and then latched on the rising edge of QSPI_enable_sync.
+// The previous "track while current_state==IDLE" scheme had a race: a
+// second APB write arriving before QSPI_enable_sync rose could slip the
+// corrupted value into the latch on the cycle the FSM transitioned out
+// of IDLE. Gating capture on the enable-sync rising edge instead
+// guarantees the latched control bus is whatever was valid at the
+// moment the (synchronised) enable was first seen, regardless of
+// subsequent software activity.
+reg [4:0]   qspi_n_rw_bytes_meta,   qspi_n_rw_bytes_sync;
+reg [3:0]   qspi_dummy_cycles_meta, qspi_dummy_cycles_sync;
+reg         qspi_read_meta,         qspi_read_sync;
+reg         qspi_write_meta,        qspi_write_sync;
+reg         qspi_addr_en_meta,      qspi_addr_en_sync;
+reg         qspi_qio_mode_meta,     qspi_qio_mode_sync;
+reg         qspi_cont_read_meta,    qspi_cont_read_sync;
+reg [7:0]   qspi_mode_code_meta,    qspi_mode_code_sync;
+reg         qspi_no_cmd_meta,       qspi_no_cmd_sync;
+
+always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
+    if(~HRESETn) begin
+        qspi_n_rw_bytes_meta   <= 5'h0; qspi_n_rw_bytes_sync   <= 5'h0;
+        qspi_dummy_cycles_meta <= 4'h0; qspi_dummy_cycles_sync <= 4'h0;
+        qspi_read_meta         <= 1'b0; qspi_read_sync         <= 1'b0;
+        qspi_write_meta        <= 1'b0; qspi_write_sync        <= 1'b0;
+        qspi_addr_en_meta      <= 1'b0; qspi_addr_en_sync      <= 1'b0;
+        qspi_qio_mode_meta     <= 1'b0; qspi_qio_mode_sync     <= 1'b0;
+        qspi_cont_read_meta    <= 1'b0; qspi_cont_read_sync    <= 1'b0;
+        qspi_mode_code_meta    <= 8'h0; qspi_mode_code_sync    <= 8'h0;
+        qspi_no_cmd_meta       <= 1'b0; qspi_no_cmd_sync       <= 1'b0;
+    end else begin
+        qspi_n_rw_bytes_meta   <= QSPI_N_RW_BYTES;   qspi_n_rw_bytes_sync   <= qspi_n_rw_bytes_meta;
+        qspi_dummy_cycles_meta <= QSPI_DUMMY_CYCLES; qspi_dummy_cycles_sync <= qspi_dummy_cycles_meta;
+        qspi_read_meta         <= QSPI_READ;         qspi_read_sync         <= qspi_read_meta;
+        qspi_write_meta        <= QSPI_WRITE;        qspi_write_sync        <= qspi_write_meta;
+        qspi_addr_en_meta      <= QSPI_ADDR_EN;      qspi_addr_en_sync      <= qspi_addr_en_meta;
+        qspi_qio_mode_meta     <= QSPI_QIO_MODE;     qspi_qio_mode_sync     <= qspi_qio_mode_meta;
+        qspi_cont_read_meta    <= QSPI_CONT_READ;    qspi_cont_read_sync    <= qspi_cont_read_meta;
+        qspi_mode_code_meta    <= QSPI_MODE_CODE;    qspi_mode_code_sync    <= qspi_mode_code_meta;
+        qspi_no_cmd_meta       <= QSPI_NO_CMD;       qspi_no_cmd_sync       <= qspi_no_cmd_meta;
+    end
+end
+
+reg [4:0]   qspi_n_rw_bytes_latched;
+reg [3:0]   qspi_dummy_cycles_latched;
+reg         qspi_read_latched;
+reg         qspi_write_latched;
+reg         qspi_addr_en_latched;
+reg         qspi_qio_mode_latched;
+reg         qspi_cont_read_latched;
+reg [7:0]   qspi_mode_code_latched;
+reg         qspi_no_cmd_latched;
+
+always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
+    if(~HRESETn) begin
+        qspi_n_rw_bytes_latched   <= 5'h0;
+        qspi_dummy_cycles_latched <= 4'h0;
+        qspi_read_latched         <= 1'b0;
+        qspi_write_latched        <= 1'b0;
+        qspi_addr_en_latched      <= 1'b0;
+        qspi_qio_mode_latched     <= 1'b0;
+        qspi_cont_read_latched    <= 1'b0;
+        qspi_mode_code_latched    <= 8'h0;
+        qspi_no_cmd_latched       <= 1'b0;
+    end else if (soft_reset_sync) begin
+        // synchronous soft-reset via watchdog
+        qspi_n_rw_bytes_latched   <= 5'h0;
+        qspi_dummy_cycles_latched <= 4'h0;
+        qspi_read_latched         <= 1'b0;
+        qspi_write_latched        <= 1'b0;
+        qspi_addr_en_latched      <= 1'b0;
+        qspi_qio_mode_latched     <= 1'b0;
+        qspi_cont_read_latched    <= 1'b0;
+        qspi_mode_code_latched    <= 8'h0;
+        qspi_no_cmd_latched       <= 1'b0;
+    end else if (QSPI_enable_sync_rise) begin
+        // Capture the synced control bus on the cycle enable_sync rises.
+        // The 3-FF enable chain (vs 2-FF on the control bus) guarantees
+        // the rising edge seen here is at least one SCLK cycle after the
+        // control-bus sync chain has had time to settle, so the sampled
+        // qspi_xxx_sync values are the ones software intended.
+        qspi_n_rw_bytes_latched   <= qspi_n_rw_bytes_sync;
+        qspi_dummy_cycles_latched <= qspi_dummy_cycles_sync;
+        qspi_read_latched         <= qspi_read_sync;
+        qspi_write_latched        <= qspi_write_sync;
+        qspi_addr_en_latched      <= qspi_addr_en_sync;
+        qspi_qio_mode_latched     <= qspi_qio_mode_sync;
+        qspi_cont_read_latched    <= qspi_cont_read_sync;
+        qspi_mode_code_latched    <= qspi_mode_code_sync;
+        qspi_no_cmd_latched       <= qspi_no_cmd_sync;
+    end
+    // Enable not rising -> hold latched values
 end
 
 reg [127:0]   QSPI_WDATA_reg;
@@ -69,6 +216,8 @@ assign QSPI_IO_o = QSPI_IO_o_reg;
 always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     if(~HRESETn) begin
         current_state <= IDLE;
+    end else if (soft_reset_sync) begin
+        current_state <= IDLE;   // watchdog-driven soft reset
     end else begin
         current_state <= next_state;
     end
@@ -76,18 +225,17 @@ end
 
 // FSM:Next state decision tree
 always_comb begin
+    next_state = IDLE;
+    QSPI_ENABLE_ACK = 1'b0;
     case(current_state)
         IDLE: begin
-            if(QSPI_enable_sync==1'b1 && QSPI_NO_CMD==1'b0) begin
+            if(QSPI_enable_sync==1'b1 && qspi_no_cmd_latched==1'b0) begin
                 next_state = OP;
-            end else if(QSPI_enable_sync==1'b1 && QSPI_NO_CMD==1'b1) begin
+            end else if(QSPI_enable_sync==1'b1 && qspi_no_cmd_latched==1'b1) begin
                 if(last_QSPI_ADDR==QSPI_ADDR)
                     next_state = NO_FETCH;
                 else
                     next_state = ADDR;
-            end else begin
-                next_state = IDLE;
-                QSPI_ENABLE_ACK = 1'b0;
             end
             //op_counter=3'h0;
         end
@@ -100,29 +248,29 @@ always_comb begin
             QSPI_ENABLE_ACK = 1'b1;
             next_state = OP;
             // Next state decision from OP if in QPI mode
-            if(QSPI_QIO_MODE==1'b1 & op_counter==3'h1) begin
+            if(qspi_qio_mode_latched==1'b1 & op_counter==3'h1) begin
                 QSPI_ENABLE_ACK = 1'b0;
-                if(QSPI_ADDR_EN)
+                if(qspi_addr_en_latched)
                     next_state = ADDR;
-                else if(QSPI_DUMMY_CYCLES!=4'h0)
+                else if(qspi_dummy_cycles_latched!=4'h0)
                     next_state = DUMMY;
-                else if(QSPI_READ)
+                else if(qspi_read_latched)
                     next_state = DATA_I;
-                else if(QSPI_WRITE)
+                else if(qspi_write_latched)
                     next_state = DATA_O;
                 else
                     next_state = IDLE;
             end
             // Next state decision from OP if in SPI mode
-            else if(QSPI_QIO_MODE==1'b0 & op_counter==3'h7) begin
+            else if(qspi_qio_mode_latched==1'b0 & op_counter==3'h7) begin
                 QSPI_ENABLE_ACK = 1'b0;
-                if(QSPI_ADDR_EN)
+                if(qspi_addr_en_latched)
                     next_state = ADDR;
-                else if(QSPI_DUMMY_CYCLES!=4'h0)
+                else if(qspi_dummy_cycles_latched!=4'h0)
                     next_state = DUMMY;
-                else if(QSPI_READ)
+                else if(qspi_read_latched)
                     next_state = DATA_I;
-                else if(QSPI_WRITE)
+                else if(qspi_write_latched)
                     next_state = DATA_O;
                 else
                     next_state = IDLE;
@@ -133,28 +281,27 @@ always_comb begin
         ADDR: begin
             QSPI_ENABLE_ACK = 1'b1;
             // Next state decision from ADDR if in QPI mode
-            if(QSPI_QIO_MODE==1'b1 & addr_counter==5'h05) begin
+            if(qspi_qio_mode_latched==1'b1 & addr_counter==5'h05) begin
                 QSPI_ENABLE_ACK = 1'b0;
-                last_QSPI_ADDR = QSPI_ADDR;
-                if(QSPI_CONT_READ)
+                if(qspi_cont_read_latched)
                     next_state = MODE;
-                else if(QSPI_DUMMY_CYCLES!=4'h0)
+                else if(qspi_dummy_cycles_latched!=4'h0)
                     next_state = DUMMY;
-                else if(QSPI_READ)
+                else if(qspi_read_latched)
                     next_state = DATA_I;
-                else if(QSPI_WRITE)
+                else if(qspi_write_latched)
                     next_state = DATA_O;
                 else
                     next_state = IDLE;
             end
             // Next state decision from ADDR if in SPI mode
-            else if(QSPI_QIO_MODE==1'b0 & addr_counter==5'h17) begin
+            else if(qspi_qio_mode_latched==1'b0 & addr_counter==5'h17) begin
                 QSPI_ENABLE_ACK = 1'b0;
-                if(QSPI_DUMMY_CYCLES!=4'h0)
+                if(qspi_dummy_cycles_latched!=4'h0)
                     next_state = DUMMY;
-                else if(QSPI_READ)
+                else if(qspi_read_latched)
                     next_state = DATA_I;
-                else if(QSPI_WRITE)
+                else if(qspi_write_latched)
                     next_state = DATA_O;
                 else
                     next_state = IDLE;
@@ -164,18 +311,18 @@ always_comb begin
         end
         MODE: begin
             // Next state decision from MODE if in QPI mode
-            if(QSPI_QIO_MODE==1'b1 & mode_counter == 1'b0) begin
-                if(QSPI_DUMMY_CYCLES!=4'h0)
+            if(qspi_qio_mode_latched==1'b1 & mode_counter == 1'b0) begin
+                if(qspi_dummy_cycles_latched!=4'h0)
                     next_state = DUMMY;
-                else if(QSPI_READ)
+                else if(qspi_read_latched)
                     next_state = DATA_I;
-                else if(QSPI_WRITE)
+                else if(qspi_write_latched)
                     next_state = DATA_O;
                 else
                     next_state = IDLE;
             end
             // Next state decision from MODE if in SPI mode
-            else if(QSPI_QIO_MODE==1'b0) begin
+            else if(qspi_qio_mode_latched==1'b0) begin
                 next_state = IDLE;
             end else begin 
                 next_state = MODE;
@@ -183,10 +330,10 @@ always_comb begin
         end
         DUMMY: begin
             // Next state decision from DUMMY
-            if(dummy_counter >= (QSPI_DUMMY_CYCLES - 1)) begin
-                if(QSPI_WRITE)
+            if(dummy_counter >= (qspi_dummy_cycles_latched - 1)) begin
+                if(qspi_write_latched)
                     next_state = DATA_O;
-                else if(QSPI_READ)
+                else if(qspi_read_latched)
                     next_state = DATA_I;
                 else
                     next_state = IDLE;
@@ -199,8 +346,8 @@ always_comb begin
                 next_state = DATA_O;
             end else begin
                 // Next state decision from DATA_O if in QPI mode
-                if(QSPI_QIO_MODE==1'b0) begin
-                    if(byte_counter==QSPI_N_RW_BYTES) begin
+                if(qspi_qio_mode_latched==1'b0) begin
+                    if(byte_counter==qspi_n_rw_bytes_latched) begin
                         if(data_counter == 3'h7)
                             next_state = IDLE;
                         else
@@ -211,7 +358,7 @@ always_comb begin
                 end 
                 // Next state decision from DATA_O if in SPI mode
                 else begin
-                    if(byte_counter==QSPI_N_RW_BYTES) begin
+                    if(byte_counter==qspi_n_rw_bytes_latched) begin
                         if(data_counter==3'h0)
                             next_state = IDLE;
                         else
@@ -225,8 +372,8 @@ always_comb begin
         DATA_I: begin
             next_state = DATA_I;
             // Next state decision from DATA_I if in QPI mode
-            if(QSPI_QIO_MODE==1'b0) begin
-                if((byte_counter[3:0]==QSPI_N_RW_BYTES)) begin
+            if(qspi_qio_mode_latched==1'b0) begin
+                if((byte_counter[3:0]==qspi_n_rw_bytes_latched)) begin
                     if(data_counter==3'h6)
                         next_state = IDLE;
                     else
@@ -235,7 +382,7 @@ always_comb begin
             end 
             // Next state decision from DATA_I if in SPI mode
             else begin
-                if((byte_counter==QSPI_N_RW_BYTES)) begin
+                if((byte_counter==qspi_n_rw_bytes_latched)) begin
                     if(data_counter==3'h0)
                         next_state = IDLE;
                     else
@@ -249,11 +396,23 @@ end
 
 reg QSPI_IO_e_int;
 
-always @(negedge QSPI_SCLK_i) begin
-    if(current_state==OP) begin
+// Negedge shift-out block — single top-level if-else chain required for
+// SpyGlass CDC synthesis (SYNTH_133). QSPI_WDATA_reg load is merged into
+// every branch except DATA_O (where it is shifted instead).
+always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
+    if(~HRESETn || soft_reset_sync) begin
+        QSPI_SCLK_e <= 1'b0;
+        QSPI_IO_o_reg <= 4'hF;
+        QSPI_IO_e_int <= 1'b1;
+        op_code <= 8'h00;
+        addr_code <= 24'h000000;
+        qspi_mode_reg <= 8'h00;
+        QSPI_WDATA_reg <= 128'd0;
+    end else if(current_state==OP) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
-        if(QSPI_QIO_MODE==1'b1) begin
+        QSPI_WDATA_reg <= QSPI_WDATA;
+        if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg[3:0]<=op_code[7:4];
             op_code[7:0] <= {op_code[3:0],4'h0};
         end else begin
@@ -263,21 +422,36 @@ always @(negedge QSPI_SCLK_i) begin
     end else if(current_state == DATA_I) begin
         QSPI_IO_e_int <= 1'b0;
         QSPI_SCLK_e <= 1'b1;
+        QSPI_WDATA_reg <= QSPI_WDATA;
     end else if(current_state == DATA_O) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
-        if(QSPI_QIO_MODE==1'b1) begin
+        // DATA_O: WDATA_reg is shifted out, NOT reloaded.
+        //
+        // SPI-mode bug workaround: during the counter-overflow guard cycle
+        // (byte_counter==0x1F on the first DATA_O cycle), the shift-out
+        // logic previously ran unconditionally, producing one spurious
+        // extra bit on MOSI before the real payload. The flash rejected
+        // the resulting Page Program as malformed. Gating the shift (and
+        // clock) on byte_counter != 0x1F suppresses that spurious bit.
+        //
+        // QPI mode behaves differently: its counter rolls over every
+        // cycle (data_counter >= 1), so what looks like a guard cycle is
+        // actually the first legitimate nibble shift — do NOT suppress.
+        if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg <= QSPI_WDATA_reg[3:0];
             QSPI_WDATA_reg <= {4'h0, QSPI_WDATA_reg[127:4]};
-        end else begin
+        end else if(byte_counter != 5'h1F) begin
             QSPI_IO_o_reg[0] <= QSPI_WDATA_reg[0];
             QSPI_WDATA_reg <= {1'b0, QSPI_WDATA_reg[127:1]};
+        end else begin
+            QSPI_SCLK_e <= 1'b0;  // suppress the spurious SPI-mode clock
         end
-
     end else if(current_state == ADDR) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
-        if(QSPI_QIO_MODE==1'b1) begin
+        QSPI_WDATA_reg <= QSPI_WDATA;
+        if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg[3:0]<=addr_code[23:20];
             addr_code[23:0] <= {addr_code[19:0],4'h0};
         end else begin
@@ -287,27 +461,24 @@ always @(negedge QSPI_SCLK_i) begin
     end else if(current_state == DUMMY) begin
         QSPI_IO_e_int <= 1'b0;
         QSPI_SCLK_e <= 1'b1;
+        QSPI_WDATA_reg <= QSPI_WDATA;
     end else if(current_state == MODE) begin
         QSPI_IO_e_int <=1'b1;
         QSPI_SCLK_e <= 1'b1;
-        if(QSPI_QIO_MODE==1'b1) begin
+        QSPI_WDATA_reg <= QSPI_WDATA;
+        if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg <= qspi_mode_reg[7:4];
             qspi_mode_reg <= {qspi_mode_reg[3:0], 4'b0};
         end
     end else begin
         op_code <= QSPI_CMD;
         addr_code <= {2'b00,QSPI_ADDR};
-        qspi_mode_reg <= QSPI_MODE_CODE;
+        qspi_mode_reg <= qspi_mode_code_latched;
+        QSPI_WDATA_reg <= QSPI_WDATA;
         QSPI_SCLK_e<=1'b0;
         QSPI_IO_o_reg<=4'hF;
         QSPI_IO_e_int <= 1'b1;
     end
-
-
-    if(current_state != DATA_O) begin
-        QSPI_WDATA_reg <= QSPI_WDATA;
-    end
-
 end
 always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     if(~HRESETn) begin
@@ -318,6 +489,17 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
         addr_counter <= 5'h00;
         mode_counter <= 1'b1;
         data_in_reg <= 128'd0;
+        last_QSPI_ADDR <= 22'd0;
+    end else if (soft_reset_sync) begin
+        // synchronous soft-reset via watchdog
+        op_counter <= 3'h0;
+        data_counter <= 3'h7;
+        byte_counter <= 5'h1F;
+        dummy_counter <= 4'h0;
+        addr_counter <= 5'h00;
+        mode_counter <= 1'b1;
+        data_in_reg <= 128'd0;
+        last_QSPI_ADDR <= 22'd0;
     end else begin
         if(current_state==OP) begin
             data_in_reg <= 128'd0;
@@ -328,10 +510,10 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
 
         if(current_state==DATA_I || current_state ==DATA_O) begin
             data_counter <= data_counter + 1;
-            if(QSPI_QIO_MODE==1'b0 && data_counter == 3'h7) begin
+            if(qspi_qio_mode_latched==1'b0 && data_counter == 3'h7) begin
                 byte_counter <= byte_counter+1;
                 data_counter <= 3'h0;
-            end else if (QSPI_QIO_MODE==1'b1 && data_counter >= 3'h1) begin
+            end else if (qspi_qio_mode_latched==1'b1 && data_counter >= 3'h1) begin
                 byte_counter <= byte_counter+1;
                 data_counter <= 3'h0;
             end
@@ -348,6 +530,8 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
 
         if(current_state == ADDR) begin
             addr_counter <= addr_counter + 1;
+            if(next_state != ADDR)
+                last_QSPI_ADDR <= QSPI_ADDR;
         end else begin
             addr_counter <= 5'h00;
         end
@@ -359,11 +543,11 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
         end
 
         if(current_state == DATA_I) begin
-            if(QSPI_QIO_MODE==1'b1) begin
-                if(byte_counter!=QSPI_N_RW_BYTES+1)
+            if(qspi_qio_mode_latched==1'b1) begin
+                if(byte_counter!=qspi_n_rw_bytes_latched+1)
                     data_in_reg <= {data_in_reg[123:0], QSPI_IO_i};
             end else begin
-                if(byte_counter!=QSPI_N_RW_BYTES+1)
+                if(byte_counter!=qspi_n_rw_bytes_latched+1)
                     data_in_reg <= {data_in_reg[126:0], QSPI_IO_i[1]};
             end
         end
@@ -371,38 +555,34 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     end
 end
 
-// RDATA latch
+// RDATA output — purely combinational, no latch
 always_comb begin
-    if(~HRESETn) begin
-        QSPI_RDATA = 128'd0;
-    end else if(QSPI_nCS) begin
-        case(QSPI_N_RW_BYTES)
-            4'h0:   QSPI_RDATA = {{120{1'b0}}, data_in_reg[7:0 ]};
-            4'h1:   QSPI_RDATA = {{112{1'b0}}, data_in_reg[15:0]};
-            4'h2:   QSPI_RDATA = {{104{1'b0}}, data_in_reg[23:0]};
-            4'h3:   QSPI_RDATA = {{96{1'b0}},  data_in_reg[31:0]};
-            4'h4:   QSPI_RDATA = {{88{1'b0}},  data_in_reg[31:0], data_in_reg[39:32]};
-            4'h5:   QSPI_RDATA = {{80{1'b0}},  data_in_reg[31:0], data_in_reg[47:32]};
-            4'h6:   QSPI_RDATA = {{72{1'b0}},  data_in_reg[31:0], data_in_reg[55:32]};
-            4'h7:   QSPI_RDATA = {{64{1'b0}},  data_in_reg[31:0], data_in_reg[63:32]};
-            4'h8:   QSPI_RDATA = {{56{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[71:64]};
-            4'h9:   QSPI_RDATA = {{48{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[79:64]};
-            4'hA:   QSPI_RDATA = {{40{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[87:64]};
-            4'hB:   QSPI_RDATA = {{32{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64]};
-            4'hC:   QSPI_RDATA = {{24{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[103:96]};
-            4'hD:   QSPI_RDATA = {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
-            4'hE:   QSPI_RDATA = {{8{1'b0}},   data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
-            4'hF:   QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
-            default: QSPI_RDATA = 128'd0;
-        endcase
-    end
+    case(qspi_n_rw_bytes_latched)
+        4'h0:   QSPI_RDATA = {{120{1'b0}}, data_in_reg[7:0 ]};
+        4'h1:   QSPI_RDATA = {{112{1'b0}}, data_in_reg[15:0]};
+        4'h2:   QSPI_RDATA = {{104{1'b0}}, data_in_reg[23:0]};
+        4'h3:   QSPI_RDATA = {{96{1'b0}},  data_in_reg[31:0]};
+        4'h4:   QSPI_RDATA = {{88{1'b0}},  data_in_reg[31:0], data_in_reg[39:32]};
+        4'h5:   QSPI_RDATA = {{80{1'b0}},  data_in_reg[31:0], data_in_reg[47:32]};
+        4'h6:   QSPI_RDATA = {{72{1'b0}},  data_in_reg[31:0], data_in_reg[55:32]};
+        4'h7:   QSPI_RDATA = {{64{1'b0}},  data_in_reg[31:0], data_in_reg[63:32]};
+        4'h8:   QSPI_RDATA = {{56{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[71:64]};
+        4'h9:   QSPI_RDATA = {{48{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[79:64]};
+        4'hA:   QSPI_RDATA = {{40{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[87:64]};
+        4'hB:   QSPI_RDATA = {{32{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64]};
+        4'hC:   QSPI_RDATA = {{24{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[103:96]};
+        4'hD:   QSPI_RDATA = {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
+        4'hE:   QSPI_RDATA = {{8{1'b0}},   data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
+        4'hF:   QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
+        default: QSPI_RDATA = 128'd0;
+    endcase
 end
 
 assign QSPI_nCS = ((QSPI_enable_sync==1'b1) ||(current_state!=IDLE) || (QSPI_SCLK_e==1'b1))?1'b0:1'b1;
 //assign QSPI_SCLK_e = (current_state!=IDLE)?1'b1:1'b0;w
 
-assign QSPI_IO_e[3] = (QSPI_QIO_MODE==1'b1)?QSPI_IO_e_int:1'b1;
-assign QSPI_IO_e[2] = (QSPI_QIO_MODE==1'b1)?QSPI_IO_e_int:1'b1;
-assign QSPI_IO_e[1] = (QSPI_QIO_MODE==1'b1)?QSPI_IO_e_int:1'b0;
-assign QSPI_IO_e[0] = (QSPI_QIO_MODE==1'b1)?QSPI_IO_e_int:1'b1;
+assign QSPI_IO_e[3] = (qspi_qio_mode_latched==1'b1)?QSPI_IO_e_int:1'b1;
+assign QSPI_IO_e[2] = (qspi_qio_mode_latched==1'b1)?QSPI_IO_e_int:1'b1;
+assign QSPI_IO_e[1] = (qspi_qio_mode_latched==1'b1)?QSPI_IO_e_int:1'b0;
+assign QSPI_IO_e[0] = (qspi_qio_mode_latched==1'b1)?QSPI_IO_e_int:1'b1;
 endmodule

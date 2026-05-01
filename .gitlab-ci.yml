@@ -1,49 +1,416 @@
-# This file is a template, and might need editing before it works on your project.
-# This is a sample GitLab CI/CD configuration file that should run without any modifications.
-# It demonstrates a basic 3 stage CI/CD pipeline. Instead of real tests or scripts,
-# it uses echo commands to simulate the pipeline execution.
+# AHB QSPI GitLab CI Pipeline
+# Runs lint, CDC analysis, cocotb regression (8 tests), coverage merge,
+# and ASIC synthesis (TSMC 65nm).
 #
-# A pipeline is composed of independent jobs that run scripts, grouped into stages.
-# Stages run in sequential order, but jobs within stages run in parallel.
-#
-# For more information, see: https://docs.gitlab.com/ee/ci/yaml/#stages
-#
-# You can copy and paste this template into a new `.gitlab-ci.yml` file.
-# You should not add this template to an existing `.gitlab-ci.yml` file by using the `include:` keyword.
-#
-# To contribute improvements to CI/CD templates, please follow the Development guide at:
-# https://docs.gitlab.com/development/cicd/templates/
-# This specific template is located at:
-# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Getting-Started.gitlab-ci.yml
+# Stages:
+#   1. setup      - Clone repo, validate tool paths, fetch dependencies
+#   2. lint       - Verilator lint
+#   3. cdc        - SpyGlass CDC analysis
+#   4. regression - Cocotb regression with VCS code coverage
+#   5. coverage   - Merge VCS coverage and generate report
+#   6. synthesis  - ASIC synthesis with Design Compiler (TSMC 65nm)
+#   7. cleanup    - Remove workspace
 
-stages:          # List of stages for jobs, and their order of execution
-  - build
-  - test
-  - deploy
+stages:
+  - setup
+  - lint
+  - cdc
+  - regression
+  - coverage
+  - synthesis
+  - cleanup
 
-build-job:       # This job runs in the build stage, which runs first.
-  stage: build
+variables:
+  # Disable GitLab's built-in checkout -- we clone manually
+  GIT_STRATEGY: none
+  # Workspace directory for the pipeline
+  WORK_DIR: "${CI_BUILDS_DIR}/${CI_PROJECT_NAME}/${CI_PIPELINE_ID}"
+  # Synopsys EDA tool paths
+  VCS_HOME: /eda/synopsys/2022-23/RHELx86/VCS_2022.06-SP2
+  VERDI_HOME: /eda/synopsys/2022-23/RHELx86/VERDI_2022.06-SP2
+  SPYGLASS_HOME: /eda/synopsys/2022-23/RHELx86/SPYGLASS_2022.06-SP2/SPYGLASS_HOME
+  DC_HOME: /eda/synopsys/2022-23/RHELx86/SYN_2022.12
+  # ARM IP library path (Corstone-101, CG092 flash cache)
+  ARM_IP_LIBRARY_PATH: /research/AAA/ip_library
+  # Simulator selection for cocotb
+  SIM: vcs
+
+# ============================================================================
+# Stage 1: Setup
+# ============================================================================
+
+clone:
+  stage: setup
   script:
-    - echo "Compiling the code..."
-    - echo "Compile complete."
+    # Remove stale workspaces from previous pipelines (older than 24h)
+    - find "${CI_BUILDS_DIR}/${CI_PROJECT_NAME}" -maxdepth 1 -mindepth 1 -type d -mmin +1440 -exec rm -rf {} + 2>/dev/null || true
+    - rm -rf "$WORK_DIR"
+    - mkdir -p "$WORK_DIR"
+    - git clone --branch "$CI_COMMIT_REF_NAME" --single-branch "$CI_REPOSITORY_URL" "$WORK_DIR"
+    - cd "$WORK_DIR" && git checkout "$CI_COMMIT_SHA"
+    - cd "$WORK_DIR" && git submodule update --init --recursive
+    - echo "Cloned $CI_COMMIT_SHORT_SHA into $WORK_DIR"
 
-unit-test-job:   # This job runs in the test stage.
-  stage: test    # It only starts when the job in the build stage completes successfully.
+preflight:
+  stage: setup
+  needs: [clone]
   script:
-    - echo "Running unit tests... This will take about 60 seconds."
-    - sleep 60
-    - echo "Code coverage is 90%"
+    - |
+      echo "========================================"
+      echo " Preflight Environment Check"
+      echo "========================================"
 
-lint-test-job:   # This job also runs in the test stage.
-  stage: test    # It can run at the same time as unit-test-job (in parallel).
-  script:
-    - echo "Linting code... This will take about 10 seconds."
-    - sleep 10
-    - echo "No lint issues found."
+      pass=0; fail=0
 
-deploy-job:      # This job runs in the deploy stage.
-  stage: deploy  # It only runs when *both* jobs in the test stage complete successfully.
-  environment: production
+      check_dir() {
+        local name="$1" path="$2"
+        if [ -z "$path" ]; then
+          echo "  FAIL  $name  (not set)"
+          fail=$((fail + 1))
+        elif [ -d "$path" ]; then
+          echo "  OK    $name = $path"
+          pass=$((pass + 1))
+        else
+          echo "  FAIL  $name = $path  (directory not found)"
+          fail=$((fail + 1))
+        fi
+      }
+
+      check_bin() {
+        local name="$1" bin="$2"
+        if command -v "$bin" > /dev/null 2>&1; then
+          echo "  OK    $name  ($(command -v "$bin"))"
+          pass=$((pass + 1))
+        else
+          echo "  FAIL  $name  ('$bin' not found on PATH)"
+          fail=$((fail + 1))
+        fi
+      }
+
+      echo ""
+      echo "-- EDA Tools ----------------------------"
+      check_dir "VCS_HOME"       "$VCS_HOME"
+      check_dir "VERDI_HOME"     "$VERDI_HOME"
+      check_dir "SPYGLASS_HOME"  "$SPYGLASS_HOME"
+      check_dir "DC_HOME"        "$DC_HOME"
+
+      echo ""
+      echo "-- IP Libraries -------------------------"
+      check_dir "ARM_IP_LIBRARY_PATH"              "$ARM_IP_LIBRARY_PATH"
+      check_dir "Corstone-101 (cmsdk_ahb_to_apb)"  "$ARM_IP_LIBRARY_PATH/latest/Corstone-101/logical/cmsdk_ahb_to_apb"
+      check_dir "CG092 Flash Cache"                 "$ARM_IP_LIBRARY_PATH/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0"
+      check_dir "Precompiled SRAM (TSMC65)"         "/research/precompiled_mems/TSMC65"
+
+      echo ""
+      echo "-- Workspace ----------------------------"
+      check_dir "WORK_DIR"      "$WORK_DIR"
+
+      echo ""
+      echo "-- Tool Binaries (with PATH set) --------"
+      export PATH="$VCS_HOME/bin:$VERDI_HOME/bin:$DC_HOME/bin:$PATH"
+      check_bin "vcs"             "vcs"
+      check_bin "dc_shell"        "dc_shell"
+      check_bin "verilator"       "verilator"
+      check_bin "python3"         "python3"
+      check_bin "cocotb-config"   "cocotb-config"
+
+      echo ""
+      echo "========================================"
+      echo " Preflight Summary  PASS=$pass  FAIL=$fail"
+      echo "========================================"
+
+      if [ "$fail" -ne 0 ]; then
+        echo ""
+        echo "ERROR: $fail preflight check(s) failed."
+        echo "Fix the paths in .gitlab-ci.yml variables or on the runner."
+        exit 1
+      fi
+
+fetch-deps:
+  stage: setup
+  needs: [clone]
   script:
-    - echo "Deploying application..."
-    - echo "Application successfully deployed."
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export SOCLABS_SOCTOOLS_FLOW_DIR="$WORK_DIR/soctools_flow"
+    # Download flash model if not present
+    - |
+      if [ ! -f "$WORK_DIR/verif/VIP/SST26VF064B.v" ]; then
+        echo "Downloading SST26VF064B flash model..."
+        make -C "$WORK_DIR" get_flash_model
+      else
+        echo "Flash model already present"
+      fi
+    # Generate makefile.flist for cocotb (resolves file paths from flists)
+    - |
+      echo "Generating cocotb file list..."
+      export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+      export DESIGN_VC="$WORK_DIR/flist/Top/ahb_QSPI_SIM.flist"
+      export SIM_TOP_DIR="$WORK_DIR/simulate/sim"
+      mkdir -p "$SIM_TOP_DIR/cocotb"
+      cd "$SIM_TOP_DIR/cocotb"
+      python3 "$SOCLABS_SOCTOOLS_FLOW_DIR/bin/filelist_compile.py" \
+        -m -f "$DESIGN_VC" \
+        -o "$SIM_TOP_DIR/cocotb/makefile.flist"
+    - echo "File list generated at $WORK_DIR/simulate/sim/cocotb/makefile.flist"
+    - cat "$WORK_DIR/simulate/sim/cocotb/makefile.flist"
+
+# ============================================================================
+# Stage 2: Lint
+# ============================================================================
+
+verilator-lint:
+  stage: lint
+  needs: [clone, preflight, fetch-deps]
+  script:
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    - echo "Verilator version:" && verilator --version
+    - make -C "$WORK_DIR" lint_verilator 2>&1 | tee verilator_lint.log
+  after_script:
+    - cp "$WORK_DIR/lint/ahb_qspi/"*.log . 2>/dev/null || true
+  artifacts:
+    when: always
+    paths:
+      - verilator_lint.log
+    expire_in: 30 days
+  allow_failure: true
+
+hal-lint:
+  stage: lint
+  needs: [clone, preflight]
+  tags:
+    - xcelium
+  variables:
+    XCELIUM_HOME: /eda/cadence/xcelium
+  script:
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    - export PATH="$XCELIUM_HOME/tools/bin:$PATH"
+    - echo "HAL version:" && hal -version 2>&1 | head -1
+    # Lint standalone modules (no external IP dependencies)
+    - make -C "$WORK_DIR/lint" lint-standalone 2>&1 | tee hal_lint_standalone.log
+    # Lint all modules including top-level (requires CG092 + Corstone-101)
+    - make -C "$WORK_DIR/lint" lint-each 2>&1 | tee hal_lint_all.log
+    # Generate reports
+    - |
+      for mod in qspi_controller qspi_clock_div apb_qspi_regs ahb_qspi_interface top_ahb_qspi; do
+        make -C "$WORK_DIR/lint" report MODULE=$mod 2>&1 || true
+      done
+  after_script:
+    - cp "$WORK_DIR/lint/"*_hal.log . 2>/dev/null || true
+    - cp "$WORK_DIR/lint/"*_hal_report.txt . 2>/dev/null || true
+  artifacts:
+    when: always
+    paths:
+      - "*_hal.log"
+      - "*_hal_report.txt"
+      - hal_lint_standalone.log
+      - hal_lint_all.log
+    expire_in: 30 days
+
+# ============================================================================
+# Stage 3: CDC Analysis
+# ============================================================================
+
+spyglass-cdc:
+  stage: cdc
+  needs: [clone, preflight]
+  tags:
+    - vcs
+  script:
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    - export SPYGLASS_HOME="$SPYGLASS_HOME"
+    - export PATH="$SPYGLASS_HOME/bin:$PATH"
+    - echo "SpyGlass CDC analysis for top_ahb_qspi"
+    - make -C "$WORK_DIR/cdc" cdc 2>&1 | tee spyglass_cdc.log
+  after_script:
+    - cp "$WORK_DIR/cdc/top_ahb_qspi_cdc_summary.rpt" . 2>/dev/null || true
+    - cp spyglass_cdc.log . 2>/dev/null || true
+  artifacts:
+    when: always
+    paths:
+      - spyglass_cdc.log
+      - top_ahb_qspi_cdc_summary.rpt
+    expire_in: 30 days
+  allow_failure: true
+
+# ============================================================================
+# Stage 4: Regression
+# ============================================================================
+
+.vcs_cocotb_setup: &vcs_cocotb_setup
+  before_script:
+    - export PATH="$VCS_HOME/bin:$VERDI_HOME/bin:$PATH"
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export SOCLABS_SOCTOOLS_FLOW_DIR="$WORK_DIR/soctools_flow"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    - python3 -m pip install --user cocotb cocotbext-ahb numpy --quiet
+
+cocotb-regression:
+  stage: regression
+  needs: [clone, preflight, fetch-deps]
+  tags:
+    - vcs
+  <<: *vcs_cocotb_setup
+  script:
+    - echo "Python version:" && python3 --version
+    - echo "cocotb version:" && python3 -m cocotb --version || cocotb-config --version
+    - echo "VCS version:" && vcs -ID 2>&1 | head -1
+    # Run cocotb tests with VCS code coverage
+    - |
+      export SIM_TOP_DIR="$WORK_DIR/simulate/sim"
+      export SIM_DIR="$SIM_TOP_DIR"
+      export COCOTB_SCRATCH_DIR="$SIM_TOP_DIR/cocotb/scratch"
+      mkdir -p "$SIM_DIR"
+      cd "$SIM_DIR"
+      make -C "$WORK_DIR/verif/cocotb" clean SIM_BUILD="$COCOTB_SCRATCH_DIR"
+      make -C "$WORK_DIR/verif/cocotb" sim \
+        SIM=vcs \
+        SIM_BUILD="$COCOTB_SCRATCH_DIR" \
+        COMPILE_ARGS="-full64 -sverilog -timescale=1ns/1ns -kdb -cm line+tgl+fsm+branch+cond" \
+        SIM_CMD_SUFFIX="-cm line+tgl+fsm+branch+cond"
+  after_script:
+    - mkdir -p cocotb
+    - cp "$WORK_DIR/simulate/sim/cocotb/scratch/results.xml" cocotb/ 2>/dev/null || true
+    - cp "$WORK_DIR/simulate/sim/cocotb/scratch/run.log"     cocotb/ 2>/dev/null || true
+    # Collect VDB coverage database
+    - mkdir -p coverage_vdbs
+    - cp -r "$WORK_DIR/simulate/sim/cocotb/scratch/simv.vdb" coverage_vdbs/cocotb.vdb 2>/dev/null || true
+  artifacts:
+    when: always
+    paths:
+      - cocotb/run.log
+      - coverage_vdbs/
+    reports:
+      junit:
+        - cocotb/results.xml
+    expire_in: 30 days
+
+# ============================================================================
+# Stage 5: Coverage
+# ============================================================================
+
+coverage-report:
+  stage: coverage
+  needs:
+    - job: clone
+    - job: cocotb-regression
+      artifacts: true
+  tags:
+    - vcs
+  before_script:
+    - export PATH="$VCS_HOME/bin:$VERDI_HOME/bin:$PATH"
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+  script:
+    - |
+      echo "========================================"
+      echo " Generating VCS Coverage Report"
+      echo "========================================"
+
+      # Collect all VDB directories that exist
+      VDB_DIRS=""
+      for vdb in coverage_vdbs/*.vdb; do
+        if [ -d "$vdb" ]; then
+          VDB_DIRS="$VDB_DIRS -dir $vdb"
+          echo "  Found: $vdb"
+        fi
+      done
+
+      if [ -z "$VDB_DIRS" ]; then
+        echo "WARNING: No VDB coverage databases found. Skipping report."
+        exit 0
+      fi
+
+      echo ""
+      echo "-- Generating coverage report -----------"
+      urg -full64 $VDB_DIRS \
+        -report coverage_report \
+        -elfile "$WORK_DIR/verif/cocotb/coverage_exclude.el" \
+        -format both \
+        -metric line+cond+fsm+tgl+branch \
+        2>&1 | grep -E 'Note|Error|Warning' || true
+
+      echo ""
+      echo "-- Coverage Summary ---------------------"
+      if [ -f coverage_report/dashboard.txt ]; then
+        cat coverage_report/dashboard.txt
+      else
+        echo "  (dashboard.txt not found)"
+      fi
+
+      echo ""
+      echo "Coverage report: coverage_report/dashboard.html"
+  artifacts:
+    when: always
+    paths:
+      - coverage_report/
+    expose_as: "Coverage Report"
+    expire_in: 30 days
+
+# ============================================================================
+# Stage 6: ASIC Synthesis (TSMC 65nm)
+# ============================================================================
+
+dc-synth-tsmc65:
+  stage: synthesis
+  needs: [clone, preflight]
+  tags:
+    - vcs
+  script:
+    - export PATH="$DC_HOME/bin:$PATH"
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    - echo "Design Compiler version:" && dc_shell -version 2>&1 | head -3
+    - mkdir -p "$WORK_DIR/imp/ASIC"
+    - |
+      cd "$WORK_DIR/asic/TSMC65nm"
+      dc_shell -f dc_synthesis_core.tcl 2>&1 | tee dc_synth.log
+      DC_EXIT=$?
+      if [ $DC_EXIT -ne 0 ]; then
+        echo "ERROR: dc_shell exited with code $DC_EXIT"
+        exit 1
+      fi
+    # Check that gate-level netlist was produced
+    - |
+      if [ ! -f "$WORK_DIR/imp/ASIC/top_ahb_qspi_gates.v" ]; then
+        echo "ERROR: Gate-level netlist not generated"
+        exit 1
+      fi
+      echo "Gate-level netlist size: $(wc -l < "$WORK_DIR/imp/ASIC/top_ahb_qspi_gates.v") lines"
+    # Print timing summary
+    - |
+      echo ""
+      echo "========================================"
+      echo " Synthesis Reports Summary"
+      echo "========================================"
+      if [ -f "$WORK_DIR/imp/ASIC/top_ahb_qspi_qor.rep" ]; then
+        echo "-- QoR Report ---------------------------"
+        cat "$WORK_DIR/imp/ASIC/top_ahb_qspi_qor.rep"
+      fi
+  after_script:
+    - cp "$WORK_DIR/asic/TSMC65nm/dc_synth.log" . 2>/dev/null || true
+    - cp "$WORK_DIR/imp/ASIC/top_ahb_qspi_area.rep" . 2>/dev/null || true
+    - cp "$WORK_DIR/imp/ASIC/top_ahb_qspi_power.rep" . 2>/dev/null || true
+    - cp "$WORK_DIR/imp/ASIC/top_ahb_qspi_timing.rep" . 2>/dev/null || true
+    - cp "$WORK_DIR/imp/ASIC/top_ahb_qspi_qor.rep" . 2>/dev/null || true
+  artifacts:
+    when: always
+    paths:
+      - dc_synth.log
+      - top_ahb_qspi_area.rep
+      - top_ahb_qspi_power.rep
+      - top_ahb_qspi_timing.rep
+      - top_ahb_qspi_qor.rep
+    expire_in: 30 days
+
+# ============================================================================
+# Stage 7: Cleanup
+# ============================================================================
+
+cleanup:
+  stage: cleanup
+  when: always
+  script:
+    - rm -rf "$WORK_DIR" || true
+    - echo "Cleaned up $WORK_DIR"

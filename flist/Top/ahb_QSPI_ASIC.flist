@@ -10,6 +10,7 @@ $(SOCLABS_AHB_QSPI_DIR)/logical/cache_subsytem/logical/cache_subsystem.v
 -f $(SOCLABS_AHB_QSPI_DIR)/flist/IP/CG092_cache.flist
 -f $(SOCLABS_AHB_QSPI_DIR)/flist/IP/corstone_101_ip.flist
 
-$(SOCLABS_AHB_QSPI_DIR)/logical/cache_models/generic/cache_ram.v
+$(SOCLABS_AHB_QSPI_DIR)/logical/cache_models/tsmc65/cache_ram.v
 
-$(ARM_IP_LIBRARY_PATH)/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/logical/testbench/execution_tb/verilog/p_flash_cache_f0_sp_ram.v
+/research/precompiled_mems/TSMC65/flash_cache_data/flash_cache_data.v
+/research/precompiled_mems/TSMC65/flash_cache_tag/flash_cache_tag.v

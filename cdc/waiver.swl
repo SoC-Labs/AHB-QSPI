@@ -1,0 +1,115 @@
+#-----------------------------------------------------------------------------
+# SoCLabs AHB QSPI — SpyGlass CDC Waivers
+#
+# Suppress CDC violations originating entirely within third-party IP.
+# AHB QSPI-authored RTL should NEVER be waived here —
+# add targeted waivers with justification comments instead.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# Waiver policy (updated after 2026-04 hardware bug hunt):
+#
+#   Third-party IP waivers (ARM CMSDK, CG092) remain — those IPs are
+#   pre-verified by their vendors and their internals should not be
+#   re-analysed here.
+#
+#   Internal waivers on AHB QSPI RTL have been REMOVED where the
+#   underlying issue has been fixed in RTL (see top_ahb_qspi.sgdc for
+#   details). A waiver that hides a real bug (like the previous
+#   Ac_conv03 waiver on AHB_QSPI_ENABLE, which masked Bug D) is worse
+#   than a noisy false-positive report.
+#
+#   If SpyGlass complains about a path that is genuinely correct by a
+#   non-trivial argument, PREFER adding an assertion in the RTL
+#   (`assume property (...)`) or a formal check, rather than suppressing
+#   the warning. Assertions are verified at runtime; waivers are not.
+#
+# Contributors
+#
+# David Mapstone (d.a.mapstone@soton.ac.uk)
+#
+# Copyright 2026, SoC Labs (www.soclabs.org)
+#-----------------------------------------------------------------------------
+
+# ============================================================================
+# Third-party IP: ARM CMSDK
+# ============================================================================
+# CMSDK APB slave mux is a purely combinational routing block with no
+# real CDC paths — any flagged crossings are false positives.
+
+waive -du "cmsdk_apb_slave_mux" -comment "ARM CMSDK IP — combinational mux, no real CDC"
+
+# ============================================================================
+# Third-party IP: ARM CG092 Flash Cache
+# ============================================================================
+# The CG092 p_flash_cache_f0 contains its own CDC synchronisers
+# (p_flash_cache_f0_capt_sync, cdc_capt_sync, static_reg) for the
+# HCLK/PCLK boundary.  These are pre-verified by ARM.
+
+waive -du "p_flash_cache_f0_capt_sync"  -comment "ARM CG092 CDC sync cell — pre-verified"
+waive -du "cdc_capt_sync"               -comment "ARM CG092 CDC sync cell — pre-verified"
+waive -du "p_flash_cache_f0_static_reg" -comment "ARM CG092 static reg — pre-verified"
+waive -du "static_reg"                  -comment "ARM CG092 static reg — pre-verified"
+# CG092 core register crossings (PCLK -> HCLK) — pre-verified by ARM.
+# Includes ccr_*, irqstat_*, irq, cshr, csmr registers and bus logic.
+waive -du "p_flash_cache_f0_core"       -comment "ARM CG092 core — CDC pre-verified by ARM"
+waive -du "p_flash_cache_f0_reg_block"  -comment "ARM CG092 register block — CDC pre-verified by ARM"
+waive -du "p_flash_cache_f0_bus_logic"  -comment "ARM CG092 bus logic — CDC pre-verified by ARM"
+waive -du "p_flash_cache_f0_mrb"        -comment "ARM CG092 mrb — CDC pre-verified by ARM"
+
+# ============================================================================
+# AHB QSPI: QSPI_nCS -> delay chain (same QSPI_SCLK_i domain)
+# ============================================================================
+# QSPI_nCS is derived from QSPI_SCLK_i-domain registers inside
+# qspi_controller (QSPI_enable_sync, current_state, QSPI_SCLK_e).
+# The delay chain in qspi_controller_mux is also clocked by QSPI_SCLK_i.
+# This is a same-domain path — SpyGlass sometimes mis-identifies the
+# clock because QSPI_nCS is a top-level wire. Targeted waiver, not a
+# blanket rule suppression.
+waive -rule Ac_unsync01 -msg "*AHB_QSPI_BUSY_del*QSPI_nCS*" \
+    -comment "Same QSPI_SCLK_i domain: QSPI_nCS is combinational from QSPI_SCLK_i regs"
+
+# ============================================================================
+# NOTE: Ac_conv03 waiver REMOVED
+# ============================================================================
+# The previous waiver suppressed Ac_conv03 warnings about convergence of
+# the ack_sync and busy_sync synchronisers feeding AHB_QSPI_ENABLE:
+#
+#     waive -rule Ac_conv03 -msg "*AHB_QSPI_ENABLE*" \
+#         -comment "By design: FSM uses both sync'd enable_ack and busy..."
+#
+# That waiver masked Bug D — the FSM could wedge because the
+# ahb_qspi_interface had no way to recover if either synchroniser
+# resolved to the "wrong" stable value. The Layer 1 watchdog fix now
+# provides recovery, and any remaining convergence report from
+# Ac_conv03 should be re-evaluated with current RTL. If the tool still
+# reports convergence on those nets, add a runtime liveness assertion
+# instead of waiving:
+#
+#     assert property (@(posedge HCLK) disable iff (!HRESETn)
+#         current_state == WAIT_READ |-> ##[1:65536] current_state != WAIT_READ);
+#
+# That would prove the FSM always eventually exits WAIT_READ (via
+# qspi_ready OR via the watchdog), making the convergence safe by
+# construction rather than by waiver.
+
+# ============================================================================
+# Reset multi-domain and multi-sync warnings
+# ============================================================================
+# HRESETn is a system-wide async reset used across HCLK, PCLK, and
+# QSPI_SCLK_i domains — this is architecturally correct.
+waive -rule Clock_sync05a -msg "*HRESETn*" \
+    -comment "HRESETn is system-wide async reset, sampled in multiple domains by design"
+waive -rule Reset_sync04 -msg "*HRESETn*" \
+    -comment "Independent sync chains sharing same async reset — no functional issue"
+waive -rule Reset_sync04 -msg "*PRESETn*" \
+    -comment "Independent sync chains sharing same async reset — no functional issue"
+
+# ============================================================================
+# Clock divider relationship
+# ============================================================================
+# QSPI_SCLK_i is intentionally derived from HCLK via qspi_clock_div.
+# SpyGlass flags this as a suspicious clock hierarchy; in our case it's
+# intentional because the SPI clock is always a fraction of the system
+# clock by design.
+waive -rule Clock_check07 -msg "*HCLK*QSPI_SCLK_i*" \
+    -comment "QSPI_SCLK_i is intentionally derived from HCLK via clock divider"

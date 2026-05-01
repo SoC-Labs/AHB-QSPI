@@ -1,0 +1,58 @@
+halstruct(64): 22.03-s005: (c) Copyright 1995-2022 Cadence Design Systems, Inc.
+
+
+
+Design facts for top module: qspi_controller
+-----------------------------------------
+
+  1. Primary inputs used as flip-flop
+     clocks and latch enables         :
+                                            Number Of single-bit
+     Primary Input                    : Flipflops/latches controlled
+     -------------                      ----------------------------
+     QSPI_SCLK_i                      : 379 FFs
+
+  2. Gated primary input used as flip-flop
+     clocks and latch enables         :
+                                            Number Of single-bit
+     Gated primary signal             : Flipflops/latches controlled
+     -------------------                ----------------------------
+
+  3. Internally generated signals used as flip-flop
+     clocks and latch enables         :
+                                            Number Of single-bit
+     Internal signal                  : Flipflops/latches controlled
+     -------------                      ----------------------------
+
+  4. Primary inputs used as async
+     set/reset
+                                      : HRESETn
+
+     Primary inputs used as sync
+     set/reset
+                                      : **NONE**
+
+     Internally generated signals used as async
+     set/reset
+
+  5. Clock-Reset Generators :
+
+  6. Clock/Reset/Set Details :
+
+  7. Physical Blocks Info :
+
+  8. Physical Block Clocks Domain Info :
+
+
+=========================================
+
+Design facts for the complete design:
+-----------------------------------------
+
+  1. Number of tops in hierarchy : 1
+
+  2. Number of single-bit flip-flops in hierarchy : 379
+    -- (i)  Number of single-bit D flip-flops in hierarchy : 379
+    -- (ii) Number of single-bit JK flip-flops in hierarchy : 0
+
+  3. Number of single-bit latches in hierarchy : 0

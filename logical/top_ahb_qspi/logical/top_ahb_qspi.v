@@ -5,8 +5,9 @@
 // Contributors
 //
 // Daniel Newbrook (d.newbrook@soton.ac.uk)
+// David Mapstone (d.mapstone@soton.ac.uk)
 //
-// Copyright � 2021-5, SoC Labs (www.soclabs.org)
+// Copyright  2021-5, SoC Labs (www.soclabs.org)
 //-----------------------------------------------------------------------------
 // Purpose:
 //
@@ -22,7 +23,12 @@
 
 module top_ahb_qspi #(
     parameter ADDR_W = 32,
-    parameter DATA_W = 32
+    parameter DATA_W = 32,
+    // Propagated to ahb_qspi_interface's watchdog counter. Default 16
+    // bits (~1.3 ms at 50 MHz HCLK) covers worst-case CLK_DIV=31 XIP
+    // reads. Override to smaller values only for simulation harnesses
+    // whose AHB master timeout is shorter than the default watchdog.
+    parameter WATCHDOG_WIDTH = 16
     )(
     input  wire                 HCLK,
     input  wire                 HRESETn,
@@ -61,7 +67,12 @@ module top_ahb_qspi #(
     input  wire [3:0]           QSPI_IO_i,
     output wire [3:0]           QSPI_IO_e,
 
-    output wire                 IRQ_QSPI_FINISHED
+    output wire                 IRQ_QSPI_FINISHED,
+
+    // Debug / visibility pins — driven straight out for LED wiring or
+    // logic analyser probes. No functional role.
+    output wire                 DBG_XIP_ACTIVE,    // reg0[8] in APB regs
+    output wire                 DBG_SOFT_RESET     // watchdog-driven soft reset pulse
 );
 
 
@@ -200,9 +211,17 @@ cache_subsystem u_cache_subsystem(
     .PWDATA(PWDATA),
     .PWRITE(PWRITE),
     .PSEL(cache_psel),
+    // Force PPROT[0]=1 ("privileged") on the cache's APB input. Without
+    // this, the CG092 p_flash_cache_f0 bus logic silently drops writes
+    // whose AWPROT[0]=0 (user mode) — see p_flash_cache_f0_bus_logic.v
+    // line 89: apb_valid = psel & ~penable & (~pwrite | pprot[0]). PS
+    // Linux userspace MMIO (/dev/mem mmap) issues AWPROT with bit 0 = 0,
+    // so CCR writes were being discarded and the cache stayed disabled,
+    // wedging every AHB XIP read on PS for lack of a response. Reads are
+    // already unconditionally allowed, so only PPROT[0] needs forcing.
     .PENABLE(PENABLE),
     .PSTRB(PSTRB),
-    .PPROT(PPROT),
+    .PPROT({PPROT[2:1], 1'b1}),
     .PRDATA(cache_prdata),
     .PSLVERR(cache_pslverr),
     .PREADY(cache_pready),
@@ -268,6 +287,12 @@ wire                 AHB_QSPI_ENABLE_ACK;
 wire                 AHB_QSPI_BUSY;
 wire [127:0]         AHB_QSPI_RDATA;
 
+// Soft-reset wire from the AHB watchdog (ahb_qspi_interface) to the
+// QSPI controller. Pulsed high for ~128 HCLK cycles when the AHB
+// WAIT_READ watchdog fires, so the controller's internal FSM returns
+// to IDLE. See Bug D fix in /home/dam1n19/.claude/plans/qspi-cdc-analysis.md
+wire                 qspi_soft_reset;
+
 wire [7:0]           APB_QSPI_CMD;
 wire                 APB_QSPI_ENABLE;
 wire                 APB_QSPI_READ;
@@ -294,6 +319,7 @@ wire QSPI_SCLK_i;
 
 
 qspi_controller_mux u_qspi_controller_mux(
+    .HRESETn(HRESETn),
     .QSPI_SCLK(QSPI_SCLK_i),
     .XIP_ACTIVE(XIP_ACTIVE),
 
@@ -376,7 +402,8 @@ apb_qspi_regs u_apb_qspi_regs(
 
 ahb_qspi_interface #(
     .ADDR_W(22),
-    .DATA_W(128)
+    .DATA_W(128),
+    .WATCHDOG_WIDTH(WATCHDOG_WIDTH)
     ) u_ahb_qspi_interface (
         .HCLK(HCLK),
         .HRESETn(HRESETn),
@@ -402,9 +429,13 @@ ahb_qspi_interface #(
         .AHB_QSPI_WDATA(AHB_QSPI_WDATA),
         .AHB_QSPI_ENABLE_ACK(AHB_QSPI_ENABLE_ACK),
         .AHB_QSPI_BUSY(AHB_QSPI_BUSY),
-        .AHB_QSPI_RDATA(AHB_QSPI_RDATA)
+        .AHB_QSPI_RDATA(AHB_QSPI_RDATA),
+        .SOFT_RESET(qspi_soft_reset)
 );
 
+
+assign DBG_XIP_ACTIVE = XIP_ACTIVE;
+assign DBG_SOFT_RESET = qspi_soft_reset;
 
 qspi_clock_div u_qspi_clock_div(
     .HCLK(HCLK),
@@ -417,6 +448,7 @@ qspi_clock_div u_qspi_clock_div(
 qspi_controller u_qspi_controller(
     .HCLK(HCLK),
     .HRESETn(HRESETn),
+    .SOFT_RESET(qspi_soft_reset),
     .QSPI_SCLK_i(QSPI_SCLK_i),
     .QSPI_SPI_MODE(2'b00),
     .QSPI_CMD(QSPI_CMD),

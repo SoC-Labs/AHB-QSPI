@@ -74,6 +74,24 @@ reg qspi_finished;
 reg qspi_busy_last;
 assign IRQ_QSPI_FINISHED = qspi_finished;
 
+// 2-FF CDC synchronizers for signals from QSPI_SCLK_i domain into PCLK domain
+reg qspi_enable_ack_meta, qspi_enable_ack_sync;
+reg qspi_busy_meta,       qspi_busy_sync;
+
+always @(posedge PCLK or negedge PRESETn) begin
+    if(~PRESETn) begin
+        qspi_enable_ack_meta <= 1'b0;
+        qspi_enable_ack_sync <= 1'b0;
+        qspi_busy_meta       <= 1'b0;
+        qspi_busy_sync       <= 1'b0;
+    end else begin
+        qspi_enable_ack_meta <= QSPI_ENABLE_ACK;
+        qspi_enable_ack_sync <= qspi_enable_ack_meta;
+        qspi_busy_meta       <= QSPI_BUSY;
+        qspi_busy_sync       <= qspi_busy_meta;
+    end
+end
+
 
 localparam [7:0] PIDR0 = 8'h59; //0xFE0
 localparam [7:0] PIDR1 = 8'h16; //0xFE4
@@ -117,10 +135,32 @@ assign QSPI_N_RW_BYTES = reg2[19:16];
 
 assign QSPI_ADDR = reg3[21:0];
 
-assign QSPI_WDATA[31:0] =   {reg8[27:24],reg8[31:28],reg8[19:16],reg8[23:20],reg8[11:8],reg8[15:12],reg8[3:0],reg8[7:4]};
-assign QSPI_WDATA[63:32] =  {reg9[27:24],reg9[31:28],reg9[19:16],reg9[23:20],reg9[11:8],reg9[15:12],reg9[3:0],reg9[7:4]};
-assign QSPI_WDATA[95:64] =  {reg10[27:24],reg10[31:28],reg10[19:16],reg10[23:20],reg10[11:8],reg10[15:12],reg10[3:0],reg10[7:4]};
-assign QSPI_WDATA[127:96] = {reg11[27:24],reg11[31:28],reg11[19:16],reg11[23:20],reg11[11:8],reg11[15:12],reg11[3:0],reg11[7:4]};
+function [31:0] qspi_wdata_qpi_xform;
+    input [31:0] data;
+    begin
+        qspi_wdata_qpi_xform =
+            {data[27:24],data[31:28],data[19:16],data[23:20],data[11:8],data[15:12],data[3:0],data[7:4]};
+    end
+endfunction
+
+function [31:0] qspi_wdata_spi_xform;
+    input [31:0] data;
+    begin
+        qspi_wdata_spi_xform =
+            {data[24],data[25],data[26],data[27],data[28],data[29],data[30],data[31],
+             data[16],data[17],data[18],data[19],data[20],data[21],data[22],data[23],
+             data[8],data[9],data[10],data[11],data[12],data[13],data[14],data[15],
+             data[0],data[1],data[2],data[3],data[4],data[5],data[6],data[7]};
+    end
+endfunction
+
+// WDATA byte transformation:
+//   QPI mode  — nibble-swap per byte (compensates for nibble-serial, lower-nibble-first output)
+//   SPI mode  — bit-reversal per byte (compensates for bit-serial, LSB-first output)
+assign QSPI_WDATA[31:0]   = QSPI_QIO_MODE ? qspi_wdata_qpi_xform(reg8)  : qspi_wdata_spi_xform(reg8);
+assign QSPI_WDATA[63:32]  = QSPI_QIO_MODE ? qspi_wdata_qpi_xform(reg9)  : qspi_wdata_spi_xform(reg9);
+assign QSPI_WDATA[95:64]  = QSPI_QIO_MODE ? qspi_wdata_qpi_xform(reg10) : qspi_wdata_spi_xform(reg10);
+assign QSPI_WDATA[127:96] = QSPI_QIO_MODE ? qspi_wdata_qpi_xform(reg11) : qspi_wdata_spi_xform(reg11);
 
 assign AHB_QSPI_CMD = reg12[7:0];
 assign AHB_QSPI_DUMMY_CYCLES = reg12[15:12];
@@ -129,42 +169,41 @@ assign QSPI_CLK_DIV = reg13;
 
 always @(posedge PCLK or negedge PRESETn) begin
     if(~PRESETn) begin
-        reg0 = 32'd0;
-        reg1 = 32'd0;
-        reg2 = 32'd0;
-        reg3 = 32'd0;
-        reg8 = 32'd0;
-        reg9 = 32'd0;
-        reg10 = 32'd0;
-        reg11 = 32'd0;
-        reg12 = 32'd0;
-        reg13 = 5'h01;
+        reg0 <= 32'd0;
+        reg1 <= 32'd0;
+        reg2 <= 32'd0;
+        reg3 <= 32'd0;
+        reg8 <= 32'd0;
+        reg9 <= 32'd0;
+        reg10 <= 32'd0;
+        reg11 <= 32'd0;
+        reg12 <= 32'd0;
+        reg13 <= 5'h01;
     end else begin
         if(PSEL & PENABLE & PWRITE) begin
             case(PADDR)
-                10'h000: reg0 = PWDATA;
-                10'h001: reg1[31:1] = PWDATA[31:1];
-                10'h002: reg2 = PWDATA;
-                10'h003: reg3 = PWDATA;
-                10'h008: reg8 = PWDATA;
-                10'h009: reg9 = PWDATA;
-                10'h00A: reg10 = PWDATA;
-                10'h00B: reg11 = PWDATA;
-                10'h00C: reg12 = PWDATA;
-                10'h00D: reg13 = PWDATA[4:0];
+                10'h000: reg0 <= PWDATA;
+                10'h001: reg1[31:1] <= PWDATA[31:1];
+                10'h002: reg2 <= PWDATA;
+                10'h003: reg3 <= PWDATA;
+                10'h008: reg8 <= PWDATA;
+                10'h009: reg9 <= PWDATA;
+                10'h00A: reg10 <= PWDATA;
+                10'h00B: reg11 <= PWDATA;
+                10'h00C: reg12 <= PWDATA;
+                10'h00D: reg13 <= PWDATA[4:0];
             endcase
         end
-        if(QSPI_ENABLE_ACK)
-            reg2[8]=1'b0;
+        if(qspi_enable_ack_sync)
+            reg2[8] <= 1'b0;
         if(reg1[8] & (~qspi_finished))
-            reg1[8]=1'b0;
-        reg1[0] = QSPI_BUSY;
+            reg1[8] <= 1'b0;
+        reg1[0] <= qspi_busy_sync;
     end
 end
 
-always @(PCLK, PADDR, QSPI_RDATA, reg0, reg1, reg2, reg3, reg8, reg9, reg10, reg11, reg12, reg13) begin
-    if(PCLK) begin
-        case(PADDR)
+always @(*) begin
+    case(PADDR)
             10'h000: PRDATA = reg0;
             10'h001: PRDATA = reg1;
             10'h002: PRDATA = reg2;
@@ -192,24 +231,47 @@ always @(PCLK, PADDR, QSPI_RDATA, reg0, reg1, reg2, reg3, reg8, reg9, reg10, reg
             10'h3FE: PRDATA = {24'd0, CIDR2};
             10'h3FF: PRDATA = {24'd0, CIDR3};
             default: PRDATA = 32'hDEADCAFE;
-        endcase
-    end
+    endcase
 end
 
-assign PREADY =  1'b1; //(PSEL & PENABLE & PWRITE) | (PSEL & ~PWRITE);
+// Assert ready only during the APB ACCESS phase (PSEL & PENABLE). This is
+// the standard APB-slave idiom; hardcoding 1'b1 happened to work through
+// the CMSDK APB mux (which gates on PSEL itself), but other bridges or
+// fabric IP may rely on PREADY being 0 outside ACCESS.
+assign PREADY  = PSEL & PENABLE;
 assign PSLVERR = 1'b0;
 
 //Interrupt generation
+//
+// IRQ_QSPI_FINISHED fires on each QSPI_BUSY falling edge. Historical
+// design served command-driven APB flows, where software clears the IRQ
+// after each `spi_cmd()` via reg1[8]=1.
+//
+// XIP mode turns every AHB read into a separate SPI transaction, so
+// QSPI_BUSY toggles at the XIP read rate (can be kHz). None of those
+// toggles are cleared because the XIP path doesn't go through the APB
+// command flow. The IRQ line pins high for the duration of XIP traffic,
+// and since it's routed level-high to PS7 IRQ_F2P with no Linux handler
+// installed, the GIC re-triggers the CPU continuously — the PS locks up
+// within seconds.
+//
+// Fix: suppress IRQ generation while XIP_ACTIVE=1 and force-clear any
+// pending IRQ on the XIP-enable transition so software re-entering
+// command-driven mode starts clean.
 always @(posedge PCLK or negedge PRESETn) begin
     if(~PRESETn) begin
         qspi_finished <= 1'b0;
         qspi_busy_last <= 1'b0;
     end else begin
-        qspi_busy_last <= QSPI_BUSY;
+        qspi_busy_last <= qspi_busy_sync;
 
-        if(qspi_busy_last&(~QSPI_BUSY)) begin
+        if(XIP_ACTIVE) begin
+            // No IRQs on XIP-driven busy toggles; keep the line cleared so
+            // PS GIC doesn't see a spurious persistent assertion.
+            qspi_finished <= 1'b0;
+        end else if(qspi_busy_last & (~qspi_busy_sync)) begin
             qspi_finished <= 1'b1;
-        end else if((reg1[8])) begin
+        end else if(reg1[8]) begin
             qspi_finished <= 1'b0;
         end
     end

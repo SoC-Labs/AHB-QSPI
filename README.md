@@ -20,8 +20,28 @@ The AHB needs a minimum of 16 address bits, to 22 address bits (for an external 
 
 The APB is mapped between the QSPI controller and Flash Cache configuration registers as below
 
-- 0x0000-0x0FFF : QSPI controller
-- 0x1000-0x1FFF : Flash Cache
+- 0x0000-0x0FFF : QSPI controller (see `src/rdl/apb_qspi_regs.rdl` for full register description)
+- 0x1000-0x1FFF : Flash Cache (CG092, see Arm documentation)
+
+### QSPI Controller APB Register Summary
+| Address | Register | Description |
+|---------|----------|-------------|
+| 0x0000 | CTRL | Control (QIO mode, XiP active, mode code, continuous read, no-cmd) |
+| 0x0004 | STATUS | Status (busy[0], IRQ clear[8]) |
+| 0x0008 | SPI_CMD | SPI command (opcode, enable, read/write, addr enable, dummy cycles, N bytes) |
+| 0x000C | SPI_ADDR | SPI address [21:0] |
+| 0x0010 | RDATA0 | Read data bytes 3:0 (read-only) |
+| 0x0014 | RDATA1 | Read data bytes 7:4 (read-only) |
+| 0x0018 | RDATA2 | Read data bytes 11:8 (read-only) |
+| 0x001C | RDATA3 | Read data bytes 15:12 (read-only) |
+| 0x0020 | WDATA0 | Write data bytes 3:0 |
+| 0x0024 | WDATA1 | Write data bytes 7:4 |
+| 0x0028 | WDATA2 | Write data bytes 11:8 |
+| 0x002C | WDATA3 | Write data bytes 15:12 |
+| 0x0030 | AHB_SPI_SETUP | AHB XiP opcode[7:0] and dummy cycles[15:12] |
+| 0x0034 | CLK_DIV | QSPI clock divider [4:0] (SCLK = HCLK / 2*N, reset default=1) |
+| 0x0FD0-0x0FEC | PIDRx | Peripheral ID registers (read-only) |
+| 0x0FF0-0x0FFC | CIDRx | Component ID registers (read-only) |
 
 ## Interrupts
 Only 1 interrupt currently for when QSPI has finished a transfer. To clear interrupt write a 1 to 8th bit of status register.
@@ -37,8 +57,6 @@ Read bandwidth with 4 KB cache for 512x 32 bit reads, and system clock of 200 MH
 - Using AHB(cached): 400 MB/s
 
 ## ToDo
-- Add programmable clock divider for QSPI
-- Add programmable op codes for AHB interface
 - Improve writing method over APB? (see below)
 - Add programmable address length (currently this is set to the maximum of the CG092 flash cache. If we want to increase this then we need a new cache)
 
@@ -51,9 +69,12 @@ The flash device we are targeting is a SST26VF064B device which allows up to 256
 2. Add write fifo. This will be a lot smaller in terms of area. But will have to keep track of how many bytes get written over QSPI to limit to 256. This requires a bit of an overhaul in how the write transaction works but it means we can fully utilise the page program command. Software then becomes a little more complicated (i.e. write N bytes to APB-> send command to QSPI controller-> check if FIFO not full and send more data-> repeat last step 256/N times-> QSPI checks if FIFO is empty whilst the happens and stops transaction when empty-> poll QSPI status until write is complete). 
 
 ## Project status
-Behaviourial this IP is 'mostly' verified. The verification has been performed against a model of the SST26VF064B flash memory. I have so far verified the most important QSPI commands and the usage of the AHB interface to the QSPI controller. However further work should be performed to verify this IP against other memory models if possible. Also some extension to the IP should be made to support different flash sizes (i.e. change the number of address bits) as well as some optimisations for writing data (see above)
+This IP has been verified against a model of the Microchip SST26VF064B flash memory with 97.5% code coverage. The most important QSPI commands and AHB XiP interface usage have been verified (see `verif/README.md` for the full checklist). Further work should verify against other flash memory models and support different flash sizes (i.e. configurable address width).
 
-Gate level simulations seem to match the behavioural. I do get some timing violations if I use the Arm standard cell timings
+Gate-level simulations match behavioural. Some timing violations occur with Arm standard cell timings.
 
-FPGA implementation is ongoing, I would like to first test against the same flash model that I have used for behavioural verification, but I currently don't have this. The only chip I have utilises DDR which I don't want to support at this stage of the project. 
+FPGA implementation has been tested on PYNQ-Z2, with QSPI working over APB. AHB XiP on FPGA has known issues.
+
+Technology support includes generic (simulation), TSMC 65nm, TSMC 28nm, and TSMC 16nm (SRAM macros for cache).
+
 

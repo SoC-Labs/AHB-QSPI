@@ -1,0 +1,340 @@
+// -----------------------------------------------------------------------------
+// SoCLabs AHB QSPI Register Description (SystemRDL 2.0)
+//
+// Describes the APB register map for the QSPI controller (apb_qspi_regs.v).
+// These registers are accessible via APB port 0 of the APB slave mux
+// inside top_ahb_qspi (address range 0x0000-0x0FFF).
+//
+// The CG092 flash cache configuration registers (0x1000-0x1FFF) are NOT
+// included here -- they are documented by Arm.
+//
+// A joint work commissioned on behalf of SoC Labs, under Arm Academic
+// Access license.
+//
+// Contributors
+//   Daniel Newbrook (d.newbrook@soton.ac.uk)
+//
+// Copyright 2021-2026, SoC Labs (www.soclabs.org)
+// -----------------------------------------------------------------------------
+
+addrmap apb_qspi_regs {
+    name = "APB QSPI Register Map";
+    desc = "QSPI controller register map, accessed via APB slave port 0
+            of the internal APB slave mux (cmsdk_apb_slave_mux).
+            All registers are 32-bit word-aligned.
+            Read/write data registers use nibble-swapped byte ordering
+            for SPI bit-serial compatibility.";
+
+    default hw = r;
+    default sw = rw;
+    default reset = 0;
+
+    // =========================================================================
+    // CTRL -- Control Register (0x0000)
+    // =========================================================================
+
+    reg ctrl_reg {
+        name = "CTRL";
+        desc = "QSPI controller mode and configuration.";
+
+        field { sw = rw; hw = r; } QIO_MODE[1] = 0;
+        QIO_MODE->desc = "Quad I/O mode enable. When set, QSPI controller
+                          uses all 4 data lines for command, address, and data
+                          phases. When clear, uses standard SPI (single data line).";
+
+        field { sw = r; hw = na; } RSVD_1_7[7] = 0;
+
+        field { sw = rw; hw = r; } XIP_ACTIVE[1] = 0;
+        XIP_ACTIVE->desc = "Execute-in-Place active. When set, the AHB interface
+                            controls the QSPI bus for XiP reads. When clear, the
+                            APB interface has QSPI bus access for direct commands.";
+
+        field { sw = r; hw = na; } RSVD_9_15[7] = 0;
+
+        field { sw = rw; hw = r; } MODE_CODE[8] = 0;
+        MODE_CODE->desc = "QSPI mode code byte sent during continuous read
+                           address phase. Typically 0xA0 for SST26VF064B
+                           to maintain QPI continuous read mode.";
+
+        field { sw = rw; hw = r; } CONT_READ[1] = 0;
+        CONT_READ->desc = "Continuous read enable. When set, a mode code byte
+                           is sent after the address phase. Used for SQI
+                           continuous read operations (e.g. opcode 0xEB).";
+
+        field { sw = rw; hw = r; } NO_CMD[1] = 0;
+        NO_CMD->desc = "Suppress opcode. When set, the command phase is skipped
+                        and the transaction starts directly at the address phase.
+                        Used in SQI continuous read mode after the first access.
+                        If the address matches the previous access, the read is
+                        served from the NO_FETCH state (no SPI transaction).";
+
+        field { sw = r; hw = na; } RSVD_26_31[6] = 0;
+    };
+    ctrl_reg CTRL @ 0x0000;
+
+    // =========================================================================
+    // STATUS -- Status Register (0x0004)
+    // =========================================================================
+
+    reg status_reg {
+        name = "STATUS";
+        desc = "QSPI controller status and interrupt control.";
+
+        field { sw = r; hw = w; } BUSY[1] = 0;
+        BUSY->desc = "QSPI busy. Read-only. Reflects the current state of the
+                      QSPI controller (1 = transaction in progress).";
+
+        field { sw = r; hw = na; } RSVD_1_7[7] = 0;
+
+        field { sw = rw; hw = r; } IRQ_CLR[1] = 0;
+        IRQ_CLR->desc = "Interrupt clear. Write 1 to clear the QSPI finished
+                         interrupt (IRQ_QSPI_FINISHED). Self-clearing: the bit
+                         is cleared by hardware after the IRQ is deasserted.";
+
+        field { sw = r; hw = na; } RSVD_9_31[23] = 0;
+    };
+    status_reg STATUS @ 0x0004;
+
+    // =========================================================================
+    // SPI_CMD -- SPI Command Register (0x0008)
+    // =========================================================================
+
+    reg spi_cmd_reg {
+        name = "SPI_CMD";
+        desc = "APB QSPI command configuration. Write this register to set up
+                and trigger a SPI transaction from the APB interface.
+                The ENABLE bit auto-clears when the QSPI controller acknowledges.";
+
+        field { sw = rw; hw = r; } CMD[8] = 0;
+        CMD->desc = "SPI opcode byte (e.g. 0x0B for high-speed read,
+                     0x02 for page program, 0x9F for JEDEC ID).";
+
+        field { sw = rw; hw = rw; } ENABLE[1] = 0;
+        ENABLE->desc = "Transaction enable. Write 1 to start the SPI transaction.
+                        Automatically cleared by hardware when the QSPI controller
+                        acknowledges (QSPI_ENABLE_ACK).";
+
+        field { sw = rw; hw = r; } READ[1] = 0;
+        READ->desc = "Read enable. Set to include a data-in phase
+                      (QSPI controller samples data from flash).";
+
+        field { sw = rw; hw = r; } WRITE[1] = 0;
+        WRITE->desc = "Write enable. Set to include a data-out phase
+                       (QSPI controller drives data to flash).";
+
+        field { sw = rw; hw = r; } ADDR_EN[1] = 0;
+        ADDR_EN->desc = "Address phase enable. Set to include the address
+                         phase in the SPI transaction.";
+
+        field { sw = rw; hw = r; } DUMMY_CYCLES[4] = 0;
+        DUMMY_CYCLES->desc = "Number of dummy clock cycles (N-1) inserted
+                              between address/mode and data phases.
+                              Set to 0 to skip the dummy phase entirely.";
+
+        field { sw = rw; hw = r; } N_RW_BYTES[4] = 0;
+        N_RW_BYTES->desc = "Number of read/write bytes (N-1). Controls the
+                            data phase length. Range 1-16 bytes (0x0 = 1 byte,
+                            0xF = 16 bytes).";
+
+        field { sw = r; hw = na; } RSVD_20_31[12] = 0;
+    };
+    spi_cmd_reg SPI_CMD @ 0x0008;
+
+    // =========================================================================
+    // SPI_ADDR -- SPI Address Register (0x000C)
+    // =========================================================================
+
+    reg spi_addr_reg {
+        name = "SPI_ADDR";
+        desc = "SPI flash address for APB-initiated transactions.";
+
+        field { sw = rw; hw = r; } ADDR[22] = 0;
+        ADDR->desc = "22-bit flash address. Sent MSB-first during the
+                      address phase. Supports up to 4 MB address space.";
+
+        field { sw = r; hw = na; } RSVD_22_31[10] = 0;
+    };
+    spi_addr_reg SPI_ADDR @ 0x000C;
+
+    // =========================================================================
+    // RDATA0-3 -- Read Data Registers (0x0010-0x001C) [Read-Only]
+    // =========================================================================
+
+    reg rdata_reg {
+        name = "RDATA";
+        desc = "Read data from the last SPI read transaction (read-only).
+                Data is byte-swapped from SPI bit order to little-endian
+                word order.";
+
+        field { sw = r; hw = w; } DATA[32] = 0;
+    };
+
+    rdata_reg RDATA0 @ 0x0010;
+    RDATA0->name = "RDATA0";
+    RDATA0->desc = "Read data bytes 3:0 (QSPI_RDATA[31:0], byte-swapped).";
+
+    rdata_reg RDATA1 @ 0x0014;
+    RDATA1->name = "RDATA1";
+    RDATA1->desc = "Read data bytes 7:4 (QSPI_RDATA[63:32], byte-swapped).";
+
+    rdata_reg RDATA2 @ 0x0018;
+    RDATA2->name = "RDATA2";
+    RDATA2->desc = "Read data bytes 11:8 (QSPI_RDATA[95:64], byte-swapped).";
+
+    rdata_reg RDATA3 @ 0x001C;
+    RDATA3->name = "RDATA3";
+    RDATA3->desc = "Read data bytes 15:12 (QSPI_RDATA[127:96], byte-swapped).";
+
+    // =========================================================================
+    // WDATA0-3 -- Write Data Registers (0x0020-0x002C)
+    // =========================================================================
+
+    reg wdata_reg {
+        name = "WDATA";
+        desc = "Write data for SPI write transactions. Data is nibble-swapped
+                internally for SPI bit-serial transmission order.";
+
+        field { sw = rw; hw = r; } DATA[32] = 0;
+    };
+
+    wdata_reg WDATA0 @ 0x0020;
+    WDATA0->name = "WDATA0";
+    WDATA0->desc = "Write data bytes 3:0 (maps to QSPI_WDATA[31:0]).";
+
+    wdata_reg WDATA1 @ 0x0024;
+    WDATA1->name = "WDATA1";
+    WDATA1->desc = "Write data bytes 7:4 (maps to QSPI_WDATA[63:32]).";
+
+    wdata_reg WDATA2 @ 0x0028;
+    WDATA2->name = "WDATA2";
+    WDATA2->desc = "Write data bytes 11:8 (maps to QSPI_WDATA[95:64]).";
+
+    wdata_reg WDATA3 @ 0x002C;
+    WDATA3->name = "WDATA3";
+    WDATA3->desc = "Write data bytes 15:12 (maps to QSPI_WDATA[127:96]).";
+
+    // =========================================================================
+    // AHB_SPI_SETUP -- AHB SPI Setup Register (0x0030)
+    // =========================================================================
+
+    reg ahb_spi_setup_reg {
+        name = "AHB_SPI_SETUP";
+        desc = "Configuration for AHB-initiated (XiP) QSPI transactions.
+                Sets the opcode and dummy cycles used when the cache
+                controller fetches a cache line from flash.";
+
+        field { sw = rw; hw = r; } AHB_CMD[8] = 0;
+        AHB_CMD->desc = "SPI opcode used for AHB XiP reads. Typically set
+                         to 0x0B (high-speed read) or 0xEB (SQI read).";
+
+        field { sw = r; hw = na; } RSVD_8_11[4] = 0;
+
+        field { sw = rw; hw = r; } AHB_DUMMY_CYCLES[4] = 0;
+        AHB_DUMMY_CYCLES->desc = "Number of dummy cycles (N-1) for AHB XiP
+                                  reads. Must match the flash device
+                                  requirements for the selected opcode.";
+
+        field { sw = r; hw = na; } RSVD_16_31[16] = 0;
+    };
+    ahb_spi_setup_reg AHB_SPI_SETUP @ 0x0030;
+
+    // =========================================================================
+    // CLK_DIV -- Clock Divider Register (0x0034)
+    // =========================================================================
+
+    reg clk_div_reg {
+        name = "CLK_DIV";
+        desc = "QSPI serial clock divider. QSPI_SCLK frequency is
+                HCLK / (2 * CLK_DIV). When CLK_DIV = 0, QSPI_SCLK = HCLK
+                (bypass). When CLK_DIV = 1, QSPI_SCLK = HCLK/2.";
+
+        field { sw = rw; hw = r; } CLK_DIV[5] = 5'h01;
+        CLK_DIV->desc = "5-bit clock divider value. Reset default is 1
+                         (QSPI_SCLK = HCLK/2).";
+
+        field { sw = r; hw = na; } RSVD_5_31[27] = 0;
+    };
+    clk_div_reg CLK_DIV @ 0x0034;
+
+    // =========================================================================
+    // Peripheral ID Registers (0x0FD0-0x0FEC)
+    // =========================================================================
+
+    reg pid_reg {
+        name = "PID";
+        desc = "Peripheral identification register (read-only).";
+        field { sw = r; hw = na; } PID[8] = 0;
+        field { sw = r; hw = na; } RSVD[24] = 0;
+    };
+
+    pid_reg PIDR4 @ 0x0FD0;
+    PIDR4->name = "PIDR4";
+    PIDR4->desc = "Peripheral ID register 4.";
+    PIDR4.PID->reset = 8'h00;
+
+    pid_reg PIDR5 @ 0x0FD4;
+    PIDR5->name = "PIDR5";
+    PIDR5->desc = "Peripheral ID register 5.";
+    PIDR5.PID->reset = 8'h00;
+
+    pid_reg PIDR6 @ 0x0FD8;
+    PIDR6->name = "PIDR6";
+    PIDR6->desc = "Peripheral ID register 6.";
+    PIDR6.PID->reset = 8'h00;
+
+    pid_reg PIDR7 @ 0x0FDC;
+    PIDR7->name = "PIDR7";
+    PIDR7->desc = "Peripheral ID register 7.";
+    PIDR7.PID->reset = 8'h00;
+
+    pid_reg PIDR0 @ 0x0FE0;
+    PIDR0->name = "PIDR0";
+    PIDR0->desc = "Peripheral ID register 0. Part number [7:0].";
+    PIDR0.PID->reset = 8'h59;
+
+    pid_reg PIDR1 @ 0x0FE4;
+    PIDR1->name = "PIDR1";
+    PIDR1->desc = "Peripheral ID register 1. Part number [11:8], designer [3:0].";
+    PIDR1.PID->reset = 8'h16;
+
+    pid_reg PIDR2 @ 0x0FE8;
+    PIDR2->name = "PIDR2";
+    PIDR2->desc = "Peripheral ID register 2. Designer [6:4], revision [7:4].";
+    PIDR2.PID->reset = 8'h15;
+
+    pid_reg PIDR3 @ 0x0FEC;
+    PIDR3->name = "PIDR3";
+    PIDR3->desc = "Peripheral ID register 3.";
+    PIDR3.PID->reset = 8'h00;
+
+    // =========================================================================
+    // Component ID Registers (0x0FF0-0x0FFC)
+    // =========================================================================
+
+    reg cid_reg {
+        name = "CID";
+        desc = "Component identification register (read-only).";
+        field { sw = r; hw = na; } CID[8] = 0;
+        field { sw = r; hw = na; } RSVD[24] = 0;
+    };
+
+    cid_reg CIDR0 @ 0x0FF0;
+    CIDR0->name = "CIDR0";
+    CIDR0->desc = "Component ID register 0. Preamble byte 0.";
+    CIDR0.CID->reset = 8'h50;
+
+    cid_reg CIDR1 @ 0x0FF4;
+    CIDR1->name = "CIDR1";
+    CIDR1->desc = "Component ID register 1. Preamble byte 1.";
+    CIDR1.CID->reset = 8'h51;
+
+    cid_reg CIDR2 @ 0x0FF8;
+    CIDR2->name = "CIDR2";
+    CIDR2->desc = "Component ID register 2. Preamble byte 2.";
+    CIDR2.CID->reset = 8'h4C;
+
+    cid_reg CIDR3 @ 0x0FFC;
+    CIDR3->name = "CIDR3";
+    CIDR3->desc = "Component ID register 3. Preamble byte 3.";
+    CIDR3.CID->reset = 8'h53;
+};

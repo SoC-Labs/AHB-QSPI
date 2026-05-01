@@ -1,7 +1,9 @@
 
 
 
-module ahb_qspi_pads (
+module ahb_qspi_pads #(
+    parameter WATCHDOG_WIDTH = 16
+) (
     input  wire                 HCLK,
     input  wire                 HRESETn,
     input  wire                 PCLK,
@@ -59,7 +61,9 @@ assign QSPI_IO_i[3] = QSPI_IO[3];
 assign QSPI_SCLK = QSPI_SCLK_i;
 assign QSPI_nCS = QSPI_nCS_i;
 
-top_ahb_qspi u_top_ahb_qspi(
+top_ahb_qspi #(
+    .WATCHDOG_WIDTH(WATCHDOG_WIDTH)
+) u_top_ahb_qspi(
     .HCLK(HCLK),
     .HRESETn(HRESETn),
     .PCLK(HCLK),

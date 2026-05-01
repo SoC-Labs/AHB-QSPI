@@ -1,0 +1,42 @@
+##-----------------------------------------------------------------------------
+## SoCLabs AHB QSPI — SpyGlass CDC Project File
+##
+## Reads RTL from the standard flist, applies CDC constraints, and runs
+## the cdc_verify goal for structural CDC analysis.
+##
+## Usage (via Makefile):
+##   make -C cdc cdc
+##
+## Contributors
+##
+## David Mapstone (d.a.mapstone@soton.ac.uk)
+##
+## Copyright 2026, SoC Labs (www.soclabs.org)
+##-----------------------------------------------------------------------------
+
+## ── Design read ─────────────────────────────────────────────────────────────
+
+# SystemVerilog mode
+set_option enableSV09 yes
+set_option language_mode mixed
+set_option designread_enable_synthesis no
+set_option mthresh 50000
+
+# Read source files from flist (environment variables expanded by Makefile)
+read_file -type sourcelist $::env(FLIST)
+
+# ── Elaboration ──────────────────────────────────────────────────────────────
+
+set_option top $::env(SG_TOP)
+
+# ── Constraints ──────────────────────────────────────────────────────────────
+
+read_file -type sgdc $::env(SGDC)
+
+# ── Waivers ──────────────────────────────────────────────────────────────────
+
+read_file -type waiver $::env(SWL)
+
+# ── Goal setup ───────────────────────────────────────────────────────────────
+# Goal is specified via -goals on the command line (required for -batch mode).
+# current_goal / run_goal are not used in -batch -project -goals flow.
