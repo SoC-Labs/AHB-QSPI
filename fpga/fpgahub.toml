@@ -33,14 +33,13 @@ command   = ["make", "-C", "fpga", "build_design"]
 produces  = ["bitstream_built"]
 timeout_s = 3600
 
-[[actions]]
-id          = "program"
-title       = "Program Pynq-Z2 bitstream (JTAG)"
-description = "Uses program_bitstream.tcl against a local Vivado Hardware Manager."
-command     = ["make", "-C", "fpga", "program"]
-requires    = ["bitstream_built"]
-produces    = ["bitstream_loaded"]
-timeout_s   = 300
+# Bitstream JTAG-program is now driven by the fpgahub program-plugin
+# subsystem — operators configure ``[boards.<n>.program.default] method =
+# "vivado_jtag"`` in their daemon ``config.toml`` and dispatch via
+# ``fpgahub board program <name> <bit>`` (or the web UI). The previous
+# ``id="program"`` action has been removed; CI scripts that called
+# ``fpgahub actions run <board> program`` should switch to ``fpgahub
+# board program``. See docs/BOARD_CONTROLS.md.
 
 [[actions]]
 id          = "deploy"
