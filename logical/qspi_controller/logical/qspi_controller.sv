@@ -400,7 +400,16 @@ reg QSPI_IO_e_int;
 // SpyGlass CDC synthesis (SYNTH_133). QSPI_WDATA_reg load is merged into
 // every branch except DATA_O (where it is shifted instead).
 always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
-    if(~HRESETn || soft_reset_sync) begin
+    if(~HRESETn) begin
+        QSPI_SCLK_e <= 1'b0;
+        QSPI_IO_o_reg <= 4'hF;
+        QSPI_IO_e_int <= 1'b1;
+        op_code <= 8'h00;
+        addr_code <= 24'h000000;
+        qspi_mode_reg <= 8'h00;
+        QSPI_WDATA_reg <= 128'd0;
+    end else if (soft_reset_sync) begin
+        // synchronous soft-reset via watchdog (matches the pattern at L182)
         QSPI_SCLK_e <= 1'b0;
         QSPI_IO_o_reg <= 4'hF;
         QSPI_IO_e_int <= 1'b1;
