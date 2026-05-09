@@ -1,23 +1,53 @@
 #-----------------------------------------------------------------------------
-# Memory macro placement — pin the cache SRAMs along the bottom edge so
-# the std-cell region is one cohesive area instead of fragmenting around
-# free-floating macros.
+# Memory macro placement — pack the cache SRAMs into a tight 2-column
+# block at the bottom-left so the std-cell region above is one cohesive
+# rectangle instead of fragmenting around stacked macros.
 #
 # Macro inventory (cache_subsystem.v: u_way0_cache_ram + u_way1_cache_ram,
 # each cache_ram drops in 4× flash_cache_data + 1× flash_cache_tag):
-#   8× flash_cache_data  (256 × 32, ~190 × 285 μm each)
-#   2× flash_cache_tag   (256 × 11)
+#   8× flash_cache_data  (311.8 × 36.36 μm — very wide, very flat)
+#   2× flash_cache_tag   (135.4 × 40.51 μm)
 #
-# Layout strategy:
-#   Bottom row — flash_cache_data macros arrayed along the bottom edge,
-#                left-to-right; flash_cache_tag macros tucked in at the
-#                far right of the same row. Std cells fill the rest of
-#                the die above.
+# Why an explicit grid: the macros are wider than they are tall by ~9×, so
+# the previous `scalable` (fractional) offsets at 10 % of die width
+# (~40 μm) collided with the 312 μm-wide cells and FC fell back to
+# stacking them in a single 1×10 column. Using absolute (μm) origins
+# pins them deterministically.
+#
+# Layout — bottom-left corner, growing up + right:
+#
+#   +-----------------+
+#   |   std cells     |   ← one cohesive rectangle for std-cell rows
+#   +-----+-----+-----+
+#   | TAG | TAG       |   ← 2 tag macros, left-justified
+#   +-----+-----+-----+
+#   | DATA  | DATA    |   ┐
+#   | DATA  | DATA    |   │ 8× flash_cache_data
+#   | DATA  | DATA    |   │ in a 2-column / 4-row grid
+#   | DATA  | DATA    |   ┘
+#   +-------+---------+
+#
+# Total macro footprint ≈ 634 × 230 μm = 146 k μm². Combined with the
+# std-cell area (~36 k μm² @ util 0.78) the die settles around
+# 640 × 285 μm — vs the original 413 × 411 (1×10 stack with dead space
+# in the left strip).
 #
 # Sourced by 1_init_design.tcl AFTER initialize_floorplan and BEFORE
 # the pre-compile sanity check.
 #-----------------------------------------------------------------------------
 
+# ── Geometry constants (μm) ────────────────────────────────────────────────
+set FCD_W      311.8
+set FCD_H      36.36
+set FCT_W      135.4
+set FCT_H      40.51
+
+set MARGIN     5.0    ;# core-edge to macro-block clearance
+set H_CHANNEL  4.0    ;# horizontal gap between macros in the same row
+set V_CHANNEL  4.0    ;# vertical gap between macro rows
+set TAG_GAP    8.0    ;# extra clearance between top data row and tag row
+
+# ── Cell discovery ─────────────────────────────────────────────────────────
 set fcd_insts [list]
 foreach_in_collection c [get_cells -hier -filter {ref_name == flash_cache_data}] {
     lappend fcd_insts [get_attribute $c full_name]
@@ -30,63 +60,62 @@ foreach_in_collection c [get_cells -hier -filter {ref_name == flash_cache_tag}] 
 }
 set fct_insts [lsort $fct_insts]
 
-#-----------------------------------------------------------------------------
-# Helper: look up a cell collection by exact full_name, side-stepping the
-# regex/glob interpretation get_cells applies to plain pattern arguments.
-#-----------------------------------------------------------------------------
 proc cell_by_full_name {full_name} {
     return [get_cells -hier -filter "full_name == \"$full_name\""]
 }
 
 #-----------------------------------------------------------------------------
-# 1) flash_cache_data — array along the bottom edge, left-to-right.
-#    rf_sp_hdf macros at this depth/width are ~190 × 285 μm; pitch 0.10 of
-#    die width gives ~150 μm spacing on a ~1500 μm die.
+# 1) flash_cache_data — 2 columns × 4 rows starting at (MARGIN, MARGIN).
+#    Iterate row-major through the sorted list so the way0/way1 RAMs
+#    naturally interleave column-by-column.
 #-----------------------------------------------------------------------------
-set fcd_pitch_x 0.10
-set x_offset    0.02
+set fcd_pitch_x [expr {$FCD_W + $H_CHANNEL}]
+set fcd_pitch_y [expr {$FCD_H + $V_CHANNEL}]
+
+set i 0
 foreach inst $fcd_insts {
     set cell [cell_by_full_name $inst]
     if {[sizeof_collection $cell] == 0} {
         puts "WARN: \[place_memories\] $inst not found — skipping"
+        incr i
         continue
     }
-    set_macro_relative_location \
-        -target_object   $cell \
-        -target_orientation R0 \
-        -target_corner   bl \
-        -anchor_corner   bl \
-        -offset          [list $x_offset 0.02] \
-        -offset_type     scalable
-    set x_offset [expr $x_offset + $fcd_pitch_x]
+    set col [expr {$i % 2}]
+    set row [expr {$i / 2}]
+    set x [expr {$MARGIN + $col * $fcd_pitch_x}]
+    set y [expr {$MARGIN + $row * $fcd_pitch_y}]
+    set_attribute $cell origin [list $x $y]
+    set_attribute $cell orientation R0
+    incr i
 }
 
+# Top of the data block (μm above die origin)
+set data_top_y [expr {$MARGIN + 4 * $fcd_pitch_y - $V_CHANNEL}]
+
 #-----------------------------------------------------------------------------
-# 2) flash_cache_tag — to the right of the data row.
+# 2) flash_cache_tag — 2-wide row sitting above the data block.
 #-----------------------------------------------------------------------------
-set fct_pitch_x 0.08
+set tag_y [expr {$data_top_y + $TAG_GAP}]
+set fct_pitch_x [expr {$FCT_W + $H_CHANNEL}]
+
+set i 0
 foreach inst $fct_insts {
     set cell [cell_by_full_name $inst]
     if {[sizeof_collection $cell] == 0} {
         puts "WARN: \[place_memories\] $inst not found — skipping"
+        incr i
         continue
     }
-    set_macro_relative_location \
-        -target_object   $cell \
-        -target_orientation R0 \
-        -target_corner   bl \
-        -anchor_corner   bl \
-        -offset          [list $x_offset 0.02] \
-        -offset_type     scalable
-    set x_offset [expr $x_offset + $fct_pitch_x]
+    set x [expr {$MARGIN + $i * $fct_pitch_x}]
+    set_attribute $cell origin [list $x $tag_y]
+    set_attribute $cell orientation R0
+    incr i
 }
 
 #-----------------------------------------------------------------------------
-# Apply the placement and lock the macros so subsequent placement passes
-# don't move them.
+# Lock the macros and add keepouts so subsequent placement passes don't
+# disturb them and the router has decent channels around each cell.
 #-----------------------------------------------------------------------------
-create_macro_relative_location_placement
-
 set fixed_macros [list]
 foreach inst [concat $fcd_insts $fct_insts] {
     set c [cell_by_full_name $inst]
@@ -103,4 +132,5 @@ foreach inst $fixed_macros {
     create_keepout_margin -type soft -outer {8 8 8 8} $ref
 }
 
-puts "INFO: \[place_memories\] [llength $fixed_macros] macros pinned + locked"
+puts "INFO: \[place_memories\] [llength $fixed_macros] macros pinned + locked\
+ (data block top y=$data_top_y, tag row y=$tag_y)"

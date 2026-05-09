@@ -12,11 +12,14 @@ export FC_OUTPUTS     = $(FC_DIR)/outputs
 # Per-module sub-tree (so multiple MODULEs can coexist on disk)
 export FC_BLOCK_DIR   = $(FC_WORK)/$(MODULE).dlib
 
-# Floorplan target. Aspect 1.0 / util 0.7 are conservative starting points
-# for top_ahb_qspi (10 SRAM macros along the bottom edge, std cells filling
-# the rest). Tighten once post-route congestion is characterised.
-export FC_ASPECT_RATIO    ?= 1.0
-export FC_CORE_UTILIZATION ?= 0.7
+# Floorplan target. flash_cache_data macros are 311.8 × 36.36 μm — very
+# wide and very flat — so the macro block (2 cols × 4 rows of data + a
+# 2-wide tag row) is ~634 × 230 μm. With ~36 k μm² of std cells stacked
+# above at util 0.78, the natural die settles around 640 × 290 → aspect
+# ratio ~2.2. Setting side_ratio matches that so FC doesn't grow a
+# square die with dead corners around the macro block.
+export FC_ASPECT_RATIO    ?= 2.2
+export FC_CORE_UTILIZATION ?= 0.78
 export FC_CORE_OFFSET     ?= 10
 
 # ── EDA tool binaries ─────────────────────────────────────────────────────
