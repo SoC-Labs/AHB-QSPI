@@ -12,15 +12,18 @@ export FC_OUTPUTS     = $(FC_DIR)/outputs
 # Per-module sub-tree (so multiple MODULEs can coexist on disk)
 export FC_BLOCK_DIR   = $(FC_WORK)/$(MODULE).dlib
 
-# Floorplan target. flash_cache_data macros are 311.8 × 36.36 μm — very
-# wide and very flat — so the macro block (2 cols × 4 rows of data + a
-# 2-wide tag row) is ~634 × 230 μm. With ~36 k μm² of std cells stacked
-# above at util 0.78, the natural die settles around 640 × 290 → aspect
-# ratio ~2.2. Setting side_ratio matches that so FC doesn't grow a
-# square die with dead corners around the macro block.
-export FC_ASPECT_RATIO    ?= 2.2
-export FC_CORE_UTILIZATION ?= 0.78
-export FC_CORE_OFFSET     ?= 10
+# Floorplan target — absolute die dimensions (μm).
+# flash_cache_data macros are 311.8 × 36.36 μm; place_memories.tcl
+# packs them into a 2 cols × 4 rows grid + tag row above, with a
+# right-edge at x ≈ 633 μm and a top-edge at y ≈ 211 μm. Util-driven
+# sizing (-control_type core -core_utilization …) ignores the macro
+# footprint at floorplan time and produces a die smaller than the
+# macros need (the cells overflow the right boundary). Use explicit
+# side_length so FC always builds a die that contains them, with
+# enough headroom above for std-cell rows + power straps.
+export FC_DIE_WIDTH        ?= 660
+export FC_DIE_HEIGHT       ?= 320
+export FC_CORE_OFFSET      ?= 10
 
 # ── EDA tool binaries ─────────────────────────────────────────────────────
 FC_BIN_DIR   = /eda/synopsys/2022-23/RHELx86/FS-COMPILER_2022.12/bin

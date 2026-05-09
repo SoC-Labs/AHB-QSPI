@@ -26,8 +26,8 @@ set fc_dir           $::env(FC_DIR)
 set fc_logs          $::env(FC_LOGS)
 set fc_reports       $::env(FC_REPORTS)
 set fc_outputs       $::env(FC_OUTPUTS)
-set aspect_ratio     $::env(FC_ASPECT_RATIO)
-set core_util        $::env(FC_CORE_UTILIZATION)
+set die_width        $::env(FC_DIE_WIDTH)
+set die_height       $::env(FC_DIE_HEIGHT)
 set core_offset      $::env(FC_CORE_OFFSET)
 
 # Named SVF — Formality reads outputs/<top>.<stage>.svf in stage order.
@@ -109,16 +109,18 @@ if {[file exists $extra_sdc]} {
 }
 
 #-----------------------------------------------------------------------------
-# Initialise floorplan — aspect 1.0, util 0.7 leaves slack for the cache
-# data macros along the bottom edge plus std-cell room above. Tighten
-# once post-route congestion is characterised.
+# Initialise floorplan with absolute die dimensions. Util-driven sizing
+# would ignore the macro footprint and produce a die too small for the
+# pinned cache SRAMs (right column overflows the boundary). The
+# defaults from common.mk size the die to fit the 2×4 data grid + tag
+# row from place_memories.tcl with ~80 μm of std-cell + power-strap
+# headroom above.
 #-----------------------------------------------------------------------------
-puts "INFO: \[fc_init\] initialize_floorplan aspect=$aspect_ratio util=$core_util offset=$core_offset"
+puts "INFO: \[fc_init\] initialize_floorplan die=${die_width}x${die_height} offset=$core_offset"
 initialize_floorplan \
-    -control_type core \
+    -control_type die \
     -shape R \
-    -side_ratio [list $aspect_ratio 1.0] \
-    -core_utilization $core_util \
+    -side_length [list $die_width $die_height] \
     -core_offset $core_offset
 
 #-----------------------------------------------------------------------------
