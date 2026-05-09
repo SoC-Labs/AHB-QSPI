@@ -1,11 +1,24 @@
+# ── Editor / IDE ──────────────────────────────────────────────────────────
+.vscode
+.claude/
+
+# ── Python ────────────────────────────────────────────────────────────────
+*.pyc
+
+# ── Simulation / cocotb / VCS / Verdi / ModelSim ──────────────────────────
 simulate/
+verdiLog
+xcelium.d
+.hal-irun.history
+*stacktrace.vstf
+*stack_trace*.txt
+crte*.txt
 
 verif/cocotb/modelsim.ini
 verif/cocotb/results.xml
 verif/cocotb/transcript
 verif/cocotb/ucli.key
 verif/cocotb/ahb_qspi.vcd
-verif/cocotb/transcript
 verif/cocotb/sim_build/
 verif/cocotb/__pycache__/
 verif/cocotb/verdiLog
@@ -15,9 +28,30 @@ verif/cocotb/wlft6jORYn
 verif/cocotb/inter.fsdb
 verif/cocotb/vdCovLog
 verif/cocotb/cm.log
-verdiLog
+
 verif/VIP/SST26VF064B.v
 
+# ── UVM ───────────────────────────────────────────────────────────────────
+uvm/ahb_qspi/sim_build
+uvm/ahb_qspi/csrc
+uvm/ahb_qspi/xprop.log
+vc_hdrs.h
+
+# ── Lint (HAL) ────────────────────────────────────────────────────────────
+lint/*.xml
+lint/*.log
+
+# ── SpyGlass CDC ──────────────────────────────────────────────────────────
+cdc/top_ahb_qspi/
+cdc/*_spyglass/
+cdc/*_cdc_summary.rpt
+cdc/*_cdc_detail.rpt
+cdc/spyglass_output/
+cdc/spyglass.log
+cdc/sg_shell.log
+cdc/resolved.flist
+
+# ── ASIC: TSMC28 + TSMC65 standalone DC flows ─────────────────────────────
 asic/TSMC28nm/*.mr
 asic/TSMC28nm/*pvl
 asic/TSMC28nm/*.syn
@@ -34,46 +68,41 @@ asic/TSMC65nm/default.svf
 asic/TSMC65nm/*.log
 asic/TSMC65nm/alib-52
 
+asic/TSMC*nm/work
+work_qc
+
+# ── ASIC: Fusion Compiler + Formality flows under syn/asic/ ───────────────
+# Shared invariant: track Makefiles + scripts/ + inputs/ only; everything
+# regenerable (work libs, logs, reports, NDM ref-libs, generated outputs,
+# fc_shell/lm_shell scratch) is ignored.
+syn/asic/*/work/
+syn/asic/*/logs/
+syn/asic/*/reports/
+
+# Fusion Compiler-specific scratch + deliverables
+syn/asic/fusion-compiler/libs/
+syn/asic/fusion-compiler/outputs/
+syn/asic/fusion-compiler/PreFrameCheck/
+syn/asic/fusion-compiler/check_workspace.ems
+syn/asic/fusion-compiler/lm_command.log
+syn/asic/fusion-compiler/lm_output.txt
+syn/asic/fusion-compiler/*.svf
+syn/asic/fusion-compiler/alib-*
+syn/asic/fusion-compiler/.synopsys*
+
+# Formality-specific scratch
+syn/asic/formality/fm_shell_command.log
+syn/asic/formality/*.svf
+
+# ── Top-level implementation tree (deprecated; old DC-shell drops here) ──
+imp
+
+# ── Docs (LaTeX build artefacts) ──────────────────────────────────────────
 docs/tex/*.aux
 docs/tex/*.log
 docs/tex/*.out
 docs/tex/*.toc
- 
-imp
 
-.vscode
-asic/TSMC*nm/work
-
-# SpyGlass CDC analysis
-cdc/top_ahb_qspi/
-cdc/*_spyglass/
-cdc/*_cdc_summary.rpt
-cdc/*_cdc_detail.rpt
-cdc/spyglass_output/
-cdc/spyglass.log
-cdc/sg_shell.log
-cdc/resolved.flist
-
-uvm/ahb_qspi/sim_build
-uvm/ahb_qspi/csrc
-vc_hdrs.h
-uvm/ahb_qspi/xprop.log
-uvm/ahb_qspi/xprop.log
-
-*stacktrace.vstf
-xcelium.d
-lint/*.xml
-lint/*.log
-.hal-irun.history
-
-*.pyc
-*stack_trace*.txt
-crte*.txt
-work_qc
-
-# PYNQ board discovery output
+# ── PYNQ / FPGA bring-up ──────────────────────────────────────────────────
 pynq/board.json
-
-# PYNQ debug-run logs
 pynq/logs/
-.claude/
