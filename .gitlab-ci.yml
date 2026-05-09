@@ -3,13 +3,14 @@
 # and ASIC synthesis (TSMC 65nm).
 #
 # Stages:
-#   1. setup      - Clone repo, validate tool paths, fetch dependencies
-#   2. lint       - Verilator lint
-#   3. cdc        - SpyGlass CDC analysis
-#   4. regression - Cocotb regression with VCS code coverage
-#   5. coverage   - Merge VCS coverage and generate report
-#   6. synthesis  - ASIC synthesis with Design Compiler (TSMC 65nm)
-#   7. cleanup    - Remove workspace
+#   1. setup       - Clone repo, validate tool paths, fetch dependencies
+#   2. lint        - Verilator lint
+#   3. cdc         - SpyGlass CDC analysis
+#   4. regression  - Cocotb regression with VCS code coverage
+#   5. coverage    - Merge VCS coverage and generate report
+#   6. synthesis   - ASIC synthesis with Design Compiler (TSMC 65nm)
+#   7. fpga-deploy - Manual fpgahub-driven deploy + stress (needs FPGAHUB_BOARD/FPGAHUB_BOARD_TAG)
+#   8. cleanup     - Remove workspace
 
 stages:
   - setup
@@ -18,6 +19,7 @@ stages:
   - regression
   - coverage
   - synthesis
+  - fpga-deploy
   - cleanup
 
 variables:
@@ -405,7 +407,53 @@ dc-synth-tsmc65:
     expire_in: 30 days
 
 # ============================================================================
-# Stage 7: Cleanup
+# Stage 7: FPGA Deploy (manual — requires a live fpgahub daemon + board)
+# ============================================================================
+#
+# Acquires a board via fpgahub (by name or capability), runs the manifest's
+# `deploy` + `stress_test` actions under the lease, and releases cleanly in
+# after_script so a failed job never leaks the board. Gated on the
+# FPGAHUB_BOARD or FPGAHUB_BOARD_TAG CI variable — leave both unset and the
+# job is skipped.
+
+fpga-deploy:
+  stage: fpga-deploy
+  when: manual
+  needs: [clone]
+  rules:
+    - if: '$FPGAHUB_BOARD != "" || $FPGAHUB_BOARD_TAG != ""'
+  variables:
+    FPGAHUB_TTL: "1h"
+    FPGAHUB_WAIT: "600"
+  script:
+    - |
+      set -euo pipefail
+      if [ -n "${FPGAHUB_BOARD:-}" ]; then
+        fpgahub lease acquire "$FPGAHUB_BOARD" \
+          --ttl "$FPGAHUB_TTL" --wait "$FPGAHUB_WAIT" --json > lease.json
+      else
+        fpgahub lease acquire --capability "$FPGAHUB_BOARD_TAG" \
+          --ttl "$FPGAHUB_TTL" --wait "$FPGAHUB_WAIT" --json > lease.json
+      fi
+      export FPGAHUB_BOARD_RESOLVED="$(jq -r .board lease.json)"
+      export FPGAHUB_TOKEN="$(jq -r .token lease.json)"
+      echo "Leased $FPGAHUB_BOARD_RESOLVED (token=${FPGAHUB_TOKEN:0:8}…)"
+    - fpgahub actions run "$FPGAHUB_BOARD_RESOLVED" deploy
+    - fpgahub actions run "$FPGAHUB_BOARD_RESOLVED" stress_test
+  after_script:
+    - |
+      if [ -f lease.json ]; then
+        board=$(jq -r .board lease.json)
+        token=$(jq -r .token lease.json)
+        fpgahub lease release "$board" --token "$token" || true
+      fi
+  artifacts:
+    when: always
+    paths:
+      - lease.json
+
+# ============================================================================
+# Stage 8: Cleanup
 # ============================================================================
 
 cleanup:
