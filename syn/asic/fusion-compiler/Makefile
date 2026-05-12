@@ -45,6 +45,7 @@ SYNTH_BLOCK    = compile.design
 CTS_BLOCK      = cts.design
 ROUTE_BLOCK    = route.design
 SIGNOFF_BLOCK  = signoff.design
+DRC_BLOCK      = drc.design
 
 # Sentinels (touched after each stage, so make can dependency-track stages)
 INIT_DONE      = $(FC_WORK)/.init.done
@@ -52,12 +53,13 @@ SYNTH_DONE     = $(FC_WORK)/.synth.done
 CTS_DONE       = $(FC_WORK)/.cts.done
 ROUTE_DONE     = $(FC_WORK)/.route.done
 SIGNOFF_DONE   = $(FC_WORK)/.signoff.done
+DRC_DONE       = $(FC_WORK)/.drc.done
 ABSTRACT_DONE  = $(FC_WORK)/.abstract.done
 
 FC_SHELL = fc_shell
 
-.PHONY: fc fc_init fc_synth fc_cts fc_route fc_signoff fc_abstract \
-        gui clean help dirs fusion_lib
+.PHONY: fc fc_init fc_synth fc_cts fc_route fc_signoff fc_drc fc_abstract \
+        drc_summary gui clean help dirs fusion_lib
 
 # ── Workspace setup ───────────────────────────────────────────────────────
 dirs:
@@ -130,8 +132,30 @@ $(SIGNOFF_DONE): $(ROUTE_DONE)
 
 fc_signoff: $(SIGNOFF_DONE)
 
-$(ABSTRACT_DONE): $(SIGNOFF_DONE)
-	@echo "INFO: [Phase 4c] partition export (LEF, DEF, NDM, GDS, Verilog)"
+$(DRC_DONE): $(SIGNOFF_DONE)
+	@echo "INFO: [Phase 5] DRC (in-design + optional ICV signoff)"
+	@rm -f $(FC_REPORTS)/07_*.rep
+	cd $(FC_WORK) && $(FC_SHELL) -f $(FC_DIR)/scripts/7_drc.tcl 2>&1 \
+	    | tee $(FC_LOGS)/7_drc.log
+	@grep -q "^FC_STAGE_OK: drc" $(FC_LOGS)/7_drc.log \
+	    || (echo "ERROR: fc_drc did not reach FC_STAGE_OK marker — see $(FC_LOGS)/7_drc.log"; exit 1)
+	@touch $@
+
+fc_drc: $(DRC_DONE)
+
+# drc_summary — re-display the per-check summary table that 7_drc.tcl
+# wrote during fc_drc. The summary parses each check's canonical
+# violation line (e.g. "Total number of DRCs = N") rather than greping
+# for "violation" everywhere, so the counts are exact and not heuristic.
+drc_summary:
+	@if [ ! -f "$(FC_REPORTS)/07_summary.rep" ]; then \
+	    echo "ERROR: $(FC_REPORTS)/07_summary.rep not found — run 'make fc_drc' first"; \
+	    exit 1; \
+	fi
+	@cat $(FC_REPORTS)/07_summary.rep
+
+$(ABSTRACT_DONE): $(DRC_DONE)
+	@echo "INFO: [Phase 6] partition export (LEF, DEF, NDM, GDS, Verilog)"
 	cd $(FC_WORK) && $(FC_SHELL) -f $(FC_DIR)/scripts/6_partition_export.tcl 2>&1 \
 	    | tee $(FC_LOGS)/6_partition_export.log
 	@grep -q "^FC_STAGE_OK: abstract" $(FC_LOGS)/6_partition_export.log \
@@ -157,7 +181,7 @@ BLOCK ?= signoff.design
 
 gui: $(FUSION_LIB)
 	@b="$(BLOCK)"; \
-	for cand in $$b signoff.design route.design cts.design compile.design init.design; do \
+	for cand in $$b drc.design signoff.design route.design cts.design compile.design init.design; do \
 	    if [ -d "$(FC_BLOCK_DIR)/$(MODULE)/design_label.$${cand%.design}" ]; then b="$$cand"; break; fi; \
 	done; \
 	echo "INFO: opening $(MODULE).dlib:$(MODULE)/$$b (read-only — pass MODE=edit for editable)"; \
@@ -183,11 +207,19 @@ help:
 	@echo "  make fc_synth                  - Phase 2: compile_fusion"
 	@echo "  make fc_cts                    - Phase 3: clock_opt"
 	@echo "  make fc_route                  - Phase 4: route_auto + route_opt"
-	@echo "  make fc_signoff                - Signoff (DRC, parasitic, reports)"
+	@echo "  make fc_signoff                - Signoff QoR (timing/area/power)"
+	@echo "  make fc_drc                    - DRC checks (in-design + ICV opt-in)"
+	@echo "  make drc_summary               - Grep DRC reports for violation counts"
 	@echo "  make fc_abstract               - Write LEF/DEF/Verilog/SDC/SDF"
 	@echo "  make fusion_lib                - Build fusion ref lib only"
 	@echo "  make gui                       - fc_shell -gui"
 	@echo "  make clean                     - Remove all generated files"
+	@echo ""
+	@echo "Opt-in vars:"
+	@echo "  ICV_DRC_RUNSET=<path>          - foundry .rs runset; enables"
+	@echo "                                   ICV signoff DRC at fc_drc"
+	@echo "  ICV_DRC_STRATEGY=<name>        - pre-defined strategy name"
+	@echo "                                   (defaults to 'qspi_drc')"
 	@echo ""
 	@echo "Module    : $(MODULE)"
 	@echo "Flist     : $(FLIST)"
