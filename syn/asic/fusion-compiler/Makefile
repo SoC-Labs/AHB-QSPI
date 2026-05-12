@@ -24,8 +24,8 @@ export FC_BLOCK_DIR   = $(FC_WORK)/$(MODULE).dlib
 #   = 5 + 145.4 + 15 + 5 ≈ 170 μm  (round up to 220 for std-cell rows)
 # Util-driven sizing ignores the macro footprint at floorplan time
 # so we always set side_length explicitly.
-export FC_DIE_WIDTH        ?= 1020
-export FC_DIE_HEIGHT       ?= 220
+export FC_DIE_WIDTH        ?= 1000
+export FC_DIE_HEIGHT       ?= 200
 export FC_CORE_OFFSET      ?= 10
 
 # ── EDA tool binaries ─────────────────────────────────────────────────────

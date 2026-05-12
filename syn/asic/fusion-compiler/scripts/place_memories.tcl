@@ -36,7 +36,9 @@ set FCT_W      135.4
 set FCT_H      40.51
 
 set MARGIN     5.0    ;# core-edge to macro-block clearance
-set V_CHANNEL  5.0    ;# vertical gap between stacked data macros
+set V_CHANNEL  10.0   ;# vertical gap between stacked data macros —
+                      ;# 10 μm gives the router visible channels between
+                      ;# the very-wide-and-flat 312×36 data RAMs
 set TAG_GAP    4.0    ;# horizontal gap between the two tag macros
 
 # Die dims from the Makefile (used to anchor the right-column + tag
@@ -65,12 +67,14 @@ proc cell_by_full_name {full_name} {
 }
 
 #-----------------------------------------------------------------------------
-# Common Y coordinates — data macros all share the same vertical stack
-# positions on both sides; tags vertically centred against the stack.
+# Common coordinates. Stack is vertically centred against the die so
+# the std-cell region splits cleanly above and below the data rows
+# rather than crowding into a single thin strip at one edge.
 #-----------------------------------------------------------------------------
-set stack_h [expr {4 * $FCD_H + 3 * $V_CHANNEL}]
-set left_x  $MARGIN
-set right_x [expr {$die_w - $MARGIN - $FCD_W}]
+set stack_h  [expr {4 * $FCD_H + 3 * $V_CHANNEL}]
+set stack_y0 [expr {($die_h - $stack_h) / 2.0}]
+set left_x   $MARGIN
+set right_x  [expr {$die_w - $MARGIN - $FCD_W}]
 
 #-----------------------------------------------------------------------------
 # 1) flash_cache_data — first 4 macros (way 0) on the LEFT column,
@@ -86,7 +90,7 @@ foreach inst $fcd_insts {
     }
     set row [expr {$i % 4}]
     set x   [expr {$i < 4 ? $left_x : $right_x}]
-    set y   [expr {$MARGIN + $row * ($FCD_H + $V_CHANNEL)}]
+    set y   [expr {$stack_y0 + $row * ($FCD_H + $V_CHANNEL)}]
     set_attribute $cell origin [list $x $y]
     set_attribute $cell orientation R0
     incr i
@@ -98,7 +102,7 @@ foreach inst $fcd_insts {
 #-----------------------------------------------------------------------------
 set tag_pair_w [expr {2 * $FCT_W + $TAG_GAP}]
 set tag_x0     [expr {($die_w - $tag_pair_w) / 2.0}]
-set tag_y      [expr {$MARGIN + ($stack_h - $FCT_H) / 2.0}]
+set tag_y      [expr {$stack_y0 + ($stack_h - $FCT_H) / 2.0}]
 
 set i 0
 foreach inst $fct_insts {
