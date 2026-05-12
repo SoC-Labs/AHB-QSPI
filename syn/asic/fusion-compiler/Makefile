@@ -13,16 +13,19 @@ export FC_OUTPUTS     = $(FC_DIR)/outputs
 export FC_BLOCK_DIR   = $(FC_WORK)/$(MODULE).dlib
 
 # Floorplan target — absolute die dimensions (μm).
-# flash_cache_data macros are 311.8 × 36.36 μm; place_memories.tcl
-# packs them into a 2 cols × 4 rows grid + tag row above, with a
-# right-edge at x ≈ 633 μm and a top-edge at y ≈ 211 μm. Util-driven
-# sizing (-control_type core -core_utilization …) ignores the macro
-# footprint at floorplan time and produces a die smaller than the
-# macros need (the cells overflow the right boundary). Use explicit
-# side_length so FC always builds a die that contains them, with
-# enough headroom above for std-cell rows + power straps.
-export FC_DIE_WIDTH        ?= 660
-export FC_DIE_HEIGHT       ?= 320
+# place_memories.tcl arranges the cache macros in a split-column
+# pattern: 4× flash_cache_data stacked at the LEFT edge, 4× stacked
+# at the RIGHT edge, and the 2 flash_cache_tag cells side-by-side
+# centred in the middle gap. Width budget:
+#   margin + data + middle_gap + 2×tag + middle_gap + data + margin
+#   = 5 + 312 + ~60 + 275 + ~60 + 312 + 5 ≈ 1029 μm
+# Height budget:
+#   margin + 4×data_H + 3×V_channel + margin
+#   = 5 + 145.4 + 15 + 5 ≈ 170 μm  (round up to 220 for std-cell rows)
+# Util-driven sizing ignores the macro footprint at floorplan time
+# so we always set side_length explicitly.
+export FC_DIE_WIDTH        ?= 1020
+export FC_DIE_HEIGHT       ?= 220
 export FC_CORE_OFFSET      ?= 10
 
 # ── EDA tool binaries ─────────────────────────────────────────────────────
