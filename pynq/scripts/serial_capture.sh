@@ -1,28 +1,32 @@
 #!/usr/bin/env bash
 #-----------------------------------------------------------------------------
-# PYNQ serial-console capture — runs a "cat" on mapstone-dev's ttyUSB6,
+# PYNQ serial-console capture — SSHes into the host where the board's
+# FTDI is attached (`host_dev_host` from `fpgahub board status`),
 # timestamps every line, writes to pynq/logs/serial-<timestamp>.log.
 #
-# Purpose: when the stress test locks the board, the PS UART0 panic banner
-# (if any) dumps just before the hang. This script captures it.
+# Purpose: when the stress test locks the board, the PS UART0 panic
+# banner (if any) dumps just before the hang. This script captures it.
 #
 # Usage:
-#     pynq/scripts/serial_capture.sh                # background start
-#     pynq/scripts/serial_capture.sh --tail         # also tail live
-#     pynq/scripts/serial_capture.sh --stop         # kill any running capture
-#     pynq/scripts/serial_capture.sh --out my.log   # explicit output file
+#     BOARD=pynq_z2_03_pl pynq/scripts/serial_capture.sh
+#     BOARD=pynq_z2_03_pl pynq/scripts/serial_capture.sh --tail
+#     pynq/scripts/serial_capture.sh --stop
+#     pynq/scripts/serial_capture.sh --out my.log
 #
-# Env:
-#     PYNQ_SSH_HOST  (default mapstone-dev.ecs.soton.ac.uk)
-#     PYNQ_SERIAL    (default /dev/ttyUSB6 — the Xilinx TUL FTDI-if01)
+# Inputs (env):
+#     BOARD            fpgahub board name (required unless PYNQ_SSH_HOST set)
+#     PYNQ_SSH_HOST    bypass fpgahub: explicit ssh target
+#     PYNQ_SERIAL      tty path on the USB host
+#                      (default /dev/serial/by-id/usb-Xilinx_TUL*-if01-port0)
 #-----------------------------------------------------------------------------
 
 set -euo pipefail
 
-SSH_HOST="${PYNQ_SSH_HOST:-mapstone-dev.ecs.soton.ac.uk}"
+BOARD="${BOARD:-}"
+SSH_HOST="${PYNQ_SSH_HOST:-}"
 # Use the stable by-id symlink — ttyUSB<N> enumeration rotates whenever the
 # FTDI disappears/reappears (e.g. after a lockup re-enumerates the USB).
-SERIAL="${PYNQ_SERIAL:-/dev/serial/by-id/usb-Xilinx_TUL_1234-tul-if01-port0}"
+SERIAL="${PYNQ_SERIAL:-/dev/serial/by-id/usb-Xilinx_TUL*-if01-port0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -54,6 +58,24 @@ if [ "$STOP" = "1" ]; then
     exit 0
 fi
 
+# Resolve dev-host from fpgahub unless PYNQ_SSH_HOST is explicit.
+if [ -z "$SSH_HOST" ]; then
+    if [ -z "$BOARD" ]; then
+        echo "[serial_capture] ERROR: set BOARD=<fpgahub-name> or PYNQ_SSH_HOST=<host>" >&2
+        exit 2
+    fi
+    if ! command -v fpgahub >/dev/null 2>&1; then
+        echo "[serial_capture] ERROR: fpgahub not on PATH" >&2
+        exit 127
+    fi
+    SSH_HOST="$(fpgahub board status "$BOARD" --json \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("host_dev_host") or "")')"
+    if [ -z "$SSH_HOST" ] || [ "$SSH_HOST" = "null" ]; then
+        echo "[serial_capture] ERROR: board '$BOARD' has no host_dev_host" >&2
+        exit 1
+    fi
+fi
+
 if [ -f "$PID_FILE" ]; then
     old_pid=$(cat "$PID_FILE")
     if kill -0 "$old_pid" 2>/dev/null; then
@@ -68,18 +90,20 @@ if [ -z "$OUT_FILE" ]; then
     OUT_FILE="$LOG_DIR/serial-$(date -u +%Y%m%dT%H%M%SZ).log"
 fi
 
-echo "[serial_capture] writing $OUT_FILE" >&2
+echo "[serial_capture] writing $OUT_FILE (via $SSH_HOST)" >&2
 
-# Remote command: configure tty (raw, 115200, no echo), then cat forever.
-# The "nohup" keeps it alive across SSH reconnect attempts. exec 3<> holds
-# the device open so the kernel doesn't TTY-flow-control us out. Line
-# buffering via stdbuf so the log sees characters immediately.
+# Remote command: resolve glob → device, configure tty (raw, 115200, no
+# echo), then cat forever. exec 3<> holds the device open so the kernel
+# doesn't TTY-flow-control us out. Line buffering via stdbuf so the log
+# sees characters immediately.
 #
 # The remote side intentionally writes to stdout — our local side tees it
 # into the log file with timestamps, so a board-side panic "kernel BUG at
 # ..." arrives live in the log even if SSH drops a moment later.
-REMOTE_CMD="stty -F $SERIAL 115200 cs8 -cstopb -parenb -icanon -echo -icrnl -ixon 2>/dev/null; \
-            stdbuf -oL cat $SERIAL"
+REMOTE_CMD="set -e; dev=\$(ls $SERIAL 2>/dev/null | head -1); \
+            if [ -z \"\$dev\" ]; then echo 'no tty matched $SERIAL' >&2; exit 4; fi; \
+            stty -F \$dev 115200 cs8 -cstopb -parenb -icanon -echo -icrnl -ixon 2>/dev/null; \
+            exec stdbuf -oL cat \$dev"
 
 # Prepend each line with a millisecond timestamp so we can correlate with
 # the stress runner's own timestamps later.

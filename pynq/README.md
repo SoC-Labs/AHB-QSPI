@@ -43,12 +43,30 @@ From the repo root on your build machine:
 ```bash
 source set_env.sh
 cd fpga
-make build_design          # produces imp/fpga/output/pynq-z2/qspi.{bit,hwh}
-make deploy PYNQ_HOST=xilinx@pynq.local
+make build_design                       # produces imp/fpga/output/pynq-z2/qspi.{bit,hwh}
+make deploy BOARD=pynq_z2_03_pl         # acquire fpgahub lease, scp, fpga_manager, release
+# OR auto-pick any free PYNQ-Z2 with PmodSF3:
+make deploy BOARD_TAG=qspi_flash_pmod
 ```
 
-This SCPs the bitstream, .hwh, and the entire `pynq/` directory to
-`/home/xilinx/qspi_overlay/` on the board.
+`make deploy` acquires a fpgahub lease, resolves the board's `host_ssh`
+/ `host_proxy` from `fpgahub board status`, SCPs the bitstream + .hwh +
+the entire `pynq/` directory to `/home/xilinx/qspi_overlay/`, hot-loads
+via `fpga_manager`, and releases the lease on exit (even on Ctrl-C or
+errors). `make stress` does the same plus the pynq stress runner.
+
+For programming via JTAG (no PYNQ Linux):
+
+```bash
+make program BOARD=pynq_z2_03_pl        # vivado_jtag plugin via fpgahub
+```
+
+> **Auth note:** `make program` uses `fpgahub board program`, which is
+> an admin endpoint requiring a Bearer token (`FPGAHUB_TOKEN=…`). mTLS
+> client certs cover lease/status/deploy, but not programming. Ask the
+> fpgahub admin to `fpgahub token create <you> --role write` and export
+> the token, or use `make deploy` (PYNQ-Linux `fpga_manager` path), which
+> needs only a lease.
 
 ## Running on the PYNQ board
 

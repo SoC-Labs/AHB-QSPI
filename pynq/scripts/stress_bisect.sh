@@ -4,30 +4,58 @@
 # captures serial + stdout, checks if the board survived, and emits a CSV
 # of verdicts. First-failing phase tells us the scope of the bug.
 #
-# Usage:
-#     pynq/scripts/stress_bisect.sh
-#     pynq/scripts/stress_bisect.sh --phases concurrent,clk_div_sweep
-#     pynq/scripts/stress_bisect.sh --budget 60
-#     pynq/scripts/stress_bisect.sh --prompt-between   # pause for power-cycle
+# Always runs inside a fpgahub lease — re-uses the parent shell's lease if
+# FPGA_BOARD/FPGA_LEASE_TOKEN are already set, otherwise acquires one
+# itself via fpga/harness/scripts/with_lease.sh.
 #
-# Env:
-#     PYNQ_HOST      default xilinx@192.168.2.99
-#     PYNQ_PROXY     default mapstone-dev.ecs.soton.ac.uk
+# Usage:
+#     BOARD=pynq_z2_03_pl pynq/scripts/stress_bisect.sh
+#     BOARD=pynq_z2_03_pl pynq/scripts/stress_bisect.sh --phases concurrent,clk_div_sweep
+#     BOARD=pynq_z2_03_pl pynq/scripts/stress_bisect.sh --budget 60
+#     BOARD=pynq_z2_03_pl pynq/scripts/stress_bisect.sh --prompt-between
+#
+# Env (resolved automatically when BOARD is set):
+#     BOARD          fpgahub board name (required unless PYNQ_HOST set)
+#     PYNQ_HOST      override: ssh target on the board
+#     PYNQ_PROXY     override: jump host
 #     PYNQ_PASSWORD  default xilinx
 #     PYNQ_DEST      default /home/xilinx/qspi_overlay
+#     FPGAHUB_TTL    lease seconds when we acquire one (default 7200)
 #-----------------------------------------------------------------------------
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WITH_LEASE="$REPO_ROOT/fpga/harness/scripts/with_lease.sh"
+
+# If we don't have host/lease info yet, re-exec ourselves under
+# with_lease.sh so the whole bisect runs inside a single lease. The
+# wrapper sets PYNQ_HOST/PYNQ_PROXY/FPGA_BOARD/FPGA_LEASE_TOKEN.
+if [ -z "${PYNQ_HOST:-}" ] && [ -z "${FPGA_LEASE_TOKEN:-}" ]; then
+    if [ -z "${BOARD:-}" ]; then
+        echo "[bisect] ERROR: set BOARD=<fpgahub-name> (or PYNQ_HOST=<user@host>)" >&2
+        exit 2
+    fi
+    if [ ! -x "$WITH_LEASE" ]; then
+        echo "[bisect] ERROR: $WITH_LEASE missing or not executable" >&2
+        exit 2
+    fi
+    exec "$WITH_LEASE" --board "$BOARD" --ttl "${FPGAHUB_TTL:-7200}" -- \
+        env BISECT_REENTERED=1 "$0" "$@"
+fi
+
 LOG_DIR="$REPO_ROOT/pynq/logs/bisect-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$LOG_DIR"
 
-PYNQ_HOST="${PYNQ_HOST:-xilinx@192.168.2.99}"
-PYNQ_PROXY="${PYNQ_PROXY:-mapstone-dev.ecs.soton.ac.uk}"
 PYNQ_PASSWORD="${PYNQ_PASSWORD:-xilinx}"
 PYNQ_DEST="${PYNQ_DEST:-/home/xilinx/qspi_overlay}"
+PYNQ_PROXY="${PYNQ_PROXY:-}"
+
+if [ -z "${PYNQ_HOST:-}" ]; then
+    echo "[bisect] ERROR: PYNQ_HOST not set after lease — board has no host_ssh?" >&2
+    exit 1
+fi
 
 BUDGET=60
 PROMPT=0
@@ -46,8 +74,11 @@ while [ $# -gt 0 ]; do
 done
 
 SSH_BASE=(ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
-          -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-          -o "ProxyJump=$PYNQ_PROXY" "$PYNQ_HOST")
+          -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+if [ -n "$PYNQ_PROXY" ]; then
+    SSH_BASE+=(-o "ProxyJump=$PYNQ_PROXY")
+fi
+SSH_BASE+=("$PYNQ_HOST")
 
 REPORT="$LOG_DIR/report.csv"
 echo "phase,verdict,elapsed_s,last_serial,last_stdout,notes" > "$REPORT"
@@ -59,7 +90,7 @@ probe_board() {
 
 probe_serial() {
     # Returns 0 if serial console answers.
-    "$SCRIPT_DIR/refresh_board.sh" >/dev/null 2>&1
+    BOARD="${BOARD:-}" "$SCRIPT_DIR/refresh_board.sh" >/dev/null 2>&1
 }
 
 classify_state() {
@@ -91,7 +122,7 @@ run_phase() {
     # 2. start serial capture in background
     PYNQ_BOARD_JSON=/dev/null \
         "$SCRIPT_DIR/serial_capture.sh" --stop >/dev/null 2>&1 || true
-    "$SCRIPT_DIR/serial_capture.sh" --out "$serial_log" >/dev/null
+    BOARD="${BOARD:-}" "$SCRIPT_DIR/serial_capture.sh" --out "$serial_log" >/dev/null
 
     # 3. run stress phase with timeout protection (budget + 30s buffer)
     local total_budget=$((BUDGET + 30))
