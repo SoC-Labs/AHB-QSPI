@@ -124,11 +124,17 @@ initialize_floorplan \
     -core_offset $core_offset
 
 #-----------------------------------------------------------------------------
-# Macro placement — pin flash_cache_data + flash_cache_tag to the bottom
-# edge so the std-cell region is one cohesive area instead of fragmenting
-# around free-floating macros.
+# Macro placement — pin flash_cache_data + flash_cache_tag in the
+# split-column arrangement defined by place_memories.tcl (data macros
+# stacked on the left + right edges, tag pair centred between them).
 #-----------------------------------------------------------------------------
 source ${fc_dir}/scripts/place_memories.tcl
+
+#-----------------------------------------------------------------------------
+# Port-to-edge assignment — external QSPI on TOP, internal busses on
+# the other edges.
+#-----------------------------------------------------------------------------
+source ${fc_dir}/scripts/place_pins.tcl
 
 #-----------------------------------------------------------------------------
 # Pre-compile sanity checks
