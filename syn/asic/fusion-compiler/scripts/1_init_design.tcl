@@ -137,6 +137,14 @@ source ${fc_dir}/scripts/place_memories.tcl
 source ${fc_dir}/scripts/place_pins.tcl
 
 #-----------------------------------------------------------------------------
+# Power-ground mesh — VDD/VSS supply nets, M1 std-cell rails, and an
+# M5/M6 strap mesh stitching the rails together. Built before
+# compile_fusion runs std-cell placement so the placer dodges the
+# straps.
+#-----------------------------------------------------------------------------
+source ${fc_dir}/scripts/pg_mesh.tcl
+
+#-----------------------------------------------------------------------------
 # Pre-compile sanity checks
 #-----------------------------------------------------------------------------
 file mkdir $fc_reports
