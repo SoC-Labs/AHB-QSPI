@@ -410,11 +410,12 @@ dc-synth-tsmc65:
 # Stage 7: FPGA Deploy (manual — requires a live fpgahub daemon + board)
 # ============================================================================
 #
-# Acquires a board via fpgahub (by name or capability), runs the manifest's
-# `deploy` + `stress_test` actions under the lease, and releases cleanly in
-# after_script so a failed job never leaks the board. Gated on the
-# FPGAHUB_BOARD or FPGAHUB_BOARD_TAG CI variable — leave both unset and the
-# job is skipped.
+# Acquires a board via fpgahub (by name or capability), then runs
+# `make stress` from the fpga Makefile. The Makefile's helpers detect
+# the existing FPGA_BOARD/FPGA_LEASE_TOKEN env and re-use the outer lease
+# (no nested acquire). after_script releases cleanly so a failed job
+# never leaks the board. Gated on FPGAHUB_BOARD / FPGAHUB_BOARD_TAG CI
+# variables — leave both unset and the job is skipped.
 
 fpga-deploy:
   stage: fpga-deploy
@@ -423,7 +424,7 @@ fpga-deploy:
   rules:
     - if: '$FPGAHUB_BOARD != "" || $FPGAHUB_BOARD_TAG != ""'
   variables:
-    FPGAHUB_TTL: "1h"
+    FPGAHUB_TTL: "3600"
     FPGAHUB_WAIT: "600"
   script:
     - |
@@ -435,11 +436,19 @@ fpga-deploy:
         fpgahub lease acquire --capability "$FPGAHUB_BOARD_TAG" \
           --ttl "$FPGAHUB_TTL" --wait "$FPGAHUB_WAIT" --json > lease.json
       fi
-      export FPGAHUB_BOARD_RESOLVED="$(jq -r .board lease.json)"
-      export FPGAHUB_TOKEN="$(jq -r .token lease.json)"
-      echo "Leased $FPGAHUB_BOARD_RESOLVED (token=${FPGAHUB_TOKEN:0:8}…)"
-    - fpgahub actions run "$FPGAHUB_BOARD_RESOLVED" deploy
-    - fpgahub actions run "$FPGAHUB_BOARD_RESOLVED" stress_test
+      export FPGA_BOARD="$(jq -r .board lease.json)"
+      export FPGA_LEASE_TOKEN="$(jq -r .token lease.json)"
+      echo "Leased $FPGA_BOARD (token=${FPGA_LEASE_TOKEN:0:8}…)"
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    # build_design has no lease cost; do it under the lease anyway so a
+    # single fpga-deploy job carries the change from clone → board.
+    - make -C "$WORK_DIR/fpga" build_design
+    # `make stress` invokes with_lease.sh which detects the existing
+    # FPGA_BOARD / FPGA_LEASE_TOKEN and reuses them. BOARD= is forwarded
+    # to the wrapper for the assertion only — the lease isn't re-acquired.
+    - export FPGA_BOARD FPGA_LEASE_TOKEN
+    - make -C "$WORK_DIR/fpga" stress BOARD="$FPGA_BOARD"
   after_script:
     - |
       if [ -f lease.json ]; then
