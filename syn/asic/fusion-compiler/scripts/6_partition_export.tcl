@@ -61,12 +61,31 @@ write_lef ${fc_outputs}/${top_module}.lef
 # STA) or generate ETM via PrimeTime as a follow-on. The .dlib block
 # IS the partition abstract for FC's hierarchical PnR flow.
 
-# Optional: GDSII for chip-finishing — partition geometry. Skipped here
-# because GDS write requires technology layer-mapping config that is
-# tech-specific; uncomment + add a layer-map once layer alignment with
-# the top-level GDS merge step is settled.
-# puts "INFO: \[fc_abstract\] write_gds"
-# write_gds -hierarchical ${fc_outputs}/${top_module}.gds
+# GDSII for chip-finish / DRC / LVS — partition geometry plus the
+# referenced std-cell + macro GDS streams merged in so the output is
+# self-contained.
+puts "INFO: \[fc_abstract\] write_gds (merging std-cell + cache-RAM streams)"
+set gds_layer_map [expr {[info exists ::env(GDS_LAYER_MAP)] ? $::env(GDS_LAYER_MAP) : ""}]
+set gds_merge_files [list]
+foreach v {GDS_STDCELL GDS_MEM_FCD GDS_MEM_FCT} {
+    if {[info exists ::env($v)] && [file exists $::env($v)]} {
+        lappend gds_merge_files $::env($v)
+    } else {
+        puts "WARNING: \[fc_abstract\] $v missing or path not found — skipping merge"
+    }
+}
+if {$gds_layer_map ne "" && [file exists $gds_layer_map]} {
+    write_gds \
+        -hierarchy all \
+        -layer_map $gds_layer_map \
+        -layer_map_format icc2 \
+        -merge_files $gds_merge_files \
+        -compress \
+        ${fc_outputs}/${top_module}.gds
+    puts "INFO: \[fc_abstract\] GDS at ${fc_outputs}/${top_module}.gds"
+} else {
+    puts "WARNING: \[fc_abstract\] GDS_LAYER_MAP not found at '$gds_layer_map' — skipping GDS write"
+}
 
 #-----------------------------------------------------------------------------
 # Manifest of delivered products

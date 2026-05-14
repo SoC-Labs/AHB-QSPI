@@ -61,6 +61,18 @@ export DB_FF          ?= $(DB_PATH)/sc12_cln65lp_base_rvt_ff_typical_min_1p32v_m
 export TLUPLUS_PATH   ?= $(PHYS_IP_PATH)/arm_tech/r2p0/synopsys_tluplus/1p9m_6x2z
 export TLUPLUS_MAP    ?= $(TLUPLUS_PATH)/tluplus.map
 
+# ── GDS stream-out — layer map + macro/stdcell GDS to merge ────────────────
+# write_gds in 6_partition_export.tcl needs (a) a Synopsys-format layer
+# map and (b) the GDS of every reference cell (std cells + macros) so
+# the output stream-out is self-contained. Without -merge_files the
+# emitted GDS contains only the partition's metal/via shapes — chip-
+# top would have to merge the std-cell + macro GDS itself at LVS time.
+export GDS_LAYER_MAP   ?= $(PHYS_IP_PATH)/arm_tech/r2p0/milkyway/1p9m_6x2z/stream_out_layer_map
+export GDS_STDCELL     ?= $(PHYS_IP_PATH)/sc12_base_rvt/r0p0/gds2/sc12_cln65lp_base_rvt.gds2
+export GDS_MEM_FCD     ?= $(MEM_BASE)/flash_cache_data/flash_cache_data.gds2
+export GDS_MEM_FCT     ?= $(MEM_BASE)/flash_cache_tag/flash_cache_tag.gds2
+export GDS_MERGE_FILES ?= $(GDS_STDCELL) $(GDS_MEM_FCD) $(GDS_MEM_FCT)
+
 # ── Design constraints ─────────────────────────────────────────────────────
 # top_ahb_qspi has two boundary clocks (HCLK + PCLK, both 4 ns in the
 # existing dc_synthesis_core.tcl baseline) plus a divided-by-2 generated
