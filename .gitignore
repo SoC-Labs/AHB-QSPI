@@ -90,6 +90,9 @@ syn/asic/fusion-compiler/*.svf
 syn/asic/fusion-compiler/alib-*
 syn/asic/fusion-compiler/.synopsys*
 
+# Locally-generated FF .db files (built by `make mem_ff_db`)
+syn/asic/libs/
+
 # Formality-specific scratch
 syn/asic/formality/fm_shell_command.log
 syn/asic/formality/*.svf
@@ -106,3 +109,8 @@ docs/tex/*.toc
 # ── PYNQ / FPGA bring-up ──────────────────────────────────────────────────
 pynq/board.json
 pynq/logs/
+
+# --- Fusion Compiler + Formality NDM ref-libs (deprecated; now under syn/asic/*/ndm_ref_libs/) ---
+*.svf
+fc_command.log
+fc_output.txt

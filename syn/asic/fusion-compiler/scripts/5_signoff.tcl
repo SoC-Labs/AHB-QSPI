@@ -20,16 +20,36 @@ source ${fc_dir}/scripts/setup.tcl
 source ${fc_dir}/scripts/setup_design_options.tcl
 
 #-----------------------------------------------------------------------------
-# Final timing/area/power QoR. ICV/redhawk in-design checks deferred
-# until top-level integration (the partition-as-block delivery does
-# not need DRC/LVS at this stage; chip-top will run the full deck).
+# Final timing / area / power QoR — per-scenario, both setup and hold.
+# Without an explicit current_scenario / -delay_type loop, report_qor
+# only emits the current-scenario setup view; we'd lose visibility on
+# the FF/min hold corner that scen_fast covers. Iterate across all
+# active scenarios and dump both setup and hold worst-paths.
 #-----------------------------------------------------------------------------
+set active_scenarios [list]
+foreach_in_collection s [get_scenarios -quiet -filter active==true] {
+    lappend active_scenarios [get_attribute $s name]
+}
+puts "INFO: \[fc_signoff\] active scenarios: $active_scenarios"
+
 redirect -tee -file ${fc_reports}/05_signoff.qor.rep {
     report_qor -summary
-    report_timing -nets -capacitance -max_paths 5
-    report_area -hierarchy
-    report_power
 }
+
+foreach scen $active_scenarios {
+    current_scenario $scen
+    redirect -tee -file ${fc_reports}/05_signoff.${scen}.setup.rep {
+        puts "=== Scenario $scen — setup ==="
+        report_timing -delay_type max -nets -capacitance -max_paths 5
+    }
+    redirect -tee -file ${fc_reports}/05_signoff.${scen}.hold.rep {
+        puts "=== Scenario $scen — hold ==="
+        report_timing -delay_type min -nets -capacitance -max_paths 5
+    }
+}
+
+redirect -tee -file ${fc_reports}/05_signoff.area.rep   { report_area -hierarchy }
+redirect -tee -file ${fc_reports}/05_signoff.power.rep  { report_power }
 
 #-----------------------------------------------------------------------------
 # Save block: ${design_lib}/${top}/signoff.design

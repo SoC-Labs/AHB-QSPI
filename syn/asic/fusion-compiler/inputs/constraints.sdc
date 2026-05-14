@@ -22,7 +22,7 @@ create_clock -name PCLK -period $PCLK_PERIOD \
 # (qspi_clock_div). Matches dc_synthesis_core.tcl's create_generated_clock.
 create_generated_clock -name QSPI_SCLK \
     -source [get_ports HCLK] -divide_by 2 \
-    [get_pins u_qspi_controller/u_qspi_clock_div/QSPI_SCLK_i]
+    [get_pins u_qspi_clock_div/QSPI_SCLK_i]
 
 # ── Async clock groups ────────────────────────────────────────────────────
 # HCLK + PCLK come from independent dividers/PLL outputs at the chip-top;
@@ -44,13 +44,13 @@ set apb_inputs  [list PADDR* PPROT* PSEL PENABLE PWRITE PWDATA* PSTRB*]
 set apb_outputs [list PRDATA* PREADY PSLVERR]
 
 foreach pat $apb_inputs {
-    set p [get_ports $pat -quiet]
+    set p [get_ports $pat]
     if {[sizeof_collection $p] > 0} {
         set_input_delay -clock PCLK $pclk_io_delay $p
     }
 }
 foreach pat $apb_outputs {
-    set p [get_ports $pat -quiet]
+    set p [get_ports $pat]
     if {[sizeof_collection $p] > 0} {
         set_output_delay -clock PCLK $pclk_io_delay $p
     }
@@ -63,13 +63,13 @@ foreach pat $apb_outputs {
 set qspi_io_delay 1.0
 
 foreach pat {QSPI_IO_i*} {
-    set p [get_ports $pat -quiet]
+    set p [get_ports $pat]
     if {[sizeof_collection $p] > 0} {
         set_input_delay -clock QSPI_SCLK $qspi_io_delay $p -add_delay
     }
 }
 foreach pat {QSPI_IO_o* QSPI_IO_e* QSPI_SCLK QSPI_nCS} {
-    set p [get_ports $pat -quiet]
+    set p [get_ports $pat]
     if {[sizeof_collection $p] > 0} {
         set_output_delay -clock QSPI_SCLK $qspi_io_delay $p -add_delay
     }

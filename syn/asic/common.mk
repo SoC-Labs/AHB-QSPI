@@ -32,16 +32,18 @@ export MEM_BASE       ?= /research/precompiled_mems/TSMC65
 export FCD_DB_SS      ?= $(MEM_BASE)/flash_cache_data/flash_cache_data_ss_1p08v_1p08v_125c.db
 export FCT_DB_SS      ?= $(MEM_BASE)/flash_cache_tag/flash_cache_tag_ss_1p08v_1p08v_125c.db
 
+# FF .db files: not shipped by the foundry; generated from the .lib's
+# in-tree by `make mem_ff_db` (lc_shell). Keeping them inside the repo
+# avoids writing into the shared /research/precompiled_mems/ tree.
+export MEM_FF_DB_DIR  ?= $(SOCLABS_AHB_QSPI_DIR)/syn/asic/libs/mem_ff
+export FCD_DB_FF      ?= $(MEM_FF_DB_DIR)/flash_cache_data_ff_1p32v_1p32v_m40c.db
+export FCT_DB_FF      ?= $(MEM_FF_DB_DIR)/flash_cache_tag_ff_1p32v_1p32v_m40c.db
+
 # Aggregate slow/fast macro library lists for link_library.
-# NOTE: only the ss_1p08v_125c corner is precompiled to .db under
-# /research/precompiled_mems/TSMC65/flash_cache_*/. The matching .lib
-# for ff_1p32v_m40c exists alongside but no .db has been built yet, so
-# MEM_DBS_FF is left empty here and the FC.read_design.tcl skips
-# scen_fast when this list is empty. To enable hold-corner analysis,
-# convert the .lib's to .db with lc_shell and point FCD_DB_FF / FCT_DB_FF
-# at the resulting files.
+# MEM_DBS_FF is populated only when the FF .db's exist on disk
+# (built by `make mem_ff_db`); otherwise scen_fast is auto-skipped.
 export MEM_DBS_SS     := $(FCD_DB_SS) $(FCT_DB_SS)
-export MEM_DBS_FF     :=
+export MEM_DBS_FF     := $(if $(wildcard $(FCD_DB_FF)),$(FCD_DB_FF) $(FCT_DB_FF),)
 
 # Link libraries — target + every macro corner present
 export LINK_LIBS      ?= $(TARGET_LIB) $(MEM_DBS_SS)

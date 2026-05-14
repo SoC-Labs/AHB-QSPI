@@ -45,8 +45,15 @@ set_domain_supply_net PD_TOP \
     -primary_power_net  VDD \
     -primary_ground_net VSS
 
-set_voltage 1.08 -object_list [get_supply_nets VDD]
-set_voltage 0.00 -object_list [get_supply_nets VSS]
+# Voltage per corner — UPF requires the supply net's voltage to be
+# defined for every corner that scenarios reference (UPF-520).
+foreach corner_name {slow fast} {
+    if {[sizeof_collection [get_corners -quiet $corner_name]] > 0} {
+        set v [expr {$corner_name eq "slow" ? 1.08 : 1.32}]
+        set_voltage $v   -object_list [get_supply_nets VDD] -corners $corner_name
+        set_voltage 0.00 -object_list [get_supply_nets VSS] -corners $corner_name
+    }
+}
 
 # ── Step 2: connect cell PG pins to the supply nets ──────────────────────
 # Every std cell + macro has VDD/VSS pins; tie them to the nets created

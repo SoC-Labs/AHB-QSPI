@@ -59,13 +59,31 @@ ABSTRACT_DONE  = $(FC_WORK)/.abstract.done
 FC_SHELL = fc_shell
 
 .PHONY: fc fc_init fc_synth fc_cts fc_route fc_signoff fc_drc fc_abstract \
-        drc_summary gui clean help dirs fusion_lib
+        drc_summary mem_ff_db gui clean help dirs fusion_lib
 
 # ── Workspace setup ───────────────────────────────────────────────────────
 dirs:
 	@mkdir -p $(FC_WORK) $(FC_LIBS) $(FC_LOGS) $(FC_REPORTS) $(FC_OUTPUTS)
 
 # ── Fusion reference library (shared with rtl-architect) ─────────────────
+# ── Memory FF .db build (lc_shell) ────────────────────────────────────────
+# /research/precompiled_mems/TSMC65 ships only the SS .db for the
+# flash_cache_* macros. lc_shell compiles the FF .lib's into local .db's
+# under $(MEM_FF_DB_DIR) so scen_fast can be enabled in the FC flow.
+LC_SHELL = lc_shell
+LC_BIN_DIR = /eda/synopsys/2022-23/RHELx86/LC_2022.12/bin
+
+$(FCD_DB_FF) $(FCT_DB_FF): $(SHARED_SCRIPTS)/build_mem_ff_db.tcl
+	@mkdir -p $(MEM_FF_DB_DIR)
+	@echo "INFO: building FF .db files for flash_cache_data + flash_cache_tag"
+	cd $(MEM_FF_DB_DIR) && $(LC_BIN_DIR)/$(LC_SHELL) -f $(SHARED_SCRIPTS)/build_mem_ff_db.tcl 2>&1 \
+	    | tee $(MEM_FF_DB_DIR)/build_mem_ff_db.log
+	@test -s $(FCD_DB_FF) -a -s $(FCT_DB_FF) \
+	    || (echo "ERROR: FF .db build failed — see $(MEM_FF_DB_DIR)/build_mem_ff_db.log"; exit 1)
+	@echo "INFO: FF .db files ready under $(MEM_FF_DB_DIR)"
+
+mem_ff_db: $(FCD_DB_FF) $(FCT_DB_FF)
+
 $(FUSION_LIB): | dirs
 	@echo "INFO: Creating fusion reference library from LEF + .db..."
 	cd $(FC_LIBS)/.. && lm_shell -f $(SHARED_SCRIPTS)/create_fusion_lib.tcl 2>&1 \

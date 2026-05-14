@@ -119,8 +119,26 @@ if {[llength $include_dirs] > 0} {
 # Analyze RTL — read everything as SystemVerilog so the .v + .sv mix in
 # ahb_QSPI_ASIC.flist parses through one analyze call (matches the lint
 # / cdc flows, which also use -sv).
+#
+# The precompiled flash_cache_{data,tag}.v files in
+# /research/precompiled_mems/TSMC65/ are behavioural simulation models
+# (force-style multi-driver patterns + initial blocks) that Presto
+# rejects with ELAB-368 / VER-40 ("Too many errors; can't continue")
+# once enough errors accumulate. Bump the elab message limit so the
+# warnings are tolerated — the actual macro behaviour comes from the
+# .db / .lef shipped through link_library + ref_libs at link time.
+# Filtering these files out of analyze doesn't help: elaborate's
+# search-path lookup finds them anyway via the +incdir+ path.
 #-----------------------------------------------------------------------------
 echo "FC_RTL_SCRIPT: analyze"
+
+# Blackbox the precompiled SRAM simulation models during elaborate.
+# They're behavioural (force-style multi-driver patterns + initial
+# blocks) and Presto rejects them with ELAB-368 once enough errors
+# accumulate. Real macro behaviour comes from the .db / .lef shipped
+# through link_library + ref_libs at link time, which is the right
+# abstract for synthesis anyway.
+set_app_options -name hdlin.elaborate.black_box -value "flash_cache_data flash_cache_tag"
 
 set define_args [list]
 foreach def $defines { lappend define_args $def }
