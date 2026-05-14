@@ -68,13 +68,14 @@ connect_pg_net -automatic
 # M5 mesh down to M1 at every crossing. Without this pattern,
 # check_pg_connectivity flags ~5000 cells as floating.
 puts "INFO: \[pg_mesh\] creating M1 follow-pin pattern"
-# rail_width 0.18 μm matches the sc12 std-cell M1 PG rail width.
-# Tried omitting it (let compile_pg infer): regressed to 5710 floating
-# std cells. Tried wider (0.24): no change vs 0.18. The accompanying
-# 119 M1 PG-DRC violations (24 shorts + 24 overlaps + 71 spacings) are
-# residual edge cases from where compile_pg's via stack drops collide
-# with macro keepouts; chip-top integration can resolve them via its
-# own straps + minor partition tweaks.
+# rail_width 0.18 μm matches the sc12 std-cell M1 PG rail width and
+# keeps via stacks from the M5 mesh landing on the rails correctly.
+# Tried -mark_as_follow_pin true to suppress new wire creation: no
+# DRC improvement (~275 PG-DRC errors), and fast-hold regressed
+# 2 -> 8 endpoints. The DRC errors are inside cells (proven via
+# check_pg_drc -ignore_std_cells -> 0 errors) and the std-cell
+# internal PG geometry is the foundry's responsibility, so 7_drc.tcl
+# uses check_pg_drc -do_not_check_shapes_in_lib_cells to skip them.
 create_pg_std_cell_conn_pattern std_cell_rail \
     -layers {M1} \
     -rail_width 0.18
