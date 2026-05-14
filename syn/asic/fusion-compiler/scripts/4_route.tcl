@@ -48,6 +48,23 @@ redirect -tee -file ${fc_reports}/04b_route_opt.qor.rep {
 }
 
 #-----------------------------------------------------------------------------
+# Dedicated hold-fix pass — the default route_opt prioritises setup;
+# small fast-corner hold violations are common after route on
+# clock-gated paths. -from_stage final_route -to_stage hold_fix targets
+# those races without disturbing setup. Skip if no scen_fast corner is
+# active (no hold corner to fix).
+#-----------------------------------------------------------------------------
+if {[sizeof_collection [get_scenarios -quiet scen_fast]] > 0} {
+    puts "INFO: \[fc_route\] route_opt -from final_route -to hold_fix (hold close on scen_fast)"
+    if {[catch {route_opt -from final_route -to hold_fix} err]} {
+        puts "WARN: \[fc_route\] hold_fix pass returned: $err"
+    }
+    redirect -tee -file ${fc_reports}/04c_route_opt_hold.qor.rep {
+        report_qor -summary
+    }
+}
+
+#-----------------------------------------------------------------------------
 # Save block: ${design_lib}/${top}/route.design
 #-----------------------------------------------------------------------------
 save_block
