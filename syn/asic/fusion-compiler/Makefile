@@ -55,11 +55,17 @@ ROUTE_DONE     = $(FC_WORK)/.route.done
 SIGNOFF_DONE   = $(FC_WORK)/.signoff.done
 DRC_DONE       = $(FC_WORK)/.drc.done
 ABSTRACT_DONE  = $(FC_WORK)/.abstract.done
+LEC_DONE       = $(FC_WORK)/.lec.done
 
 FC_SHELL = fc_shell
 
-.PHONY: fc fc_init fc_synth fc_cts fc_route fc_signoff fc_drc fc_abstract \
-        drc_summary mem_ff_db gui clean help dirs fusion_lib
+# Sibling Formality tree — fc_lec delegates here so there is one LEC
+# implementation (run_lec.tcl), not a duplicate inside the FC flow.
+FM_FLOW_DIR = $(SOCLABS_AHB_QSPI_DIR)/syn/asic/formality
+
+.PHONY: fc fc_all fc_init fc_synth fc_cts fc_route fc_signoff fc_drc \
+        fc_abstract fc_lec drc_summary mem_ff_db gui clean help dirs \
+        fusion_lib
 
 # ── Workspace setup ───────────────────────────────────────────────────────
 dirs:
@@ -182,13 +188,37 @@ $(ABSTRACT_DONE): $(DRC_DONE)
 
 fc_abstract: $(ABSTRACT_DONE)
 
-# Full flow
+# ── Formality LEC (post-export) ───────────────────────────────────────────
+# The gate netlist LEC verifies ($(FC_OUTPUTS)/$(MODULE).v) is written by
+# 6_partition_export.tcl, so LEC depends on the abstract sentinel. We
+# delegate to the sibling Formality Makefile rather than re-implement
+# match/verify: it already greps FM_LEC_OK and exits non-zero on a
+# failing/aborted point, so a LEC failure propagates and the sentinel is
+# not touched. This is the partition's LEC sign-off — the
+# check_lec_compatibility advisory that doesn't exist as an fc_shell
+# atomic is covered here properly, RTL-vs-netlist.
+$(LEC_DONE): $(ABSTRACT_DONE)
+	@echo "INFO: [Phase 7] Formality LEC — RTL vs post-layout netlist"
+	$(MAKE) -C $(FM_FLOW_DIR) lec
+	@touch $@
+
+fc_lec: $(LEC_DONE)
+
+# Full flow (through partition export — matches the historical `fc`)
 fc: fc_abstract
 	@echo ""
 	@echo "INFO: Fusion Compiler partition flow complete for $(MODULE)"
 	@echo "INFO: Reports : $(FC_REPORTS)/"
 	@echo "INFO: Outputs : $(FC_OUTPUTS)/"
 	@echo "INFO: Logs    : $(FC_LOGS)/"
+
+# Full flow + LEC sign-off. Kept separate from `fc` so a site without
+# the Formality tool can still run the PnR flow end-to-end; CI / tape-in
+# should use `fc_all`.
+fc_all: fc fc_lec
+	@echo ""
+	@echo "INFO: Fusion Compiler flow + Formality LEC complete for $(MODULE)"
+	@echo "INFO: LEC reports : $(FM_FLOW_DIR)/reports/"
 
 # ── GUI on the most recently saved block ─────────────────────────────────
 # Opens fc_shell's GUI on a saved checkpoint. Override BLOCK to view a
@@ -220,24 +250,34 @@ help:
 	@echo "save_block sentinel so make -j is safe across blocks."
 	@echo ""
 	@echo "Usage:"
-	@echo "  make fc                        - Run the full flow"
+	@echo "  make fc                        - Run the full flow (through export)"
+	@echo "  make fc_all                    - fc + Formality LEC (CI / tape-in)"
 	@echo "  make fc_init                   - Phase 1: init_design + floorplan"
 	@echo "  make fc_synth                  - Phase 2: compile_fusion"
 	@echo "  make fc_cts                    - Phase 3: clock_opt"
 	@echo "  make fc_route                  - Phase 4: route_auto + route_opt"
 	@echo "  make fc_signoff                - Signoff QoR (timing/area/power)"
-	@echo "  make fc_drc                    - DRC checks (in-design + ICV opt-in)"
+	@echo "  make fc_drc                    - DRC checks (tier0/1/1b + ICV opt-in)"
 	@echo "  make drc_summary               - Grep DRC reports for violation counts"
-	@echo "  make fc_abstract               - Write LEF/DEF/Verilog/SDC/SDF"
+	@echo "  make fc_abstract               - Write LEF/DEF/GDS/UPF/Verilog/SDC/"
+	@echo "                                   per-scenario SDF+SPEF + manifest"
+	@echo "  make fc_lec                    - Formality LEC (delegates to"
+	@echo "                                   ../formality; needs fc_abstract)"
 	@echo "  make fusion_lib                - Build fusion ref lib only"
+	@echo "  make mem_ff_db                 - Build FF mem .db (enables scen_fast"
+	@echo "                                   -> multi-corner SDF/SPEF + hold)"
 	@echo "  make gui                       - fc_shell -gui"
 	@echo "  make clean                     - Remove all generated files"
 	@echo ""
-	@echo "Opt-in vars:"
+	@echo "Opt-in vars / files:"
 	@echo "  ICV_DRC_RUNSET=<path>          - foundry .rs runset; enables"
 	@echo "                                   ICV signoff DRC at fc_drc"
 	@echo "  ICV_DRC_STRATEGY=<name>        - pre-defined strategy name"
 	@echo "                                   (defaults to 'qspi_drc')"
+	@echo "  GDS_LAYER_MAP=<path>           - enables GDS stream-out at"
+	@echo "                                   fc_abstract (default in common.mk)"
+	@echo "  inputs/routing_rules.tcl       - NDR/antenna rules at fc_route"
+	@echo "                                   (copy .template; off by default)"
 	@echo ""
 	@echo "Module    : $(MODULE)"
 	@echo "Flist     : $(FLIST)"

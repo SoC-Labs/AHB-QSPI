@@ -25,6 +25,30 @@ source ${fc_dir}/scripts/setup.tcl
 source ${fc_dir}/scripts/setup_design_options.tcl
 
 #-----------------------------------------------------------------------------
+# Optional routing rules — non-default routing rules (NDRs), per-layer
+# width/spacing, antenna rules, and clock-net NDR assignment. This is
+# the alignment hook with the 28nm full-chip flow's routing_rules.tcl:
+# sc12 cln65lp at this die size routes cleanly with the tool defaults,
+# so there is NO checked-in rule file (and none is fabricated — the
+# numbers are PDK/foundry data). Copy inputs/routing_rules.tcl.template
+# to inputs/routing_rules.tcl and fill in the antenna ratios / NDR
+# widths from the cln65lp routing-rule deck to enable it. Sourced here
+# (after setup, before route_auto) so create_routing_rule +
+# set_clock_routing_rule land before any nets are routed.
+#-----------------------------------------------------------------------------
+set routing_rules ${fc_dir}/inputs/routing_rules.tcl
+if {[file exists $routing_rules]} {
+    puts "INFO: \[fc_route\] sourcing routing rules: $routing_rules"
+    if {[catch {source $routing_rules} rr_err]} {
+        puts "WARN: \[fc_route\] routing_rules.tcl raised: $rr_err"
+        puts "WARN: \[fc_route\]   continuing with tool-default routing rules"
+    }
+} else {
+    puts "INFO: \[fc_route\] no inputs/routing_rules.tcl — tool-default rules"
+    puts "INFO: \[fc_route\]   (see inputs/routing_rules.tcl.template to enable)"
+}
+
+#-----------------------------------------------------------------------------
 # route_auto — initial detail+global route
 #-----------------------------------------------------------------------------
 puts "INFO: \[fc_route\] route_auto"

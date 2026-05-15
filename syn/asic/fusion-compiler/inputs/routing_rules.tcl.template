@@ -1,0 +1,69 @@
+#-----------------------------------------------------------------------------
+# Routing-rules TEMPLATE — opt-in, NOT active until copied.
+#
+#   cp inputs/routing_rules.tcl.template inputs/routing_rules.tcl
+#   # then replace every <FILL_IN ...> with the real cln65lp value
+#
+# 4_route.tcl sources inputs/routing_rules.tcl (if present) after setup
+# and before route_auto. This file is the structural alignment with the
+# 28nm full-chip flow's scripts/routing_rules.tcl. It is intentionally a
+# TEMPLATE with placeholders, not numbers: NDR widths/spacings and
+# antenna ratios are PDK/foundry data and must come from the cln65lp
+# routing-rule deck / the 1p9m_6x2z technology file referenced by
+# TF_FILE in syn/asic/common.mk — they are deliberately NOT invented
+# here. sc12 cln65lp at the 970×190 µm partition size routes cleanly on
+# tool defaults, so leaving inputs/routing_rules.tcl absent is the
+# supported default; this template exists so a tighter node / denser
+# block can switch rules on without restructuring 4_route.tcl.
+#
+# Available in scope when sourced: $top_module, $design_lib_name,
+# $fc_dir, $fc_reports (set by 4_route.tcl); a current block is open.
+#-----------------------------------------------------------------------------
+
+# ── 1. Non-default rule for the clock nets ───────────────────────────────
+# Wider/spaced clock routing reduces clock-net RC + crosstalk. Flow B
+# uses an NDR named NDR1 confined to {min M2 .. max M5}. Pick the metal
+# window and the width/spacing multipliers from the cln65lp deck.
+#
+# create_routing_rule CLK_NDR \
+#     -widths        {M2 <FILL_IN_W>  M3 <FILL_IN_W>  M4 <FILL_IN_W>  M5 <FILL_IN_W>} \
+#     -spacings      {M2 <FILL_IN_S>  M3 <FILL_IN_S>  M4 <FILL_IN_S>  M5 <FILL_IN_S>} \
+#     -via_cuts      {default}
+#
+# Confine clock routing to the M2..M5 window and attach the NDR:
+# foreach clk [get_clocks -quiet *] {
+#     set_clock_routing_rule -clock $clk \
+#         -rule CLK_NDR -min_routing_layer M2 -max_routing_layer M5
+# }
+
+# ── 2. Per-layer signal width/spacing overrides (optional) ───────────────
+# Only needed if the default tech width/spacing must be tightened for
+# this block (e.g. EM on the cache HRDATA/HWDATA buses). Values from the
+# cln65lp EM/routing deck.
+#
+# set_routing_rule -default \
+#     -widths   {M3 <FILL_IN_W> M4 <FILL_IN_W>} \
+#     -spacings {M3 <FILL_IN_S> M4 <FILL_IN_S>}
+
+# ── 3. Antenna rules ─────────────────────────────────────────────────────
+# Antenna ratios are foundry data. In this FC/tech setup they normally
+# arrive via the 1p9m_6x2z technology file (TF_FILE) and the antenna
+# rules are enforced automatically by check_routes -antenna (already run
+# in 7_drc.tcl). Only set app options here if the deck requires a
+# non-default diode-insertion / ratio override:
+#
+# set_app_options -name route.detail.antenna_fixing_preference \
+#                  -value <FILL_IN_use_diode|use_jumper>
+# set_app_options -name route.detail.diode_libcell_names \
+#                  -value {<FILL_IN_ANTENNA_DIODE_CELL>}
+
+# ── 4. Via DFM / via mapping (optional) ──────────────────────────────────
+# Flow B does add_via_mapping from a Synopsys DFM-swap Tcl. If a cln65lp
+# DFM-swap deck is available, point at it here:
+#
+# if {[info exists ::env(VIA_MAP_FILE)] && [file exists $::env(VIA_MAP_FILE)]} {
+#     add_via_mapping -from_icc_file $::env(VIA_MAP_FILE)
+# }
+
+puts "INFO: \[routing_rules\] template not customised — nothing applied"
+puts "INFO: \[routing_rules\]   fill in <FILL_IN ...> values to activate"
