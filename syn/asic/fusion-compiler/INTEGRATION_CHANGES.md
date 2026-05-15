@@ -172,3 +172,33 @@ Terminals: 0`) + `check_routes` 52 DRCs. This is the PG-mesh/route
 quality domain — the uncommitted in-progress `pg_mesh.tcl` work (#13),
 not the integration scripts. The new checks correctly *surface* it;
 they don't cause it.
+
+## Validation round 2 — 2026-05-15 (PG repair attempt: negative result)
+
+Re-ran synth→…→drc with two changes under test.
+
+- **SKIP-safety fix (`1899773`) — CONFIRMED working live.** DRC summary
+  now shows `pre_netlist` / `pre_designdata` / `pre_signoff` /
+  `check_placement` as `SKIP "check name absent in this fc_shell build"`
+  instead of the earlier false FAIL/WARN. EMS-035 detection is correct.
+- **Route-DRC (concurrent `4_route.tcl` detail-route/ECO work) —
+  validated:** `check_routes` 52 → **15** DRCs.
+- **PG floating-cell repair (`b5521d3`) — ineffective, REVERTED
+  (`01029bb`).** `connect_pg_net -automatic` + a post rail strategy at
+  synth did **not** reduce floating: 771/517 → 814/487 (~unchanged,
+  marginally worse on VDD). The `02d` snapshot showed 5644 cells at the
+  synth-stage repair vs 7070 by DRC — CTS/route add ~1400 cells *after*
+  any synth-time repair, and the stubborn ~11 % even at synth time
+  proves it is **not** a logical-binding problem (`connect_pg_net`
+  cannot fix it). Corrected root cause: the M1 follow-pin rails are
+  physically trimmed/blocked in the congested `PATH_31_*` band between
+  the macro columns. The real fix is tool-iterative rail-pattern work
+  (rail without `trim`, macro-adjacent rail-blockage handling, or a
+  post-route `route_pg`/rail-repair pass) — it cannot be done blind
+  without `fc_shell` in the loop, so it is correctly left to the
+  `pg_mesh.tcl` owner (#13) rather than shipped as a non-fix.
+
+Net DRC gate: 829 violations, now almost entirely
+`check_pg_connectivity` (814) — `check_routes` is down to 15 and the
+phantom tier-0/1b FAILs are gone. The remaining blocker is one genuine
+PG-mesh problem, precisely characterised above.
