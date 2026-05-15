@@ -83,7 +83,7 @@ proc run_check_adv {name body} {
     puts "INFO: \[fc_drc\] $name -> $rpt (advisory)"
     set rc 0
     if {[catch {redirect -tee -file $rpt $body} err]} {
-        if {[regexp -nocase {unknown|not a valid|unsupported|no such|invalid (option|value)|illegal} $err]} {
+        if {[regexp -nocase {unknown|not a (valid|supported|recognized|known)|unsupported|no such|invalid (option|value|check)|illegal|is not a check} $err]} {
             puts "WARN: \[fc_drc\] $name unsupported in this fc_shell build — SKIP ($err)"
             set rc 2
         } else {
@@ -101,16 +101,25 @@ proc run_check_adv {name body} {
 # late: a floating/multi-driver net that survives to chip-top LVS, an
 # unconstrained boundary path the partition never timed, or a block that
 # isn't structurally abstract-ready. They run BEFORE the heavier tier-1
-# geometric checks so a structurally-broken block fails fast. All are
-# advisory w.r.t. the integration gate (tool-version rule-name drift
-# must not block) EXCEPT netlist_pre_check, which is a hard gate — a
-# multi-driver / undriven net is a real LEC+LVS hazard.
+# geometric checks so a structurally-broken block fails fast.
+#
+# Runner vs gate: EVERY tier-0/tier-1b check uses run_check_adv so an
+# atomic-rule name this fc_shell build doesn't recognise SKIPs (rc=2)
+# instead of FAILing — tool-version rule-name drift must never falsely
+# block integration. The hard-vs-advisory distinction lives entirely in
+# summarise_check (does a *real* violation count toward the gate), NOT
+# in which runner is used. Multi-rule check_design calls are split into
+# one rule per call so a single unknown name can't take down a sibling
+# rule. netlist_pre_check + design_data are the hard ones here (a
+# multi-driver / undriven net is a real LEC+LVS hazard); pre_signoff /
+# pre_timing are advisory.
 #-----------------------------------------------------------------------------
 puts "INFO: \[fc_drc\] tier 0 — structural / constraint pre-checks"
 
-run_check     pre_netlist   {check_design -checks {netlist_pre_check design_data}}
-run_check_adv pre_signoff   {check_design -checks {pre_signoff_stage}}
-run_check_adv pre_timing    {check_timing}
+run_check_adv pre_netlist    {check_design -checks {netlist_pre_check}}
+run_check_adv pre_designdata {check_design -checks {design_data}}
+run_check_adv pre_signoff    {check_design -checks {pre_signoff_stage}}
+run_check_adv pre_timing     {check_timing}
 
 #-----------------------------------------------------------------------------
 # Tier 1 — In-design checks
@@ -155,13 +164,15 @@ run_check check_routes          {check_routes -open_net true -drc true -antenna 
 #                     polarity / cross-domain) — informational at
 #                     partition level, chip-top re-balances skew.
 # placement + mv_design + pin_placement are hard gates (real abutment
-# hazards); clock_trees is advisory.
+# hazards); clock_trees is advisory. As in tier 0, all use run_check_adv
+# (unknown-name → SKIP, not a false block); the gate is in
+# summarise_check.
 #-----------------------------------------------------------------------------
 puts "INFO: \[fc_drc\] tier 1b — placement-legality / handoff checks"
 
-run_check     check_placement     {check_design -checks {placement}}
-run_check     check_mv_design     {check_design -checks {mv_design}}
-run_check     check_pin_placement {check_pin_placement}
+run_check_adv check_placement     {check_design -checks {placement}}
+run_check_adv check_mv_design     {check_design -checks {mv_design}}
+run_check_adv check_pin_placement {check_pin_placement}
 run_check_adv check_clock_trees   {check_clock_trees}
 
 #-----------------------------------------------------------------------------
@@ -362,6 +373,7 @@ if {[info exists drc_results(signoff_drc)]} {
 # without blocking integration.
 puts $sfp "  ----------------------  -------  --------------------------------"
 summarise_check pre_netlist         1
+summarise_check pre_designdata      1
 summarise_check pre_signoff         0
 summarise_check pre_timing          0
 summarise_check check_placement     1
