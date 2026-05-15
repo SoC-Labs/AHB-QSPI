@@ -271,6 +271,23 @@ proc summarise_check {name hard} {
         summarise $name "SKIP" "unsupported in this fc_shell build" 0
         return
     }
+    # fc_shell reports an unrecognised check_design rule name via the EMS
+    # stream — `Error: "<name>" is not a valid check name. (EMS-035)` —
+    # NOT as a Tcl error, so run_check_adv's catch never fires (rc stays
+    # 0) and the rule-name-drift SKIP path is missed. Detect that
+    # signature in the report itself and classify SKIP: this build simply
+    # does not carry that atomic check, which must never block
+    # integration or inflate the violation count (live-run finding —
+    # netlist_pre_check / design_data / placement / pre_signoff_stage are
+    # absent in FS-COMPILER_2022.12; valid here: timing, pin_placement,
+    # clock_trees, mv_design).
+    if {[file exists $rpt]} {
+        set _fp [open $rpt r]; set _txt [read $_fp]; close $_fp
+        if {[regexp {is not a valid check name|\(EMS-035\)} $_txt]} {
+            summarise $name "SKIP" "check name absent in this fc_shell build" 0
+            return
+        }
+    }
     set ems [grep_count $rpt {Total \d+ EMS messages\s*:\s*(\d+) errors?}]
     if {$ems != -1} {
         if {$ems == 0} {
