@@ -97,6 +97,37 @@ behaviour. LEC compatibility is instead covered properly by `fc_lec`
    showing `SKIP` means that command/rule name differs in this build —
    adjust the name, it is not a design problem.
 2. `make fc_abstract` → check `reports/06_abstract_manifest.txt` for the
-   SPEF/UPF rows; a SPEF "write failed" warning means signoff-stage RC
-   extraction must be added to `5_signoff.tcl`.
-3. `make fc_lec` (or `fc_all`).
+   SPEF/UPF rows; a SPEF "write failed" warning now means
+   `extract_parasitics` itself failed (it is wired into `5_signoff.tcl`).
+3. `make fc_lec` (or `fc_all`); then `make fc_etm` (scaffold).
+4. `syn/asic/scripts/verify_partition_handoff.sh` — re-hash the drop.
+
+## Follow-on round 1 — implemented (still not silicon-validated)
+
+Same verification caveat as above: Tcl `info complete`, `bash -n`,
+`make -n`, YAML parse, and a **functional test of the verify script**;
+no live `fc_shell`/`pt_shell` run.
+
+- **#3 signoff RC** — `5_signoff.tcl` now runs `extract_parasitics`
+  before QoR/save and **`exit 1` (no `FC_STAGE_OK`) if it fails**, so a
+  stale-RC signoff block can't slip through and stage-6 SPEF has data.
+- **#2 SKIP-safe checks** — every tier-0/1b check uses `run_check_adv`
+  (unknown rule → SKIP, never a false block); multi-rule `check_design`
+  calls split one-rule-per-call (`pre_netlist` + `pre_designdata`);
+  unknown-name regex broadened. Hard/advisory gate stays in
+  `summarise_check`.
+- **#10 hand-off verify** — `syn/asic/scripts/verify_partition_handoff.sh`
+  re-hashes every delivered file vs the manifest and surfaces hold/min
+  coverage. Functionally tested (OK/FAIL/WARN/coverage, exit 1 on
+  mismatch).
+- **#5 ETM** — `syn/asic/primetime/` (mirrors the formality tree:
+  sentinel + `PT_ETM_OK` grep), one ETM per delivered corner; `fc_etm`
+  delegates to it. **Scaffold, deliberately NOT in `fc_all`.**
+- **#11 CI** — opt-in `fc-pnr-lec-tsmc65` job (manual, gated on
+  `RUN_FC_PNR`, `allow_failure`) runs `fc_all` + the verify script.
+  Promotion path to a hard gate documented inline.
+
+Deferred (need a live tool / other people, not script work): #1 live
+run, re-enabling clock gating (#4), IR-drop/EM signoff (#6), GDS LVS
+(#7), `make mem_ff_db` for scen_fast (#8), per-corner SDC (#9),
+`pg_mesh.tcl` coordination (#13), boundary-UPF review (#14).
