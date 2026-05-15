@@ -131,3 +131,44 @@ Deferred (need a live tool / other people, not script work): #1 live
 run, re-enabling clock gating (#4), IR-drop/EM signoff (#6), GDS LVS
 (#7), `make mem_ff_db` for scen_fast (#8), per-corner SDC (#9),
 `pg_mesh.tcl` coordination (#13), boundary-UPF review (#14).
+
+## Live validation — 2026-05-15 (supersedes the "not silicon-validated" caveat)
+
+A clean serial `make fc_all` completed end-to-end (16:18→16:35): all
+seven stages reached `FC_STAGE_OK`, **both `scen_fast` + `scen_slow`
+corners active** (so #8 is effectively done — `MEM_DBS_FF` is populated
+and the multi-corner SDF/SPEF path is live).
+
+**Confirmed working on the live run:**
+- **#3** signoff passed. Note: `extract_parasitics` does **not** exist
+  in `fc_shell` (`CMD-005`); `5_signoff.tcl` now uses `update_timing
+  -full`. The `exit 1`-no-`FC_STAGE_OK` guard correctly caught the bad
+  command on the first attempt — the sentinel design works.
+- **#10** `verify_partition_handoff.sh` → `RESULT: PASS, OK=20 WARN=0
+  FAIL=0` against the real drop (parsed the enriched manifest incl. all
+  multi-corner SPEF).
+- **LEC** `FM_LEC_OK: top_ahb_qspi` — `fc_lec` delegation works, RTL ≡
+  netlist.
+- **#1** the manifest is the enriched format (source block, SHA256,
+  roles, scenario coverage); `.upf` (save_upf) produced.
+
+**Found and fixed (live-run findings):**
+- **#2 had a real hole:** `check_design` reports an unknown rule via the
+  EMS stream (`EMS-035 "is not a valid check name"`), *not* a Tcl error,
+  so `run_check_adv`'s `catch` never fired — `netlist_pre_check`,
+  `design_data`, `placement`, `pre_signoff_stage` were misreported
+  FAIL/WARN instead of SKIP. `summarise_check` now detects the EMS-035
+  signature in the report and classifies SKIP. Valid in this build:
+  `check_timing`, `check_pin_placement`, `check_clock_trees`,
+  `mv_design`. Mapping the absent names to real equivalents needs
+  `check_design -help` on the tool (tuning follow-up, not fabricated).
+- Manifest role-map: `write_gds -compress` → `.gds.gz`,
+  `write_parasitics` → per-RC-corner `.spef` + `.spef_scenario` index;
+  added explicit role keys.
+
+**Genuinely outstanding (not my code):** DRC `RESULT: 823 violations`,
+dominated by `check_pg_connectivity` 768 floating std-cells (`VDD
+Terminals: 0`) + `check_routes` 52 DRCs. This is the PG-mesh/route
+quality domain — the uncommitted in-progress `pg_mesh.tcl` work (#13),
+not the integration scripts. The new checks correctly *surface* it;
+they don't cause it.
