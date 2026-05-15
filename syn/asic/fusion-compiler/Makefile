@@ -56,6 +56,7 @@ SIGNOFF_DONE   = $(FC_WORK)/.signoff.done
 DRC_DONE       = $(FC_WORK)/.drc.done
 ABSTRACT_DONE  = $(FC_WORK)/.abstract.done
 LEC_DONE       = $(FC_WORK)/.lec.done
+ETM_DONE       = $(FC_WORK)/.etm.done
 
 FC_SHELL = fc_shell
 
@@ -63,9 +64,14 @@ FC_SHELL = fc_shell
 # implementation (run_lec.tcl), not a duplicate inside the FC flow.
 FM_FLOW_DIR = $(SOCLABS_AHB_QSPI_DIR)/syn/asic/formality
 
+# Sibling PrimeTime tree — fc_etm delegates here for the boundary
+# timing model fc_shell U-2022.12 cannot write (no write_lib_model
+# -format etm). SCAFFOLD: not yet silicon-validated.
+PT_FLOW_DIR = $(SOCLABS_AHB_QSPI_DIR)/syn/asic/primetime
+
 .PHONY: fc fc_all fc_init fc_synth fc_cts fc_route fc_signoff fc_drc \
-        fc_abstract fc_lec drc_summary mem_ff_db gui clean help dirs \
-        fusion_lib
+        fc_abstract fc_lec fc_etm drc_summary mem_ff_db gui clean help \
+        dirs fusion_lib
 
 # ── Workspace setup ───────────────────────────────────────────────────────
 dirs:
@@ -204,6 +210,21 @@ $(LEC_DONE): $(ABSTRACT_DONE)
 
 fc_lec: $(LEC_DONE)
 
+# ── PrimeTime ETM (post-export) ───────────────────────────────────────────
+# Boundary timing model — depends on the same fc_abstract products LEC
+# uses (gate netlist + per-scenario SPEF + boundary SDC). Delegates to
+# the sibling PrimeTime Makefile (PT_ETM_OK marker enforced there), so a
+# failed extraction does not touch the sentinel. NOT in fc_all: it is an
+# unverified scaffold and an optional, heavy deliverable — run it
+# explicitly (`make fc_etm`) once validated, or fold into a future
+# `fc_deliver` aggregate.
+$(ETM_DONE): $(ABSTRACT_DONE)
+	@echo "INFO: [Phase 7b] PrimeTime ETM — boundary timing model"
+	$(MAKE) -C $(PT_FLOW_DIR) etm
+	@touch $@
+
+fc_etm: $(ETM_DONE)
+
 # Full flow (through partition export — matches the historical `fc`)
 fc: fc_abstract
 	@echo ""
@@ -263,6 +284,9 @@ help:
 	@echo "                                   per-scenario SDF+SPEF + manifest"
 	@echo "  make fc_lec                    - Formality LEC (delegates to"
 	@echo "                                   ../formality; needs fc_abstract)"
+	@echo "  make fc_etm                    - PrimeTime boundary ETM (delegates"
+	@echo "                                   to ../primetime; SCAFFOLD, not in"
+	@echo "                                   fc_all; needs fc_abstract+SPEF)"
 	@echo "  make fusion_lib                - Build fusion ref lib only"
 	@echo "  make mem_ff_db                 - Build FF mem .db (enables scen_fast"
 	@echo "                                   -> multi-corner SDF/SPEF + hold)"
