@@ -32,6 +32,29 @@ source ${fc_dir}/scripts/setup.tcl
 source ${fc_dir}/scripts/setup_design_options.tcl
 
 #-----------------------------------------------------------------------------
+# Signoff-quality parasitic extraction. Two reasons this must run here:
+#   1. The per-scenario QoR below is only trustworthy on real extracted
+#      RC — without this, report_timing uses the estimated/virtual-route
+#      parasitics carried over from route.design.
+#   2. 6_partition_export.tcl's write_parasitics (per-scenario SPEF) has
+#      nothing to emit unless the signoff block carries extracted
+#      parasitics; the SPEF guard there would otherwise downgrade to a
+#      warning and the integrator would have to re-flat-extract through
+#      the block.
+# TLU+ models + per-corner early/late specs were already bound in the
+# shared FC.read_design.tcl (read_parasitic_tech / set_parasitic_
+# parameters), so extract_parasitics here covers every active corner.
+# Guarded: a missing TLU+ / extraction failure must not silently produce
+# a signoff block with stale RC — fail the stage loudly instead.
+puts "INFO: \[fc_signoff\] extract_parasitics (signoff RC for QoR + SPEF)"
+if {[catch {extract_parasitics} ep_err]} {
+    puts "ERROR: \[fc_signoff\] extract_parasitics failed: $ep_err"
+    puts "ERROR: \[fc_signoff\] signoff QoR + exported SPEF would be on stale"
+    puts "ERROR: \[fc_signoff\] route-estimate RC — not touching FC_STAGE_OK."
+    exit 1
+}
+
+#-----------------------------------------------------------------------------
 # Final timing / area / power QoR — per-scenario, both setup and hold.
 # Without an explicit current_scenario / -delay_type loop, report_qor
 # only emits the current-scenario setup view; we'd lose visibility on
