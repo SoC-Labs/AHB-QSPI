@@ -152,10 +152,18 @@ array set deliverable_role {
     .lef   "physical abstract — chip-top placement footprint"
     .upf   "boundary power intent — chip-top supply-set wiring"
     .gds   "merged stream-out — chip-finish / signoff DRC / LVS"
+    .gds.gz "merged stream-out (gzip) — chip-finish / signoff DRC / LVS"
+    .spef_scenario "SPEF corner index — maps the per-RC-corner .spef set"
 }
+# write_parasitics expands one -output into a .spef per RC corner
+# (rcbest/rcworst × temp) plus a .spef_scenario index — live-run fact.
+# The per-corner files still end in .spef so they match the .spef role;
+# only the .gz GDS and the .spef_scenario index needed explicit keys.
+# Check the compound suffixes (.gds.gz, .spef_scenario, .pg.v) before
+# their bare forms so the more specific role wins.
 proc deliverable_role_for {fname} {
     global deliverable_role
-    foreach suf {.pg.v .spef .sdf .gds .lef .def .sdc .upf .v} {
+    foreach suf {.gds.gz .spef_scenario .pg.v .spef .sdf .gds .lef .def .sdc .upf .v} {
         if {[string match "*${suf}" $fname]} {
             if {[info exists deliverable_role($suf)]} {
                 return $deliverable_role($suf)
