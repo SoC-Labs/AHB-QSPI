@@ -119,23 +119,44 @@ _maybe_fqdn() {
     echo "$target"                              # give up; let SSH fail loudly
 }
 
+_host_reachable() {
+    # _host_reachable user@host[:port] — quick TCP-connect probe
+    # (default port 22). Used to decide whether a daemon-supplied SSH
+    # jump host is usable from *this* client before we commit to it.
+    # An unroutable private-subnet proxy fails fast here so we can
+    # fall back to the dev host instead of hanging on banner exchange.
+    local t="${1#*@}" host port
+    host="${t%%:*}"
+    if [ "$t" = "$host" ]; then port=22; else port="${t##*:}"; fi
+    [ -n "$host" ] || return 1
+    timeout 4 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null
+}
+
 resolve_env_for() {
     # Populate PYNQ_HOST / PYNQ_PROXY / PYNQ_DEV_HOST from board status.
-    # Board IPs typically live on a private per-board subnet on the
-    # daemon host, so when host_proxy is empty we transparently fall
-    # back to host_dev_host as the SSH jump host. Operators can still
-    # override with PYNQ_PROXY= in the calling environment.
+    # Proxy precedence: (1) an explicit PYNQ_PROXY= in the calling
+    # environment always wins; (2) else the daemon's host_proxy iff it
+    # is actually reachable from this client; (3) else host_dev_host.
+    # Step (2)'s probe is what rescues off-subnet clients when the
+    # daemon hands back a private per-board jump (e.g. pynq_z2_02_pl ->
+    # david@192.168.4.1) that only routes from the daemon host itself.
     local name="$1"
-    local json
+    local json want_proxy cfg_proxy dev_host
+    want_proxy="${PYNQ_PROXY:-}"
     json=$(fpgahub board status "$name" --json) || return 1
     PYNQ_HOST=$(_json_get "$json" host_ssh)
-    PYNQ_PROXY=$(_json_get "$json" host_proxy)
-    PYNQ_DEV_HOST=$(_json_get "$json" host_dev_host)
-    if [ -z "$PYNQ_PROXY" ] && [ -n "$PYNQ_DEV_HOST" ]; then
-        PYNQ_PROXY="$PYNQ_DEV_HOST"
+    cfg_proxy=$(_maybe_fqdn "$(_json_get "$json" host_proxy)")
+    dev_host=$(_maybe_fqdn "$(_json_get "$json" host_dev_host)")
+    if [ -n "$want_proxy" ]; then
+        PYNQ_PROXY=$(_maybe_fqdn "$want_proxy")
+    elif [ -n "$cfg_proxy" ] && _host_reachable "$cfg_proxy"; then
+        PYNQ_PROXY="$cfg_proxy"
+    elif [ -n "$dev_host" ]; then
+        PYNQ_PROXY="$dev_host"
+    else
+        PYNQ_PROXY="$cfg_proxy"
     fi
-    PYNQ_PROXY=$(_maybe_fqdn "$PYNQ_PROXY")
-    PYNQ_DEV_HOST=$(_maybe_fqdn "$PYNQ_DEV_HOST")
+    PYNQ_DEV_HOST="$dev_host"
     export PYNQ_HOST PYNQ_PROXY PYNQ_DEV_HOST
 }
 
@@ -177,9 +198,17 @@ list_capability_boards() {
 
 try_lease() {
     # Try one acquire. Echoes the token to stdout on success, nothing
-    # on failure. Caller already saw stderr.
+    # on failure. Caller already saw stderr. If the board is a chiplet-
+    # bridge pair member the daemon answers 409 pair_required; the QSPI
+    # flash smoke never uses the inter-board bridge, so we retry once
+    # with --solo (only the named die is leased, partner stays free).
     local name="$1" out
-    out=$(fpgahub lease acquire "$name" --ttl "$TTL" 2>&1) || return 1
+    if ! out=$(fpgahub lease acquire "$name" --ttl "$TTL" 2>&1); then
+        case "$out" in
+            *pair_required*) out=$(fpgahub lease acquire "$name" --solo --ttl "$TTL" 2>&1) || return 1 ;;
+            *) return 1 ;;
+        esac
+    fi
     # Expected: "granted token=ABC expires=YYYY-MM-DDThh:mm:ssZ"
     echo "$out" | sed -n 's/.*token=\([^ ]*\).*/\1/p'
 }
