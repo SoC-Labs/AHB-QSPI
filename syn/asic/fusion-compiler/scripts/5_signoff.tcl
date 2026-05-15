@@ -9,6 +9,18 @@ set design_lib_name  "${top_module}.dlib"
 set fc_dir           $::env(FC_DIR)
 set fc_logs          $::env(FC_LOGS)
 set fc_reports       $::env(FC_REPORTS)
+set fc_outputs       $::env(FC_OUTPUTS)
+
+# SVF for signoff — closes the per-stage SVF chain that
+# formality/scripts/run_lec.tcl walks (init→synth→cts→route→signoff).
+# run_lec.tcl globs ${top}.signoff.svf; if this stage never names one,
+# the signoff slot is silently dropped and any signoff-stage ECO / cell
+# substitution becomes an unguided LEC mismatch. Signoff does no
+# remapping today so the file is usually empty, but it MUST exist and be
+# named before the block is opened so future signoff ECO fixes are
+# captured in the LEC guidance.
+file mkdir ${fc_outputs}/svf
+set_svf ${fc_outputs}/svf/${top_module}.signoff.svf
 
 #-----------------------------------------------------------------------------
 # Open the post-route checkpoint
