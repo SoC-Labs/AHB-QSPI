@@ -1,0 +1,102 @@
+# Partition-flow integration changes
+
+Companion to `FLOW_COMPARISON.md`. Implements the three asks: close the
+chip-top integration gaps, align the 65 nm partition flow with the 28 nm
+full-chip flow where it makes sense, and add placement-legality checks.
+
+## Verification status — read this first
+
+These changes were **not executed** — `fc_shell` / `fm_shell` and the
+cln65lp PDK are not available in the editing environment. What *was*
+verified:
+
+- **Tcl structural validity**: all edited scripts pass `info complete`
+  (balanced braces/brackets/quotes).
+- **Makefile**: `make -n fc_all` parses and the dependency graph
+  (`…→fc_abstract→fc_lec`, cross-delegation to `../formality`) resolves.
+
+What is **not** verified and must be checked on a real run: fc_shell
+command/option spelling for this 2022.12 build (esp. `write_parasitics`,
+`save_upf`, the new `check_design` rule names, `check_pin_placement`,
+`check_clock_trees`). Every new command is wrapped so a name/option
+mismatch **degrades to a WARNING/SKIP, not a stage failure** — but the
+intended behaviour still needs a live run to confirm.
+
+No fabricated PDK/foundry data was introduced anywhere (see routing
+rules below).
+
+## 1. Chip-top integration gaps
+
+| Change | File | Notes |
+|--|--|--|
+| Signoff-stage SVF named | `scripts/5_signoff.tcl` | Closes the `init→synth→cts→route→signoff` SVF chain `formality/scripts/run_lec.tcl` walks; signoff slot was silently dropped before. |
+| GDS stream-out | `scripts/6_partition_export.tcl` | Already wired (concurrent edit) to the `GDS_*` vars that were already in `common.mk`; verified consistent. |
+| Per-scenario SDF | `scripts/6_partition_export.tcl` | Was hardcoded `scen_slow`. Now loops `active==true` scenarios; emits `${top}.${scen}.sdf` + a slow-biased `${top}.sdf` alias. Automatically multi-corner once `scen_fast` exists. |
+| Per-scenario SPEF | `scripts/6_partition_export.tcl` | New `write_parasitics` per scenario so chip-top does real hierarchical STA instead of re-flat-extracting. Guarded (missing extraction → warning). |
+| Boundary UPF | `scripts/6_partition_export.tcl` | New `save_upf` so a multi-Vdd chip-top sees the block's supply-set / single PD_TOP / absence of isolation-retention. Guarded. |
+| Manifest provenance | `scripts/6_partition_export.tcl` | Source block, timestamp, scenario coverage (+ explicit "no scen_fast → hold not covered"), SHA256 per file, per-artefact role string. |
+
+**Not done — ETM.** `write_lib_model -format etm` is genuinely
+unavailable in fc_shell 2022.12 (pre-existing NOTE in the script is
+correct). The proper fix is a downstream PrimeTime `extract_model`
+stage; that needs PT and is out of scope for a script edit. The `.dlib`
+block + the new per-scenario SPEF/SDF give the integrator a working
+hierarchical-STA path in the meantime.
+
+## 2. Flow alignment (65 nm partition ↔ 28 nm full-chip)
+
+- **In-flow LEC**: new `fc_lec` + `fc_all` Makefile targets. `fc_lec`
+  **delegates** to the existing `syn/asic/formality` Makefile (which
+  already enforces the `FM_LEC_OK` marker) rather than duplicating
+  match/verify — one LEC implementation. `fc` is unchanged (PnR-only,
+  for sites without Formality); `fc_all = fc + fc_lec` is the CI /
+  tape-in target. Mirrors Flow B's stage-6 Formality.
+- **Routing-rules hook**: `4_route.tcl` now sources
+  `inputs/routing_rules.tcl` if present (after setup, before
+  `route_auto`), structurally matching Flow B's `routing_rules.tcl`.
+  Off by default (sc12 cln65lp routes clean on defaults).
+- **Multi-corner**: not a new mechanism — the flow already auto-creates
+  `scen_fast` when `MEM_DBS_FF` is populated (`make mem_ff_db`). The
+  export/QoR/DRC changes now *propagate* that second corner instead of
+  hardcoding slow. Documented in `make help` and the manifest. No hold
+  corner was fabricated.
+
+Makefile `help` updated for all new targets/vars; `clean` already covers
+the new artefacts (all under `FC_WORK`/`FC_OUTPUTS`).
+
+## 3. Placement-legality checks (`scripts/7_drc.tcl`)
+
+New **tier 0** (structural/constraint pre-checks, fail-fast before the
+heavy geometric tier 1):
+
+- `pre_netlist` = `check_design {netlist_pre_check design_data}` — **hard
+  gate** (multi-driver/undriven nets are real LEC+LVS hazards).
+- `pre_signoff` = `check_design {pre_signoff_stage}` — advisory.
+- `pre_timing` = `check_timing` — advisory (chip-top reconstrains).
+
+New **tier 1b** (per-aspect handoff legality):
+
+- `check_placement` = `check_design {placement}` — **hard** (proves no
+  std cell crept inside the `place_memories.tcl` macro keepouts).
+- `check_mv_design` = `check_design {mv_design}` — **hard** (asserts no
+  stray MV constructs before a multi-Vdd chip-top wraps the block).
+- `check_pin_placement` — **hard** (boundary pins on-track / abuttable).
+- `check_clock_trees` — advisory.
+
+Summary table extended (`summarise_check`, EMS-aware with rc fallback);
+hard checks count toward the integration gate, advisory ones report
+WARN/SKIP and never block. `check_lec_compatibility` and
+`block_abstract_ready` were **deliberately not added** — they are not
+real fc_shell atomic check names; inventing them would fabricate tool
+behaviour. LEC compatibility is instead covered properly by `fc_lec`
+(real RTL-vs-netlist Formality).
+
+## Suggested validation order on a real run
+
+1. `make fc_drc` → inspect `reports/07_summary.rep`: any new check
+   showing `SKIP` means that command/rule name differs in this build —
+   adjust the name, it is not a design problem.
+2. `make fc_abstract` → check `reports/06_abstract_manifest.txt` for the
+   SPEF/UPF rows; a SPEF "write failed" warning means signoff-stage RC
+   extraction must be added to `5_signoff.tcl`.
+3. `make fc_lec` (or `fc_all`).
