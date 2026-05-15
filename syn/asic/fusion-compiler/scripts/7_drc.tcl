@@ -71,6 +71,47 @@ proc run_check {name body} {
     set drc_results($name) [list $rc $rpt]
 }
 
+# Advisory variant. Same redirect/capture, but if the command failed
+# because the check name / option isn't recognised in THIS fc_shell
+# build (the atomic check_design rule set drifts across releases),
+# record rc=2 ("SKIP") instead of rc=1 ("FAIL"). A partition must not be
+# declared not-ready-for-integration just because a tool version spells
+# a rule differently — but a genuine violation (rc=1) still blocks.
+proc run_check_adv {name body} {
+    global fc_reports drc_results
+    set rpt ${fc_reports}/07_${name}.rep
+    puts "INFO: \[fc_drc\] $name -> $rpt (advisory)"
+    set rc 0
+    if {[catch {redirect -tee -file $rpt $body} err]} {
+        if {[regexp -nocase {unknown|not a valid|unsupported|no such|invalid (option|value)|illegal} $err]} {
+            puts "WARN: \[fc_drc\] $name unsupported in this fc_shell build — SKIP ($err)"
+            set rc 2
+        } else {
+            puts "WARN: \[fc_drc\] $name raised an error: $err"
+            set rc 1
+        }
+    }
+    set drc_results($name) [list $rc $rpt]
+}
+
+#-----------------------------------------------------------------------------
+# Tier 0 — lightweight pre-checks (structural / constraint / readiness).
+#
+# These are cheap and catch the failure modes that bite an integrator
+# late: a floating/multi-driver net that survives to chip-top LVS, an
+# unconstrained boundary path the partition never timed, or a block that
+# isn't structurally abstract-ready. They run BEFORE the heavier tier-1
+# geometric checks so a structurally-broken block fails fast. All are
+# advisory w.r.t. the integration gate (tool-version rule-name drift
+# must not block) EXCEPT netlist_pre_check, which is a hard gate — a
+# multi-driver / undriven net is a real LEC+LVS hazard.
+#-----------------------------------------------------------------------------
+puts "INFO: \[fc_drc\] tier 0 — structural / constraint pre-checks"
+
+run_check     pre_netlist   {check_design -checks {netlist_pre_check design_data}}
+run_check_adv pre_signoff   {check_design -checks {pre_signoff_stage}}
+run_check_adv pre_timing    {check_timing}
+
 #-----------------------------------------------------------------------------
 # Tier 1 — In-design checks
 #-----------------------------------------------------------------------------
@@ -93,6 +134,35 @@ run_check check_pg_connectivity {check_pg_connectivity}
 # PG geometry (verified via the same invocation in fc_shell).
 run_check check_pg_drc          {check_pg_drc -do_not_check_shapes_in_lib_cells -ignore_std_cells}
 run_check check_routes          {check_routes -open_net true -drc true -antenna true -report_all_open_nets true}
+
+#-----------------------------------------------------------------------------
+# Tier 1b — extra placement-legality / handoff checks.
+#
+# The bundled check_design above runs `legality` + `pin_placement` as
+# part of a multi-rule call whose pass/fail collapses into one EMS
+# count. These standalone invocations give the integrator per-aspect
+# visibility on the things that specifically break hierarchical abutment:
+#   placement      — halo/keepout/overlap legality beyond row-legality
+#                     (the split-column macro layout in place_memories.tcl
+#                      sets hard+soft keepouts; this proves no std cell
+#                      crept inside them post-route_opt)
+#   mv_design      — power-domain consistency. Single PD_TOP today, but
+#                     running it asserts the block carries no stray MV
+#                     constructs before a multi-Vdd chip-top wraps it.
+#   pin_placement  — boundary pins on-track / abuttable by chip-top
+#                     routing (standalone -> per-pin detail)
+#   clock_trees    — clock-tree structural integrity (no comb loops /
+#                     polarity / cross-domain) — informational at
+#                     partition level, chip-top re-balances skew.
+# placement + mv_design + pin_placement are hard gates (real abutment
+# hazards); clock_trees is advisory.
+#-----------------------------------------------------------------------------
+puts "INFO: \[fc_drc\] tier 1b — placement-legality / handoff checks"
+
+run_check     check_placement     {check_design -checks {placement}}
+run_check     check_mv_design     {check_design -checks {mv_design}}
+run_check     check_pin_placement {check_pin_placement}
+run_check_adv check_clock_trees   {check_clock_trees}
 
 #-----------------------------------------------------------------------------
 # Tier 2 — ICV signoff DRC (opt-in)
@@ -171,6 +241,41 @@ proc summarise {name status detail count} {
     global sfp total_violations
     puts $sfp [format "  %-22s  %-7s  %s" $name $status $detail]
     incr total_violations $count
+}
+
+# Generic summariser for the tier-0 / tier-1b checks. Most are
+# check_design-based and share the EMS-summary line, so parse that when
+# present; otherwise fall back to the run_check return code. `hard`
+# selects whether a non-clean result counts toward the integration gate
+# (total_violations) or is reported WARN-only. rc==2 means the check
+# isn't supported in this fc_shell build → SKIP, never blocks.
+proc summarise_check {name hard} {
+    global fc_reports drc_results
+    if {![info exists drc_results($name)]} {
+        summarise $name "n/a" "not run" 0
+        return
+    }
+    lassign $drc_results($name) rc rpt
+    if {$rc == 2} {
+        summarise $name "SKIP" "unsupported in this fc_shell build" 0
+        return
+    }
+    set ems [grep_count $rpt {Total \d+ EMS messages\s*:\s*(\d+) errors?}]
+    if {$ems != -1} {
+        if {$ems == 0} {
+            summarise $name "PASS" "0 EMS errors" 0
+        } else {
+            summarise $name [expr {$hard ? "FAIL" : "WARN"}] \
+                      "$ems EMS errors" [expr {$hard ? $ems : 0}]
+        }
+        return
+    }
+    if {$rc == 0} {
+        summarise $name "PASS" "completed — see [file tail $rpt]" 0
+    } else {
+        summarise $name [expr {$hard ? "FAIL" : "WARN"}] \
+                  "see [file tail $rpt]" [expr {$hard ? 1 : 0}]
+    }
 }
 
 # check_design — EMS message summary line: "Total N EMS messages : E errors, W warnings, I info."
@@ -252,9 +357,22 @@ if {[info exists drc_results(signoff_drc)]} {
     }
 }
 
+# Tier-0 / tier-1b checks. Hard gates (real abutment / LVS / LEC
+# hazards) count toward total_violations; advisory ones report WARN/SKIP
+# without blocking integration.
+puts $sfp "  ----------------------  -------  --------------------------------"
+summarise_check pre_netlist         1
+summarise_check pre_signoff         0
+summarise_check pre_timing          0
+summarise_check check_placement     1
+summarise_check check_mv_design     1
+summarise_check check_pin_placement 1
+summarise_check check_clock_trees   0
+
 puts $sfp "================================================================="
 if {$total_violations == 0} {
     puts $sfp " RESULT: CLEAN — partition ready for chip-top integration"
+    puts $sfp "         (WARN/SKIP rows are advisory — review before tape-in)"
 } else {
     puts $sfp " RESULT: $total_violations violation(s) — see individual reports"
 }
