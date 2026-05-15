@@ -202,3 +202,66 @@ Net DRC gate: 829 violations, now almost entirely
 `check_pg_connectivity` (814) — `check_routes` is down to 15 and the
 phantom tier-0/1b FAILs are gone. The remaining blocker is one genuine
 PG-mesh problem, precisely characterised above.
+
+## PG floating-cell deep-dive — definitive diagnosis + hand-off
+
+Read-only tool probes of the saved `signoff.design`/`drc.design` blocks
+settled what the report alone could not:
+
+- **It is 100 % physical, 0 % logical.** Querying every leaf cell's
+  PG-pin nets directly: **0 cells are logically floating** — all 7070
+  *are* tied to VDD/VSS. `check_pg_connectivity`'s returned collection
+  is **floating *wires*** (VDD 36, VSS 22), not cells; the `{PATH_31_*}`
+  in the report are wire-path names, never cell instances.
+- **Mechanism:** `pg_mesh.tcl` runs `compile_pg` at **init, before
+  placement/route**. M1 follow-pin rails exist at every row-Y
+  (9.9→177.9 µm) but, in the macro-fragmented central std-cell channel
+  (data RAMs L x≈5–317 / R x≈653–965; tag RAMs centred y≈74.7–115.2),
+  ~36/22 rail segments never get a via stack up to the 50 µm-pitch
+  M5/M6 mesh. Every std cell on an orphaned segment is reported floating
+  → 814 VDD / 487 VSS.
+
+**Three tool-validated fix attempts, all ineffective (all reverted /
+never committed):**
+
+1. Post-placement `connect_pg_net` + M1-only rebuild (synth): no change
+   — there is no logical problem to fix.
+2. Post-route `compile_pg -strategies {rail_strategy …}`: the init-stage
+   strategies **do not persist** across `save_block`/`open_block`;
+   command errored, guard no-op'd it.
+3. Post-route **inline-recreated** patterns+strategies + `compile_pg`:
+   partially ran ("Creating via shapes for strategies mesh_strategy_so")
+   then **errored mid-run** before completing rail/connect; floating
+   cells unchanged (814/487), floating *wires got worse* (36→72 /
+   22→44). Net-negative.
+
+**Conclusion — needs interactive ownership, not more non-interactive
+trial-and-error.** Each attempt is a ~6 min batch run and #3 proved
+`compile_pg` aborts part-way post-route for a reason only visible by
+running it interactively (capture the full `pg_err`; the abort is after
+`mesh_strategy_so` — likely `macro_strategy_so`, a via-rule, or a
+routed-net/blockage conflict). This belongs to the `pg_mesh.tcl` owner
+in `fc_shell -gui`.
+
+**Concrete fix recipe for the owner:**
+
+- Reproduce in one interactive session: `make gui BLOCK=route.design`,
+  then paste `pg_mesh.tcl` steps 3–6 (patterns+strategies, `*_so`
+  names) and run `compile_pg -strategies {…}` **without a catch** — read
+  the exact failing command/object.
+- Most likely correct structural fix: **move the std-cell-rail + mesh
+  via-stitch `compile_pg` out of init and into a post-route PG stage**
+  (its own stage, isolated from the in-flight `4_route.tcl` detail-route
+  cleanup), so rails are stitched to the mesh against the *final* placed
+  + routed layout — which init-time `compile_pg` structurally cannot do.
+- Alternative: a channel-confined fine-pitch **M3** vertical stitch (the
+  original author's abandoned M2-stitch idea, moved off M2 to avoid
+  std-cell pin-access contention) so every M1 segment has a frequent
+  via path up.
+- Either way **co-manage the PG-vs-signal DRC interaction** with the
+  `4_route.tcl` work (post-route PG metal can add `check_routes`
+  spacings; `check_routes` is currently 15 and separately converging).
+
+Net: the integration-flow scope of this task is validated end-to-end;
+this single PG-routing item is fully characterised and handed off with a
+reproducible recipe, rather than left as an unvalidated guess.
