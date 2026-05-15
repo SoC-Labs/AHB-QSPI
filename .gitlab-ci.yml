@@ -8,7 +8,9 @@
 #   3. cdc         - SpyGlass CDC analysis
 #   4. regression  - Cocotb regression with VCS code coverage
 #   5. coverage    - Merge VCS coverage and generate report
-#   6. synthesis   - ASIC synthesis with Design Compiler (TSMC 65nm)
+#   6. synthesis   - ASIC synthesis with Design Compiler (TSMC 65nm),
+#                    + opt-in Fusion Compiler partition PnR + LEC
+#                    (manual, gated on RUN_FC_PNR)
 #   7. fpga-deploy - Manual fpgahub-driven deploy + stress (needs FPGAHUB_BOARD/FPGAHUB_BOARD_TAG)
 #   8. cleanup     - Remove workspace
 
@@ -404,6 +406,57 @@ dc-synth-tsmc65:
       - top_ahb_qspi_power.rep
       - top_ahb_qspi_timing.rep
       - top_ahb_qspi_qor.rep
+    expire_in: 30 days
+
+# Fusion Compiler partition PnR + Formality LEC (TSMC 65nm).
+#
+# Runs the full hierarchical partition flow (init→synth→cts→route→
+# signoff→export→DRC) THEN Formality LEC via `make fc_all`, then
+# re-verifies the hand-off drop with verify_partition_handoff.sh.
+#
+# Opt-in + manual + allow_failure on purpose:
+#   - it is a multi-hour place&route run, not something to block every
+#     push on (cf. dc-synth-tsmc65 above which is only synthesis);
+#   - the flow is not yet silicon-validated (see
+#     syn/asic/fusion-compiler/INTEGRATION_CHANGES.md — verified only by
+#     Tcl info-complete + make -n, never a live fc_shell run).
+#
+# PROMOTION PATH — once a clean `make fc_all` + verify run is achieved
+# on the runner: drop `allow_failure`, drop `when: manual`, and widen
+# the rule (e.g. run on the integration branch) so it becomes a real
+# gate. The Makefiles already self-enforce FC_STAGE_OK / FM_LEC_OK, so
+# a non-zero exit here is trustworthy.
+fc-pnr-lec-tsmc65:
+  stage: synthesis
+  when: manual
+  needs: [clone, preflight]
+  tags:
+    - vcs
+  rules:
+    - if: '$RUN_FC_PNR != ""'
+  allow_failure: true
+  script:
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    # FC / Formality tool paths are set by the flow Makefiles themselves
+    # (FC_BIN_DIR / FM_BIN_DIR), so nothing to export here.
+    - echo "Fusion Compiler partition flow + LEC for top_ahb_qspi"
+    - make -C "$WORK_DIR/syn/asic/fusion-compiler" fc_all 2>&1 | tee fc_all.log
+    # Hand-off self-check: re-hash every delivered file against the
+    # manifest FC wrote, and surface scenario/hold coverage.
+    - "$WORK_DIR/syn/asic/scripts/verify_partition_handoff.sh"
+    # Echo the DRC tier-0/1/1b summary into the job log.
+    - make -C "$WORK_DIR/syn/asic/fusion-compiler" drc_summary || true
+  after_script:
+    - mkdir -p fc_reports
+    - cp "$WORK_DIR/syn/asic/fusion-compiler/reports/"*.rep      fc_reports/ 2>/dev/null || true
+    - cp "$WORK_DIR/syn/asic/fusion-compiler/reports/06_abstract_manifest.txt" fc_reports/ 2>/dev/null || true
+    - cp "$WORK_DIR/syn/asic/formality/reports/"*.rep            fc_reports/ 2>/dev/null || true
+    - cp fc_all.log fc_reports/ 2>/dev/null || true
+  artifacts:
+    when: always
+    paths:
+      - fc_reports/
     expire_in: 30 days
 
 # ============================================================================
