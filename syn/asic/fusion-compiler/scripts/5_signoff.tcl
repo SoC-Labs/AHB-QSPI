@@ -43,12 +43,17 @@ source ${fc_dir}/scripts/setup_design_options.tcl
 #      the block.
 # TLU+ models + per-corner early/late specs were already bound in the
 # shared FC.read_design.tcl (read_parasitic_tech / set_parasitic_
-# parameters), so extract_parasitics here covers every active corner.
+# parameters). fc_shell U-2022.12 has no standalone `extract_parasitics`
+# command (CMD-005) — RC extraction is driven implicitly by a full
+# timing update against the bound TLU+ tech. `update_timing -full`
+# forces that recompute across every active scenario so the QoR below
+# and the SPEF written in 6_partition_export.tcl are on real extracted
+# RC, not the route-estimate carried over from route.design.
 # Guarded: a missing TLU+ / extraction failure must not silently produce
 # a signoff block with stale RC — fail the stage loudly instead.
-puts "INFO: \[fc_signoff\] extract_parasitics (signoff RC for QoR + SPEF)"
-if {[catch {extract_parasitics} ep_err]} {
-    puts "ERROR: \[fc_signoff\] extract_parasitics failed: $ep_err"
+puts "INFO: \[fc_signoff\] update_timing -full (signoff RC for QoR + SPEF)"
+if {[catch {update_timing -full} ep_err]} {
+    puts "ERROR: \[fc_signoff\] update_timing -full failed: $ep_err"
     puts "ERROR: \[fc_signoff\] signoff QoR + exported SPEF would be on stale"
     puts "ERROR: \[fc_signoff\] route-estimate RC — not touching FC_STAGE_OK."
     exit 1
