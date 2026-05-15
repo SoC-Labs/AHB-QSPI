@@ -89,6 +89,48 @@ if {[sizeof_collection [get_scenarios -quiet scen_fast]] > 0} {
 }
 
 #-----------------------------------------------------------------------------
+# DRC-cleanup detail-route pass. route_opt + hold_fix leave ~50 DRCs in
+# the congested std-cell band between the macro columns (the cache
+# HRDATA/HWDATA buses + the PG mesh competing for tracks): mostly
+# end-of-line spacing plus the occasional short at a macro-column
+# boundary. An incremental detail route seeded from the DRC info
+# already in the block reroutes only the violating regions, so it
+# cleans the spacing/short without disturbing the bulk of the routing
+# (and thus without re-opening setup/hold). Iterate a few times — EOL
+# fixes can cascade.
+#-----------------------------------------------------------------------------
+puts "INFO: \[fc_route\] route_detail (incremental DRC cleanup)"
+if {[catch {route_detail -incremental true \
+                         -initial_drc_from_input true \
+                         -max_number_iterations 10} rd_err]} {
+    puts "WARN: \[fc_route\] route_detail cleanup returned: $rd_err"
+}
+redirect -tee -file ${fc_reports}/04d_route_detail_drc.rep {
+    report_qor -summary
+    check_routes -open_net true -drc true
+}
+
+# Pure detail-route took 52 -> ~22 DRCs but can't relieve the local
+# congestion in the narrow std-cell band between the macro columns
+# (it reroutes nets, it can't nudge cells). A final route_opt pass can
+# make small ECO placement/sizing changes there, freeing M1/M2 tracks
+# so the residual end-of-line spacings + the macro-boundary short can
+# route legally. Then one more incremental detail route to lock it in.
+puts "INFO: \[fc_route\] route_opt -from final_route (congestion-relief ECO)"
+if {[catch {route_opt -from final_route -to final_route} ro_err]} {
+    puts "WARN: \[fc_route\] route_opt final_route returned: $ro_err"
+}
+if {[catch {route_detail -incremental true \
+                         -initial_drc_from_input true \
+                         -max_number_iterations 10} rd2_err]} {
+    puts "WARN: \[fc_route\] post-ECO route_detail returned: $rd2_err"
+}
+redirect -tee -file ${fc_reports}/04e_route_drc_final.rep {
+    report_qor -summary
+    check_routes -open_net true -drc true
+}
+
+#-----------------------------------------------------------------------------
 # Save block: ${design_lib}/${top}/route.design
 #-----------------------------------------------------------------------------
 save_block
