@@ -44,6 +44,7 @@ INIT_BLOCK     = init.design
 SYNTH_BLOCK    = compile.design
 CTS_BLOCK      = cts.design
 ROUTE_BLOCK    = route.design
+PG_BLOCK       = pg.design
 SIGNOFF_BLOCK  = signoff.design
 DRC_BLOCK      = drc.design
 
@@ -52,6 +53,7 @@ INIT_DONE      = $(FC_WORK)/.init.done
 SYNTH_DONE     = $(FC_WORK)/.synth.done
 CTS_DONE       = $(FC_WORK)/.cts.done
 ROUTE_DONE     = $(FC_WORK)/.route.done
+PG_DONE        = $(FC_WORK)/.pg.done
 SIGNOFF_DONE   = $(FC_WORK)/.signoff.done
 DRC_DONE       = $(FC_WORK)/.drc.done
 ABSTRACT_DONE  = $(FC_WORK)/.abstract.done
@@ -69,9 +71,9 @@ FM_FLOW_DIR = $(SOCLABS_AHB_QSPI_DIR)/syn/asic/formality
 # -format etm). SCAFFOLD: not yet silicon-validated.
 PT_FLOW_DIR = $(SOCLABS_AHB_QSPI_DIR)/syn/asic/primetime
 
-.PHONY: fc fc_all fc_init fc_synth fc_cts fc_route fc_signoff fc_drc \
+.PHONY: fc fc_all fc_init fc_synth fc_cts fc_route fc_pg fc_signoff fc_drc \
         fc_abstract fc_lec fc_etm drc_summary mem_ff_db gui clean help \
-        dirs fusion_lib
+        dirs fusion_lib fc_pg_probe
 
 # ── Workspace setup ───────────────────────────────────────────────────────
 dirs:
@@ -152,7 +154,22 @@ $(ROUTE_DONE): $(CTS_DONE)
 
 fc_route: $(ROUTE_DONE)
 
-$(SIGNOFF_DONE): $(ROUTE_DONE)
+# Phase 4a — post-route PG rail + M3-stitch (Blocker-1 fix). Stitches
+# the M1 std-cell rails to the M5/M6 mesh via a fine-pitch M3 vertical
+# strap, against the final routed layout (init-stage compile_pg
+# structurally cannot). Probe-validated: floating std cells 814/487 ->
+# 0/0 at PG_M3_PITCH=3.0. Produces pg.design, consumed by 5_signoff.tcl.
+$(PG_DONE): $(ROUTE_DONE)
+	@echo "INFO: [Phase 4a] post-route PG rail + M3 stitch"
+	cd $(FC_WORK) && $(FC_SHELL) -f $(FC_DIR)/scripts/pg_rails.tcl 2>&1 \
+	    | tee $(FC_LOGS)/pg_rails.log
+	@grep -q "^FC_STAGE_OK: pg" $(FC_LOGS)/pg_rails.log \
+	    || (echo "ERROR: fc_pg did not reach FC_STAGE_OK marker — see $(FC_LOGS)/pg_rails.log"; exit 1)
+	@touch $@
+
+fc_pg: $(PG_DONE)
+
+$(SIGNOFF_DONE): $(PG_DONE)
 	@echo "INFO: [Phase 4b] signoff (DRC, parasitic-SI, reports)"
 	cd $(FC_WORK) && $(FC_SHELL) -f $(FC_DIR)/scripts/5_signoff.tcl 2>&1 \
 	    | tee $(FC_LOGS)/5_signoff.log
@@ -241,6 +258,26 @@ fc_all: fc fc_lec
 	@echo "INFO: Fusion Compiler flow + Formality LEC complete for $(MODULE)"
 	@echo "INFO: LEC reports : $(FM_FLOW_DIR)/reports/"
 
+# ── Blocker-1 diagnostic: post-route PG rail-stitch probe ────────────────
+# NON-DESTRUCTIVE. Operates on a copy of route.design (pg_probe.design);
+# route/signoff/drc blocks are untouched. Reproduces the post-route
+# std-cell-rail compile_pg and captures the exact failing command that
+# INTEGRATION_CHANGES.md's PG deep-dive hands off as "needs an
+# interactive run to see". ~6 min. Requires a prior `make fc_route`
+# (route.design must exist) — does NOT rebuild the flow.
+fc_pg_probe: $(FUSION_LIB)
+	@if [ ! -d "$(FC_BLOCK_DIR)/$(MODULE)/design_label.route" ]; then \
+	    echo "ERROR: route.design not found — run 'make fc_route' first"; exit 1; \
+	fi
+	@echo "INFO: [pg_probe] post-route PG rail-stitch diagnostic (non-destructive)"
+	cd $(FC_WORK) && $(FC_SHELL) -f $(FC_DIR)/scripts/pg_postroute_probe.tcl 2>&1 \
+	    | tee $(FC_LOGS)/pg_postroute_probe.log
+	@grep -q "^FC_STAGE_OK: pg_probe" $(FC_LOGS)/pg_postroute_probe.log \
+	    || (echo "ERROR: pg_probe did not reach its marker — see $(FC_LOGS)/pg_postroute_probe.log"; exit 1)
+	@echo "INFO: [pg_probe] summary:"; cat $(FC_REPORTS)/pg_postroute_probe.rep
+	@echo "INFO: [pg_probe] failing-command detail (grep PGPROBE_ERR in the log):"
+	@grep -nE "PGPROBE_(FAIL|ERR_MSG|ERR_CODE|BASELINE_FLOAT|POST_FLOAT|RESULT)" $(FC_LOGS)/pg_postroute_probe.log || true
+
 # ── GUI on the most recently saved block ─────────────────────────────────
 # Opens fc_shell's GUI on a saved checkpoint. Override BLOCK to view a
 # different stage (e.g. `make gui BLOCK=route.design` or compile.design).
@@ -277,6 +314,9 @@ help:
 	@echo "  make fc_synth                  - Phase 2: compile_fusion"
 	@echo "  make fc_cts                    - Phase 3: clock_opt"
 	@echo "  make fc_route                  - Phase 4: route_auto + route_opt"
+	@echo "  make fc_pg                     - Phase 4a: post-route PG rail +"
+	@echo "                                   M3 stitch (Blocker-1 fix; closes"
+	@echo "                                   814/487 floating cells -> 0/0)"
 	@echo "  make fc_signoff                - Signoff QoR (timing/area/power)"
 	@echo "  make fc_drc                    - DRC checks (tier0/1/1b + ICV opt-in)"
 	@echo "  make drc_summary               - Grep DRC reports for violation counts"
@@ -290,6 +330,9 @@ help:
 	@echo "  make fusion_lib                - Build fusion ref lib only"
 	@echo "  make mem_ff_db                 - Build FF mem .db (enables scen_fast"
 	@echo "                                   -> multi-corner SDF/SPEF + hold)"
+	@echo "  make fc_pg_probe               - Blocker-1 diagnostic: post-route"
+	@echo "                                   PG rail-stitch probe (needs"
+	@echo "                                   fc_route; non-destructive, ~6 min)"
 	@echo "  make gui                       - fc_shell -gui"
 	@echo "  make clean                     - Remove all generated files"
 	@echo ""

@@ -17,9 +17,23 @@ export SWL     := $(SOCLABS_AHB_QSPI_DIR)/cdc/waiver.swl
 export SG_TOP  := $(MODULE)
 PRJ            := $(SOCLABS_AHB_QSPI_DIR)/cdc/top_ahb_qspi.prj
 
-# SpyGlass output directory
-SG_WORK := $(MODULE)
-RPTDIR  := $(SG_WORK)/$(MODULE)/cdc/cdc_verify/spyglass_reports
+# ── CDC goal ─────────────────────────────────────────────────────────────────
+# Default to the STRUCTURAL goal (cdc_verify_struct). The full
+# `cdc/cdc_verify` goal additionally runs the advanced formal Ac_cdc
+# metastability rules (Ac_cdc01a et al.) which DO NOT TERMINATE in batch
+# on this design — the run hangs at rule 429/533, so no summary is ever
+# produced (this is exactly why `top_ahb_qspi_cdc_summary.rpt` never
+# existed). cdc_verify_struct completes in minutes and produces the
+# moresimple.rpt CDC sign-off summary. Override for the (long/opt-in)
+# advanced run:  make cdc SG_GOAL=cdc/cdc_verify
+SG_GOAL ?= cdc/cdc_verify_struct
+
+# SpyGlass output directory. Reports land in a per-goal subtree, so
+# RPTDIR tracks $(SG_GOAL)'s leaf name.
+SG_WORK   := $(MODULE)
+SG_GOALLEAF := $(notdir $(SG_GOAL))
+RPTDIR  := $(SG_WORK)/$(MODULE)/cdc/$(SG_GOALLEAF)/spyglass_reports
+CONSRPT := $(SG_WORK)/consolidated_reports/$(MODULE)_cdc_$(subst /,_,$(SG_GOAL))/moresimple.rpt
 
 # Report files
 RPT_SUMMARY := $(MODULE)_cdc_summary.rpt
@@ -28,7 +42,7 @@ RPT_DETAIL  := $(MODULE)_cdc_detail.rpt
 # ── SpyGlass flags ───────────────────────────────────────────────────────────
 SG_FLAGS := -batch \
             -project $(PRJ) \
-            -goals "cdc/cdc_verify"
+            -goals "$(SG_GOAL)"
 
 .PHONY: cdc cdc-report clean help
 
@@ -52,26 +66,33 @@ cdc: $(RESOLVED_FLIST)
 	@$(MAKE) --no-print-directory cdc-report
 
 # ── Extract summary report ───────────────────────────────────────────────────
+# moresimple.rpt is SpyGlass's roll-up. Prefer the consolidated copy,
+# fall back to the per-goal spyglass_reports copy. Surfaces the
+# message/waiver totals, the per-rule tally, and (sign-off-critical)
+# every Ac_unsync02 unsynchronised crossing.
 cdc-report:
-	@{ \
+	@RPT=""; \
+	if [ -f "$(CONSRPT)" ]; then RPT="$(CONSRPT)"; \
+	elif [ -f "$(RPTDIR)/moresimple.rpt" ]; then RPT="$(RPTDIR)/moresimple.rpt"; fi; \
+	{ \
 	echo "══════════════════════════════════════════════════════════"; \
-	echo "  SpyGlass CDC Report: $(MODULE)"; \
+	echo "  SpyGlass CDC Report: $(MODULE)   goal=$(SG_GOAL)"; \
 	echo "══════════════════════════════════════════════════════════"; \
-	echo ""; \
-	echo "── Violation Summary ─────────────────────────────────────"; \
-	if ls $(RPTDIR)/*summary* 1>/dev/null 2>&1; then \
-		cat $(RPTDIR)/*summary*; \
-	elif ls $(RPTDIR)/*.rpt 1>/dev/null 2>&1; then \
-		grep -h -E '(Error|Warning|Info|Total)' $(RPTDIR)/*.rpt 2>/dev/null || echo "  (no summary lines found)"; \
+	if [ -z "$$RPT" ]; then \
+		echo "  (no moresimple.rpt — run 'make cdc' first; the full"; \
+		echo "   cdc/cdc_verify goal hangs at the advanced Ac_cdc rules,"; \
+		echo "   use the default cdc/cdc_verify_struct goal)"; \
 	else \
-		echo "  (no report files found — run 'make cdc' first)"; \
-	fi; \
-	echo ""; \
-	echo "── CDC Crossings (AHB QSPI RTL) ─────────────────────────"; \
-	if ls $(RPTDIR)/*.rpt 1>/dev/null 2>&1; then \
-		grep -h -iE '(qspi_|ahb_qspi|apb_qspi|cache_)' $(RPTDIR)/*.rpt 2>/dev/null | head -50 || echo "  (none found)"; \
-	else \
-		echo "  (no report files)"; \
+		echo "  source: $$RPT"; \
+		echo ""; \
+		echo "── Message totals ────────────────────────────────────"; \
+		grep -hE 'Total Number of Generated Messages|Number of Waived Messages|Reported Messages:' "$$RPT" 2>/dev/null | sed 's/^#* */  /'; \
+		echo ""; \
+		echo "── Per-rule tally ────────────────────────────────────"; \
+		grep -hoE '(Ac_unsync02|Ac_sync01|Ac_conv0[0-9]|Ac_glitch03|Clock_sync0[0-9]|Reset_sync0[0-9]|Ac_cdc01a?)' "$$RPT" 2>/dev/null | sort | uniq -c | sort -rn; \
+		echo ""; \
+		echo "── Unsynchronised crossings (Ac_unsync02 — sign-off review) ──"; \
+		grep -hE 'Ac_unsync02' "$$RPT" 2>/dev/null | sed -E 's/.*(Unsynchronized Crossing:.*)/  \1/' || echo "  (none)"; \
 	fi; \
 	echo ""; \
 	} | tee $(RPT_SUMMARY)
@@ -87,7 +108,11 @@ help:
 	@echo "AHB QSPI SpyGlass CDC Flow"
 	@echo ""
 	@echo "Usage:"
-	@echo "  make cdc                       - Run CDC analysis (default: $(MODULE))"
+	@echo "  make cdc                       - Structural CDC (cdc_verify_struct);"
+	@echo "                                   completes + writes a summary"
+	@echo "  make cdc SG_GOAL=cdc/cdc_verify - Full incl. advanced formal CDC"
+	@echo "                                   (OPT-IN: hangs at rule 429/533 in"
+	@echo "                                   batch on this design — long/manual)"
 	@echo "  make cdc-report                - Re-extract summary from last run"
 	@echo "  make clean                     - Remove SpyGlass work directories"
 	@echo ""

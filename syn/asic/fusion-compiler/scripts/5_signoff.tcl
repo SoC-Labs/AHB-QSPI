@@ -23,10 +23,13 @@ file mkdir ${fc_outputs}/svf
 set_svf ${fc_outputs}/svf/${top_module}.signoff.svf
 
 #-----------------------------------------------------------------------------
-# Open the post-route checkpoint
+# Open the post-route-PG checkpoint. pg.design = route.design after the
+# Phase-4a rail + M3-stitch (pg_rails.tcl) that closes the 814/487
+# floating-std-cell PG gap. Signoff QoR / SPEF must be on the stitched
+# PG, not the pre-stitch route.design.
 #-----------------------------------------------------------------------------
 open_lib   $design_lib_name
-open_block ${design_lib_name}:${top_module}/route.design
+open_block ${design_lib_name}:${top_module}/pg.design
 
 source ${fc_dir}/scripts/setup.tcl
 source ${fc_dir}/scripts/setup_design_options.tcl

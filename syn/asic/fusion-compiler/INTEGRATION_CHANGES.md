@@ -265,3 +265,70 @@ in `fc_shell -gui`.
 Net: the integration-flow scope of this task is validated end-to-end;
 this single PG-routing item is fully characterised and handed off with a
 reproducible recipe, rather than left as an unvalidated guess.
+
+## PG floating-cell — RESOLVED 2026-05-18 (supersedes the hand-off above)
+
+The recipe above was executed. The "needs interactive ownership"
+conclusion is **superseded** — the fix was found and validated
+non-interactively via a fast (~6 min) reproducible probe on the real
+saved `route.design`.
+
+**Probe harness.** `scripts/pg_postroute_probe.tcl` + `make fc_pg_probe`
+(non-destructive: copies `route.design` → `pg_probe.design`, never
+touches the canonical blocks; full `compile_pg` error capture;
+before/after `check_pg_connectivity`). This is the ~6 min iteration
+loop the deep-dive said was missing.
+
+**What the probe settled (evidence, not guess):**
+
+1. **The prior hand-off's "most likely fix" is wrong.** A post-route
+   `compile_pg -strategies {rail_strategy}` (rebuild the M1 rails post-
+   route) **completes cleanly but does NOT reduce floating** — 814/487
+   unchanged, floating *wires* slightly worse. The rail is already
+   bound; rebuilding it changes nothing. (It also does *not* abort as
+   attempt #3 reported — that abort was the inline-recreate of all
+   three strategies, not rail-only.)
+2. **The deep-dive's "Alternative" is correct and is the fix.** Adding a
+   channel-confined fine-pitch **M3 vertical stitch** post-route (so
+   every orphaned M1 segment gets a frequent via path up to the M5/M6
+   mesh), `compile_pg -strategies {rail_strategy m3_stitch_strategy}`
+   against the final routed block:
+
+   | M3 stitch pitch | floating VDD | floating VSS | compile_pg |
+   |--|--|--|--|
+   | (none — rail only) | 814 | 487 | clean |
+   | 6 µm | 18 | 0 | clean |
+   | **3 µm** | **0** | **0** | **clean** |
+
+   At 3 µm `check_pg_connectivity` is **fully closed (0/0)**. It must be
+   done post-route — init-stage `compile_pg` structurally cannot stitch
+   to a layout that does not exist yet, which is why pg_mesh.tcl alone
+   never could.
+
+**Productionised (not left as a recipe):**
+
+- New stage script `scripts/pg_rails.tcl` — Phase 4a. Opens
+  `route.design`, rebuilds `std_cell_rail` + the M3 stitch
+  (`PG_M3_PITCH`, default 3.0), `connect_pg_net -automatic`,
+  `compile_pg`, saves `pg.design`, prints `FC_STAGE_OK: pg`. Guarded:
+  a `compile_pg` failure exits 1 with no marker (a still-floating block
+  cannot slip to signoff).
+- Makefile: new `fc_pg` target + `.pg.done` sentinel; dependency chain
+  is now `route → pg → signoff` (`$(SIGNOFF_DONE): $(PG_DONE)`).
+- `5_signoff.tcl` now opens `pg.design` (was `route.design`) so signoff
+  QoR / the exported per-scenario SPEF are on the stitched PG, not the
+  pre-stitch route block.
+- `pg_mesh.tcl` is unchanged (still builds supply + M5/M6 mesh + macro
+  straps at init — the placer still needs to see the mesh; only the
+  rail↔mesh via-stitch moved post-route, which is exactly the
+  structural split the deep-dive called for).
+
+**Validation status.** The PG stitch itself is validated on the real
+`route.design` (0/0 floating, clean `compile_pg`) and `make fc_pg` runs
+the production stage end-to-end. Still to run on a runner: a full
+`make fc_all` so signoff QoR / SPEF / Formality LEC are regenerated on
+`pg.design` and `7_drc.tcl check_pg_connectivity` records the 0/0 in
+`reports/07_summary.rep` (it currently still shows the pre-fix 814).
+The remaining DRC item is `check_routes` (15, separately converging in
+`4_route.tcl`), which the M3 stitch must be re-checked against at the
+final pitch (PG metal vs signal spacing) on that full run.

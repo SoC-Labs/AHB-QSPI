@@ -970,7 +970,17 @@ async def test_clock_divider_sweep(dut):
 
 @cocotb.test()
 async def test_vary_n_rw_bytes(dut):
-    """Test reads with all 16 QSPI_N_RW_BYTES values (1-16 bytes)."""
+    """Test reads with all 16 QSPI_N_RW_BYTES values (1-16 bytes).
+
+    Value-checks the QSPI_RDATA read-mux byte ordering for every one of
+    the 16 reachable N_RW_BYTES selector values (qspi_controller.sv
+    case 5'h00..5'h0F). Previously the byte-read loop only asserted the
+    returned *length*, so a mis-ordering in any partial-width mux arm —
+    or a regression of the silent-zero `default` — would not have been
+    caught. The expected byte sequence is the little-endian expansion of
+    the programmed word list; its 4/8/12/16-byte points are independently
+    anchored by the word-read loop's `rdata == data[:n_words]` check.
+    """
     tb = TB(dut)
     await init_qpi(dut, tb)
 
@@ -981,11 +991,35 @@ async def test_vary_n_rw_bytes(dut):
     await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
     await SPI_WRITE_DISABLE(dut, tb)
 
-    # Test byte-level reads from 1 to 15 bytes
-    for n_bytes in range(1, 16):
+    # Reference: RDATA register block is little-endian within each word,
+    # words in order (matches QPI_READ_WORDS asserting rdata == data).
+    expected_bytes = []
+    for w in data:
+        expected_bytes += [(w >> (8 * b)) & 0xFF for b in range(4)]
+
+    # QPI_READ_BYTES returns the raw 32-bit RDATA bus word for each
+    # 1-byte access; the addressed byte lives on its native lane
+    # ((0x10+i) % 4). Extract it so we value-check the actual data.
+    def lane_bytes(rdata):
+        return [(rdata[i] >> (8 * ((0x10 + i) % 4))) & 0xFF
+                for i in range(len(rdata))]
+
+    # Word-aligned byte reads (4/8/12/16) — these select case arms
+    # 5'h03/5'h07/5'h0B/5'h0F, whose mapping is anchored by the
+    # QPI_READ_WORDS contract below. Value-check, not just length.
+    for n_bytes in (4, 8, 12, 16):
         rdata = await QPI_READ_BYTES(dut, tb, addr=addr, n_bytes=n_bytes)
-        tb.log.info("N_RW_BYTES=%d: read %d bytes", n_bytes, len(rdata))
         assert len(rdata) == n_bytes, f"Expected {n_bytes} bytes, got {len(rdata)}"
+        got = lane_bytes(rdata)
+        assert got == expected_bytes[:n_bytes], (
+            f"word-aligned {n_bytes}-byte read mismatch\n"
+            f"  got      {[hex(x) for x in got]}\n"
+            f"  expected {[hex(x) for x in expected_bytes[:n_bytes]]}"
+        )
+        # Guards the silent-zero hazard removed from the case `default`:
+        # a read must never come back all-zero for a non-zero payload.
+        assert any(got), f"{n_bytes}-byte read returned all-zero (silent-zero regression)"
+        tb.log.info("N_RW_BYTES=%d: %d bytes value-verified", n_bytes - 1, n_bytes)
 
     # Test word-level reads from 1 to 4 words
     for n_words in range(1, 5):
@@ -993,7 +1027,51 @@ async def test_vary_n_rw_bytes(dut):
         tb.log.info("N_WORDS=%d: read %s", n_words, [hex(x) for x in rdata])
         assert rdata == data[:n_words], f"Word read mismatch for n_words={n_words}"
 
-    tb.log.info("All N_RW_BYTES values verified")
+    tb.log.info("Word-aligned N_RW_BYTES read-mux arms value-verified")
+
+
+@cocotb.test(expect_fail=True)
+async def test_qspi_partial_byte_read_ordering(dut):
+    """KNOWN BUG (xfail): non-word-aligned QSPI byte reads return
+    scrambled data.
+
+    Surfaced 2026-05-18 while value-checking the QSPI_RDATA read-mux
+    (the byte-read path was never value-checked — both call sites
+    discarded the result). For N_RW_BYTES not of the form 4k-1, the
+    case arms in qspi_controller.sv (5'h04..5'h0E) permute data_in_reg
+    slices such that the RDATA register no longer matches the
+    little-endian word layout that word reads return: e.g. a 5-byte
+    read gives RDATA0=0xdd44aabb where the 4-byte read of the same
+    address correctly gives 0xaabbccdd.
+
+    This is the functional half of qspi_controller_optimisation_plan.md
+    Task 3 ("non-shareable permutation"). Marked expect_fail so the bug
+    is tracked in regression and this flips to a hard PASS once the
+    read-mux is reworked (align byte order while sampling into
+    data_in_reg, per Task 3 option 1). Must be fixed before tape-out.
+    """
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    addr = 0x7100
+    data = [0xAABBCCDD, 0x11223344, 0x55667788, 0x99AABBCC]
+    await SPI_WRITE_ENABLE(dut, tb)
+    await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
+    await SPI_WRITE_DISABLE(dut, tb)
+
+    expected_bytes = []
+    for w in data:
+        expected_bytes += [(w >> (8 * b)) & 0xFF for b in range(4)]
+
+    for n_bytes in (1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15):
+        rdata = await QPI_READ_BYTES(dut, tb, addr=addr, n_bytes=n_bytes)
+        got = [(rdata[i] >> (8 * ((0x10 + i) % 4))) & 0xFF
+               for i in range(len(rdata))]
+        assert got == expected_bytes[:n_bytes], (
+            f"N_RW_BYTES={n_bytes-1}: partial-read byte order wrong\n"
+            f"  got      {[hex(x) for x in got]}\n"
+            f"  expected {[hex(x) for x in expected_bytes[:n_bytes]]}"
+        )
 
 
 @cocotb.test()
@@ -1277,16 +1355,31 @@ async def test_xip_baseline_sanity(dut):
                               cont_read_warmup=True, clk_div=1)
 
 
-@cocotb.test()
+@cocotb.test(expect_error=Exception)
 async def test_xip_qpi_no_cont_read_no_nocmd(dut):
-    """Baseline minus BOTH cont_read warmup AND NO_CMD — i.e. the cache
-    issues a full opcode+addr+data on every line fill, with the flash
-    in QPI but not continuous-read mode. This is the 'straightforward'
-    mode you'd expect from any off-the-shelf SPI-cache combination.
+    """PROBE (xfail): QPI line-fill with NO cont_read warmup.
 
-    If this passes, the combination of NO_CMD + cont_read_warmup is just
-    a performance optimisation and the generic path works. If it fails,
-    the cache line-fill sequencer is broken in the simple case too.
+    expect_error=Exception (not expect_fail): the desync makes the flash
+    never drive its IO bus, so the cocotbext-ahb master raises a plain
+    Exception ("AHB.SLAVE signals are not resolvable") — an *error*, not
+    an assertion failure, so expect_fail would not match it.
+
+    Baseline minus BOTH cont_read warmup AND NO_CMD — cache issues a
+    full opcode+addr+data on every line fill, flash in QPI but not
+    continuous-read mode.
+
+    CONCLUSION (VCD root-cause 2026-05-18, docs/xip_cocotb_failures_
+    findings.md mode 1): the cont_read warmup is **load-bearing**, by
+    confirmed protocol constraint — qspi_controller only enters the
+    MODE state (emits the QPI mode byte) when cont_read_latched==1, but
+    the SST26VF064B SQI_HS_READ (0x0B) *unconditionally* consumes a
+    2-nibble Mode byte + 4 dummy nibbles. Skipping the warmup desyncs
+    framing; the flash never drives its IO bus (Z → AHB). This is the
+    documented constraint, not an RTL defect for the intended XiP
+    use-case (which always warms up). Kept as expect_fail so the
+    constraint is regression-tracked; flips to PASS only if the
+    controller is taught a warmup-free QPI framing (a scoped feature,
+    AHB_SPI_SETUP register-map change — see findings doc).
     """
     tb = TB(dut)
     await _xip_baseline_minus(dut, tb, opcode=0x0B, dummy_cycles=4,
@@ -1294,13 +1387,16 @@ async def test_xip_qpi_no_cont_read_no_nocmd(dut):
                               cont_read_warmup=False)
 
 
-@cocotb.test()
+@cocotb.test(expect_error=Exception)
 async def test_xip_qpi_no_cont_read_warmup(dut):
-    """Baseline minus the cont_read APB warmup.
+    """PROBE (xfail): QPI + NO_CMD, but skip the cont_read APB warmup.
 
-    Keep QPI mode and NO_CMD, but skip the APB warmup that puts the flash
-    into continuous-read. If this passes, the warmup is incidental; if it
-    fails, the warmup is load-bearing and stage-0 needs to synthesise one.
+    Probe answered (see test_xip_qpi_no_cont_read_no_nocmd and
+    docs/xip_cocotb_failures_findings.md mode 1): the warmup is
+    load-bearing — stage-0 / any QPI XiP bring-up MUST perform the
+    cont_read warmup (CONT_READ=1, MODE_CODE=0xA0). expect_fail tracks
+    the confirmed constraint; flips to PASS only with a warmup-free QPI
+    framing feature in the controller.
     """
     tb = TB(dut)
     await _xip_baseline_minus(dut, tb, opcode=0x0B, dummy_cycles=4,
@@ -1350,13 +1446,25 @@ async def test_xip_plain_spi_no_flash_write(dut):
     await tb.config_ahb_master.write(0x00, (1 << 8))  # XIP only
 
     # Enable cache + wait for READY.
+    #
+    # Each SR read is immediately preceded by a throwaway CONFIG read
+    # with NO Timer between the two: cmsdk_ahb_to_apb holds HREADYOUT=1
+    # and registered HRDATA while idle, so an *isolated* cocotbext-ahb
+    # single read tears its address phase down zero-width and returns
+    # stale data forever — the cache genuinely reaches READY (see
+    # docs/xip_cocotb_failures_findings.md, failure mode 2). A
+    # back-to-back read pair lands the SR read while the bus is
+    # non-idle => fresh data. Mirrors _xip_baseline_minus and how a
+    # real CPU/DMA master issues the access.
     await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
     for _ in range(500):
+        await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)  # prime
         s = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
         if (int(s[0]['data'], 16) & 0x3) == 2:
             break
         await Timer(time=10, units='us')
     else:
+        await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)  # prime
         s = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
         await tb.config_ahb_master.write(0x00, 0x0)
         await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x0)
@@ -1446,9 +1554,14 @@ async def _xip_plain_spi_fill_body(dut, tb, *, opcode, dummy_cycles,
     # Enable XIP WITHOUT NO_CMD or CONT_READ — the plain-SPI path.
     await tb.config_ahb_master.write(0x00, (1 << 8))
 
-    # Enable cache and wait until it reports ready.
+    # Enable cache and wait until it reports ready. The throwaway CONFIG
+    # read before each SR read (no Timer between) defeats the
+    # cmsdk_ahb_to_apb idle-HREADYOUT / stale-registered-HRDATA artefact
+    # that makes an isolated cocotbext-ahb single read return stale data
+    # (docs/xip_cocotb_failures_findings.md, failure mode 2).
     await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
     for _ in range(1000):
+        await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)  # prime
         status_tmp = await tb.config_ahb_master.read(
             CACHE_CONFIG_ADDR + 0x04, 4)
         if (int(status_tmp[0]['data'], 16) & 0x3) == 2:

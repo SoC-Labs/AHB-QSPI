@@ -564,26 +564,39 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     end
 end
 
-// RDATA output — purely combinational, no latch
+// RDATA output — purely combinational, no latch.
+//
+// qspi_n_rw_bytes_latched is 5 bits; the case tags below are width-
+// matched 5-bit literals (was 4-bit, which raised 16 UELCIT lint
+// warnings — selector 5b vs tag 4b). N_RW_BYTES is a 4-bit register
+// field (apb_qspi_regs.rdl: N_RW_BYTES[4], range 0x0..0xF = 1..16
+// bytes) zero-extended into this 5-bit port at the single instantiation
+// site (top_ahb_qspi.v: `{1'b0, QSPI_N_RW_BYTES}`), so values 0x10..0x1F
+// are not reachable in the current design. The default arm therefore
+// returns the full 16-byte view rather than 128'd0: if a future change
+// ever widens the field or drives bit[4], a read degrades gracefully to
+// "all captured bytes" instead of silently returning zero (the prior
+// behaviour gave no error indication — see qspi_controller_optimisation
+// _plan.md Task 3/7).
 always_comb begin
     case(qspi_n_rw_bytes_latched)
-        4'h0:   QSPI_RDATA = {{120{1'b0}}, data_in_reg[7:0 ]};
-        4'h1:   QSPI_RDATA = {{112{1'b0}}, data_in_reg[15:0]};
-        4'h2:   QSPI_RDATA = {{104{1'b0}}, data_in_reg[23:0]};
-        4'h3:   QSPI_RDATA = {{96{1'b0}},  data_in_reg[31:0]};
-        4'h4:   QSPI_RDATA = {{88{1'b0}},  data_in_reg[31:0], data_in_reg[39:32]};
-        4'h5:   QSPI_RDATA = {{80{1'b0}},  data_in_reg[31:0], data_in_reg[47:32]};
-        4'h6:   QSPI_RDATA = {{72{1'b0}},  data_in_reg[31:0], data_in_reg[55:32]};
-        4'h7:   QSPI_RDATA = {{64{1'b0}},  data_in_reg[31:0], data_in_reg[63:32]};
-        4'h8:   QSPI_RDATA = {{56{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[71:64]};
-        4'h9:   QSPI_RDATA = {{48{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[79:64]};
-        4'hA:   QSPI_RDATA = {{40{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[87:64]};
-        4'hB:   QSPI_RDATA = {{32{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64]};
-        4'hC:   QSPI_RDATA = {{24{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[103:96]};
-        4'hD:   QSPI_RDATA = {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
-        4'hE:   QSPI_RDATA = {{8{1'b0}},   data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
-        4'hF:   QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
-        default: QSPI_RDATA = 128'd0;
+        5'h00:  QSPI_RDATA = {{120{1'b0}}, data_in_reg[7:0 ]};
+        5'h01:  QSPI_RDATA = {{112{1'b0}}, data_in_reg[15:0]};
+        5'h02:  QSPI_RDATA = {{104{1'b0}}, data_in_reg[23:0]};
+        5'h03:  QSPI_RDATA = {{96{1'b0}},  data_in_reg[31:0]};
+        5'h04:  QSPI_RDATA = {{88{1'b0}},  data_in_reg[31:0], data_in_reg[39:32]};
+        5'h05:  QSPI_RDATA = {{80{1'b0}},  data_in_reg[31:0], data_in_reg[47:32]};
+        5'h06:  QSPI_RDATA = {{72{1'b0}},  data_in_reg[31:0], data_in_reg[55:32]};
+        5'h07:  QSPI_RDATA = {{64{1'b0}},  data_in_reg[31:0], data_in_reg[63:32]};
+        5'h08:  QSPI_RDATA = {{56{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[71:64]};
+        5'h09:  QSPI_RDATA = {{48{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[79:64]};
+        5'h0A:  QSPI_RDATA = {{40{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[87:64]};
+        5'h0B:  QSPI_RDATA = {{32{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64]};
+        5'h0C:  QSPI_RDATA = {{24{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[103:96]};
+        5'h0D:  QSPI_RDATA = {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
+        5'h0E:  QSPI_RDATA = {{8{1'b0}},   data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
+        5'h0F:  QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
+        default: QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
     endcase
 end
 

@@ -48,6 +48,7 @@ cdc/*_cdc_summary.rpt
 cdc/*_cdc_detail.rpt
 cdc/spyglass_output/
 cdc/spyglass.log
+cdc/spyglass.out
 cdc/sg_shell.log
 cdc/resolved.flist
 
