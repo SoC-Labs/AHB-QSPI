@@ -190,7 +190,9 @@ hal-lint:
     - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
     - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
     - export PATH="$XCELIUM_HOME/tools/bin:$PATH"
-    - echo "HAL version:" && hal -version 2>&1 | head -1
+    # `| head -1` SIGPIPEs the tool under pipefail — keep the banner non-fatal.
+    - echo "HAL version:"
+    - hal -version 2>&1 | head -1 || true
     # Lint standalone modules (no external IP dependencies)
     - make -C "$WORK_DIR/lint" lint-standalone 2>&1 | tee hal_lint_standalone.log
     # Lint all modules including top-level (requires CG092 + Corstone-101)
@@ -260,7 +262,9 @@ cocotb-regression:
   script:
     - echo "Python version:" && python3 --version
     - echo "cocotb version:" && python3 -m cocotb --version || cocotb-config --version
-    - echo "VCS version:" && vcs -ID 2>&1 | head -1
+    # `| head -1` SIGPIPEs the tool under pipefail — keep the banner non-fatal.
+    - echo "VCS version:"
+    - vcs -ID 2>&1 | head -1 || true
     # Run cocotb tests with VCS code coverage
     - |
       export SIM_TOP_DIR="$WORK_DIR/simulate/sim"
@@ -365,7 +369,14 @@ dc-synth-tsmc65:
     - export PATH="$DC_HOME/bin:$PATH"
     - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
     - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
-    - echo "Design Compiler version:" && dc_shell -version 2>&1 | head -3
+    # Informational banner only. `dc_shell -version` prints >3 lines, so
+    # `head -3` closes the pipe early and dc_shell dies on SIGPIPE (exit
+    # 141). Under the runner's `set -o pipefail` that aborts the whole
+    # job *before synthesis runs* — which is exactly the "No files to
+    # upload" failure (after_script finds no reports). `|| true` makes
+    # the banner non-fatal; the real dc_shell run below still gates.
+    - echo "Design Compiler version:"
+    - dc_shell -version 2>&1 | head -3 || true
     - mkdir -p "$WORK_DIR/imp/ASIC"
     - |
       cd "$WORK_DIR/asic/TSMC65nm"
@@ -453,10 +464,60 @@ fc-pnr-lec-tsmc65:
     - cp "$WORK_DIR/syn/asic/fusion-compiler/reports/06_abstract_manifest.txt" fc_reports/ 2>/dev/null || true
     - cp "$WORK_DIR/syn/asic/formality/reports/"*.rep            fc_reports/ 2>/dev/null || true
     - cp fc_all.log fc_reports/ 2>/dev/null || true
+    # ---- Partition hand-off drop for downstream hierarchical FC ----
+    # GitLab artifact paths are relative to the job working dir (NOT
+    # $WORK_DIR), so stage the drop here with the same copy-back pattern
+    # every job in this file uses. fc_handoff/ is self-contained: the
+    # outputs/ payload + its SHA256 manifest + the NDM design library +
+    # a consumer README, so a parent FC pipeline can fetch this one
+    # directory and either open_lib the block or verify-and-consume the
+    # physical/timing views.
+    - mkdir -p fc_handoff
+    - cp -r "$WORK_DIR/syn/asic/fusion-compiler/outputs/." fc_handoff/ 2>/dev/null || true
+    # Manifest lives in reports/, not outputs/ — copy it alongside the
+    # payload so verify_partition_handoff.sh works with one dir.
+    - cp "$WORK_DIR/syn/asic/fusion-compiler/reports/06_abstract_manifest.txt" fc_handoff/ 2>/dev/null || true
+    # NDM design library (lib/tech/attach + all stage blocks, ~24M).
+    # The FC-native partition abstract is the block
+    #   top_ahb_qspi.dlib:top_ahb_qspi/signoff.design
+    # Tar it so a parent FC pipeline can fetch and open_lib it directly.
+    # 6_partition_export.tcl's NOTE: this .dlib IS the partition abstract
+    # for FC's hierarchical PnR flow (ETM is unavailable in fc 2022.12).
+    - |
+      DLIB="$WORK_DIR/syn/asic/fusion-compiler/work/top_ahb_qspi.dlib"
+      if [ -d "$DLIB" ]; then
+        tar -C "$WORK_DIR/syn/asic/fusion-compiler/work" \
+            -czf fc_handoff/top_ahb_qspi.dlib.tar.gz top_ahb_qspi.dlib \
+          && echo "Packaged NDM: fc_handoff/top_ahb_qspi.dlib.tar.gz" \
+          || echo "WARNING: NDM .dlib package failed (non-fatal)"
+      else
+        echo "WARNING: top_ahb_qspi.dlib not found — NDM not packaged"
+      fi
+    - |
+      cat > fc_handoff/HANDOFF_README.txt <<'EOF'
+      AHB-QSPI partition hand-off — top_ahb_qspi (TSMC 65nm)
+
+      Physical/timing payload : ./ — LEF/DEF/GDS/UPF/Verilog/SDC +
+                                per-scenario SDF/SPEF, each SHA256-pinned
+                                in 06_abstract_manifest.txt (provenance:
+                                source signoff block + scenario coverage).
+      FC-native abstract      : top_ahb_qspi.dlib.tar.gz
+                                  tar xzf top_ahb_qspi.dlib.tar.gz
+                                  open_lib  top_ahb_qspi.dlib
+                                  open_block top_ahb_qspi.dlib:top_ahb_qspi/signoff.design
+      LEC sign-off            : fc_reports/03_verify_summary.rep
+                                (RTL vs post-layout netlist).
+      Verify this drop        : run, from the repo,
+                                  syn/asic/scripts/verify_partition_handoff.sh \
+                                    <thisdir>/06_abstract_manifest.txt <thisdir>
+                                exit 0 = every file present & SHA matches.
+      EOF
   artifacts:
     when: always
     paths:
       - fc_reports/
+      - fc_handoff/
+    expose_as: "FC partition hand-off"
     expire_in: 30 days
 
 # ============================================================================
