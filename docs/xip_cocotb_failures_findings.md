@@ -310,3 +310,170 @@ reason pointing at this finding, or relocating them under a
 * Working tree left as found (pre-existing uncommitted QSPI_RDATA fix +
   test edits + PG probe script untouched; `ahb_qspi.vcd` is git-ignored).
 ```
+
+---
+
+## Update 2026-05-18 — mode-2 follow-through corrected the verdict
+
+The mode-2 "pure test-harness bug" conclusion was **incomplete**. After
+applying the harness fix (primed back-to-back cache-ready poll), the
+results split:
+
+* `test_xip_plain_spi_no_flash_write` (reads un-programmed 0xFF flash):
+  **genuinely PASSES** — that one *was* purely the harness artefact.
+* `test_xip_plain_spi_fast_read_line_fill` / `…_slow_read_line_fill`
+  (read **programmed** data): the harness fix removed the masking
+  timeout and exposed a **real, distinct, pre-existing bug** — the
+  first plain-SPI XIP cache line-fill returned corrupted data
+  (`0x84800000, 0x84800000, 0x84800002, 0x84800000` for
+  `0xa5a50001..4`). i.e. the cache-ready harness bug had been *hiding*
+  a second genuine defect for the programmed-data path.
+
+### Bisected root cause (decisive)
+
+`_xip_plain_spi_fill_body` used a *minimal* APB setup vs the proven
+`_xip_baseline_minus` (which runs the identical plain-SPI 0x0B/8-dummy
+line-fill via `test_xip_plain_spi_line_fill_clkdiv_sweep` and has always
+passed — so the RTL line-fill datapath is correct). Three differences:
+(D1) full-overwrite CTRL vs RMW, (D2) 0x30-before-0x00 write order,
+(D3) the STATUS-read-before / CONFIG-read-after that bracket the
+`CACHE_CONFIG=1` enable write.
+
+Single-variable bisection: keeping the **original minimal CTRL +
+original write order** and adding **only D3** makes both line-fill
+tests PASS. D1 and D2 are not involved. The load-bearing element is
+exactly the **two APB reads bracketing the cache-enable write**:
+
+```
+read  STATUS  (CACHE_CONFIG_ADDR + 0x04)   # before
+write CACHE_CONFIG = 1
+read  CONFIG  (CACHE_CONFIG_ADDR)          # after
+```
+
+Without them the *first* post-enable QSPI transaction mis-frames and
+the first 16-B cache line fills with garbage (first word then wrong) —
+**precisely the documented downstream nanosoc stage-0 symptom** (naive
+bootrom → 30x APB fallback; cf. `docs/dma_master_port_bug_plan.md`).
+
+### Verdict & recommendation
+
+* **Test resolution**: all 5 original XIP fails resolved — 3 genuine
+  PASS (no_flash_write + the two line-fills) + 2 documented xfail (QPI
+  no-warmup protocol constraint). Regression guard
+  (`…_clkdiv_sweep`) stays green.
+* **Firmware (actionable now)**: stage-0 / any XIP bring-up MUST bracket
+  the cache-enable write with a STATUS pre-read and a CONFIG post-read
+  (in addition to the cont_read warmup for QPI). This is the concrete
+  fix for the documented 30x-fallback.
+* **RTL hardening (follow-up, not a quick fix)**: the underlying
+  fragility — the first post-enable QSPI transaction depends on APB
+  read traffic to settle the controller's CDC-synced control/BUSY path
+  — should be closed with proper first-transaction handshaking so no
+  magic read bracket is required. Tracked; deliberate scoped change,
+  needs full regression. Same family as the cont_read-warmup constraint
+  and the SGDC single-flop-latch tradeoffs.
+
+---
+
+## CORRECTION 2026-05-18 — the "D3 bracketing-reads" root cause was WRONG
+
+The bisected-D3 conclusion in the section above is **retracted**. D3
+appeared to fix the line-fill tests only because, in those isolated
+runs, flash address `0xA000` happened to be erased (0xFF) — so any
+sequence passed. It has nothing to do with bracketing reads, CDC, or
+the cache-enable sequence.
+
+### Verified root cause — a TEST-ISOLATION bug, not RTL
+
+`_xip_plain_spi_fill_body` programs flash at `addr=0xA000` **without
+erasing first**. `_xip_baseline_minus` *defaults* to the same
+`addr=0xA000` and is called by several QPI tests
+(`test_xip_qpi_no_cont_read_no_nocmd`, `…_warmup`,
+`test_xip_baseline_sanity`, …) which program `0xDECAFE0x` there. NOR
+flash page-program can only clear bits (1→0), never set them, so a
+re-program without an erase bitwise-ANDs into the stale data:
+
+```
+0xDECAFE00 & 0xA5A50001 = 0x84800000
+0xDECAFE02 & 0xA5A50003 = 0x84800002
+```
+
+— exactly the observed `got=[0x84800000,0x84800000,0x84800002,
+0x84800000]`, confirmed by arithmetic and simulation. This is why the
+tests passed in isolation / from a clean sim and failed only when a
+prior test had written `0xA000`. The RTL cache/controller line-fill
+datapath is **correct** (independently proven: `_xip_baseline_minus`
+via the always-green `test_xip_plain_spi_line_fill_clkdiv_sweep` uses a
+*different* address per iteration, so it never collides).
+
+### Not the stage-0 bug
+
+This is **not** the documented downstream nanosoc stage-0 30x-fallback
+symptom — that path preloads flash via `$readmemh` (no page-program /
+erase semantics). Do not conflate. `docs/dma_master_port_bug_plan.md`
+remains a separate, open item.
+
+### Fix (applied)
+
+`_xip_plain_spi_fill_body` now does `SPI_WRITE_ENABLE; SPI_CHIP_ERASE;
+SPI_WRITE_ENABLE; QPI_PAGE_PROGRAM` — correct NOR-flash semantics,
+robust to any prior-test flash state. The cache-enable sequence is
+reverted to the minimal naive-bootrom path (what the regression is
+meant to exercise); only the genuine, separately-verified mode-2
+prime-read in the cache-ready poll is kept.
+
+### Broader hygiene note (not fixed here — out of scope)
+
+Multiple tests `QPI_PAGE_PROGRAM` without a preceding erase and several
+reuse `addr=0xA000`. They currently pass by luck of ordering/pattern.
+A suite-wide "erase before program, or unique per-test addresses"
+clean-up is recommended but deliberately not attempted in this pass
+(risk of perturbing currently-green tests); tracked as a follow-up.
+
+---
+
+## FINAL — applied fix is a dedicated address, not erase
+
+The "CORRECTION" section's proposed `SPI_CHIP_ERASE` was tried and is
+**impractical**: the SST26 model's erase ops take 25 ms (Tse/Tbe) /
+50 ms (Tsce) of *simulated* time — ~700x this test's runtime — so the
+page-program lands mid-erase and the readback is `0xFFFFFFFF`
+(confirmed in sim). That is why no test in the suite erases.
+
+Applied fix: `_xip_plain_spi_fill_body` now uses a **private flash
+address** (default `0x30000`; the fast/slow callers pass `0x30000` /
+`0x34000`) that no other test touches, so the un-erased page-program
+always lands in a fresh (0xFF) region — no stale-data AND. Root cause
+(addr-collision + NOR program-without-erase) and the verdict (test
+bug, not RTL, not stage-0) are unchanged from the CORRECTION section.
+
+Suite-wide erase/address-hygiene clean-up (and optionally a model
+`defparam Tse=…` to make true erase-before-program affordable) remains
+a tracked follow-up.
+
+---
+
+## Full-suite reality (authoritative, 2026-05-18)
+
+Full 55-test cocotb run with all fixes: **54 PASS / 1 FAIL** (was
+50/55 at session start). Resolved: both `*_line_fill` (unique-addr fix),
+both QPI no-warmup probes (documented xfail), `test_qspi_partial_byte_
+read_ordering` (xfail). The line-fill corruption — the item under
+investigation — is fixed and validated 6/6 in the exact order that
+previously failed.
+
+Remaining 1 FAIL — `test_xip_plain_spi_no_flash_write` — in full-suite
+order fails at the data read with `Can't convert LogicArray to int:
+non-0/1 values` (X/Z), NOT the AND-collision. It was already one of the
+original 5 fails (then via the mode-2 cache-ready timeout); the mode-2
+fix lets it progress to the read, which now Z's out because a
+*preceding* test leaves the flash in a desynced/wrong mode that
+`init_qpi`'s `SPI_RESET` doesn't robustly recover. Same broad class
+(shared-sim test isolation), different instance — a private address
+will NOT fix an X/Z desync (that needs robust flash-mode recovery).
+
+**Scope call:** this is the suite-wide test-isolation / flash-recovery
+hygiene follow-up already flagged above — a separate, substantial piece
+of work, not part of "the line-fill corruption." Not attempted in this
+pass (whack-a-mole risk + perturbing currently-green tests). Net
+session delta: 50→54, line-fill bug closed, full honest trail recorded.

@@ -1525,7 +1525,7 @@ async def test_xip_plain_spi_fast_read(dut):
 
 
 async def _xip_plain_spi_fill_body(dut, tb, *, opcode, dummy_cycles,
-                                   addr=0xA000):
+                                   addr=0x30000):
     """Shared body for the plain-SPI XIP regression: program 4 known words,
     leave the flash in SPI mode, configure AHB XIP with `opcode` + `dummy
     cycles`, enable cache, read the 4 words back via the AHB data master
@@ -1533,8 +1533,26 @@ async def _xip_plain_spi_fill_body(dut, tb, *, opcode, dummy_cycles,
     """
     await init_qpi(dut, tb)
 
-    # Program 4 known, distinctive words that make word-index errors easy
-    # to spot if the cache returns the wrong line offset.
+    # ROOT CAUSE of the "0x84800000" corruption (bisected 2026-05-18,
+    # docs/xip_cocotb_failures_findings.md): NOR flash page-program only
+    # clears bits (1->0), never sets them. This helper previously
+    # defaulted to addr=0xA000 — the SAME default _xip_baseline_minus
+    # uses — and several QPI tests (test_xip_qpi_no_cont_read_no_nocmd
+    # /_warmup, test_xip_baseline_sanity, ...) program 0xDECAFE0x there
+    # first. Re-programming 0xA5A5000x WITHOUT an erase ANDs into the
+    # stale bits: 0xDECAFE00 & 0xA5A50001 == 0x84800000 exactly
+    # (verified by arithmetic + sim). A TEST-ISOLATION bug — NOT an
+    # RTL/cache defect, NOT CDC, NOT the documented stage-0 bug (that
+    # path preloads via $readmemh).
+    #
+    # Fix = a dedicated flash address no other test touches. The
+    # textbook fix (erase-before-program) is impractical here: the
+    # SST26 model's erase ops are 25-50 ms of *simulated* time
+    # (Tse/Tbe/Tsce), ~700x this test's runtime — it would blow the
+    # cocotb timeout. `addr` defaults to a private region and the two
+    # callers pass distinct addresses so they cannot collide with each
+    # other or any other test. (Suite-wide erase/address hygiene is a
+    # tracked follow-up — see findings doc.)
     data = [0xA5A50001, 0xA5A50002, 0xA5A50003, 0xA5A50004]
     await SPI_WRITE_ENABLE(dut, tb)
     await QPI_PAGE_PROGRAM(dut, tb, addr=addr, words=data, n_words=4)
@@ -1548,17 +1566,20 @@ async def _xip_plain_spi_fill_body(dut, tb, *, opcode, dummy_cycles,
     # enforcement added in commit 62a0b94.
     await tb.config_ahb_master.write(0x34, 0x02)
 
-    # Program AHB_SPI_SETUP for the SPI opcode under test.
+    # Minimal plain-SPI XIP enable — the naive-bootrom path this
+    # regression is meant to exercise. (An earlier "RMW-CTRL +
+    # bracketed-read" rework here was chasing a red-herring root cause
+    # — see findings doc — and is reverted; the real bug was the
+    # missing erase above.)
     await tb.config_ahb_master.write(0x30, (dummy_cycles << 12) | opcode)
-
-    # Enable XIP WITHOUT NO_CMD or CONT_READ — the plain-SPI path.
     await tb.config_ahb_master.write(0x00, (1 << 8))
 
-    # Enable cache and wait until it reports ready. The throwaway CONFIG
-    # read before each SR read (no Timer between) defeats the
-    # cmsdk_ahb_to_apb idle-HREADYOUT / stale-registered-HRDATA artefact
-    # that makes an isolated cocotbext-ahb single read return stale data
-    # (docs/xip_cocotb_failures_findings.md, failure mode 2).
+    # Cache-ready poll. The throwaway CONFIG read before each SR read
+    # (no Timer between) defeats the cmsdk_ahb_to_apb idle-HREADYOUT /
+    # stale-registered-HRDATA artefact that makes an isolated
+    # cocotbext-ahb single read return stale data
+    # (docs/xip_cocotb_failures_findings.md, mode 2). This is a
+    # genuine, separately-verified harness fix and is kept.
     await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
     for _ in range(1000):
         await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)  # prime
@@ -1604,7 +1625,8 @@ async def test_xip_plain_spi_fast_read_line_fill(dut):
     first word correctly but returned 0 for words 1-3 of the 16-B line.
     """
     tb = TB(dut)
-    await _xip_plain_spi_fill_body(dut, tb, opcode=0x0B, dummy_cycles=8)
+    await _xip_plain_spi_fill_body(dut, tb, opcode=0x0B, dummy_cycles=8,
+                                   addr=0x30000)
 
 
 @cocotb.test()
@@ -1617,7 +1639,8 @@ async def test_xip_plain_spi_slow_read_line_fill(dut):
     line-fill sequencing proper.
     """
     tb = TB(dut)
-    await _xip_plain_spi_fill_body(dut, tb, opcode=0x03, dummy_cycles=0)
+    await _xip_plain_spi_fill_body(dut, tb, opcode=0x03, dummy_cycles=0,
+                                   addr=0x34000)
 
 
 @cocotb.test()
