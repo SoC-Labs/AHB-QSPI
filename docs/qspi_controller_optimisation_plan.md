@@ -204,3 +204,52 @@ bug noted at [line 286](../logical/qspi_controller/logical/qspi_controller.sv#L2
   (`Error: Width mismatch on port 'WEN' of reference to 'flash_cache_tag'`).
   This is in [`logical/cache_models/tsmc65/cache_ram.v`](../logical/cache_models/tsmc65/cache_ram.v),
   not the QSPI controller — separate fix.
+
+---
+
+## Outcome — 2026-05-18 (honest results; supersedes the predicted payoffs)
+
+Tasks 1+2 (Agent B) and 4+7 (this pass) were implemented and measured.
+The plan's predicted payoffs (~20% area from Task 1, slack recovery
+from Task 4) **did not materialise** at standalone synthesis. What
+actually happened:
+
+**The single most important finding — caught by synthesis, NOT cocotb:**
+Agent B's merged Task 1/2 (`7afecfd`) was **non-synthesisable** — the
+block split left `op_code/addr_code/qspi_mode_reg/QSPI_WDATA_reg`
+driven by two `always` blocks (`ELAB-366` multi-driver). VCS tolerates
+mutually-exclusive multi-driver so cocotb passed 55/55 and gave false
+confidence; `feat-nanosoc_int` could not be synthesised at all until
+the redundant pin-drive-block reset of those regs was removed. Running
+synthesis (not trusting the functional regression) is what surfaced it.
+**This fix is mandatory, independent of any optimisation goal.**
+
+**Measured (standalone qspi_controller, 10 ns QSPI_SCLK, sc12 ss/0.9/125),
+against the correct pre-Agent-B baseline `cda2c86` (NOT the stale Apr
+report, which predated this project's CDC hardening — that +1084 µm² /
++73 flops is CDC, not Blocker 2):**
+
+| | cda2c86 (pre-B) | final (T1/2/4/7 + fixes) |
+|--|--|--|
+| Total cell area | 9711.8 µm² | 9553.0 µm² (**−1.6 %**) |
+| Sequential cells | 423 | 432 (+9 = Task 4 `m1`/`p1`) |
+| Logic levels | 7 | 8 (+1) |
+| Critical-path slack | +0.05 ns | +0.04 ns |
+| Synthesisable | yes | yes (was BROKEN at `7afecfd`) |
+| cocotb | 55/55 | 55/55 |
+
+Net: a small (~1.6 %) area improvement and a mandatory
+synthesisability repair — *not* the headline optimisation the plan
+projected. Task 4's ±1-precompute is timing-neutral here (its real
+target is the top-level QSPI_SCLK 14-level path, which standalone
+synth does not exercise — re-measure at top-level FC signoff). Task 2
+made truly reset-free per spec (Agent B's first cut kept a sync-reset
+mux); area-neutral — DC was already optimising that mux.
+
+**Tasks 5 & 6 — deliberately NOT done.** Task 5 (factor the shared
+post-phase next-state decode) is a readability/1-level change on an
+FSM with a documented spurious-bit-bug history — poor risk/reward.
+Task 6 (~50 µm², right-size addr_code) is entangled with the SPI
+24-bit address framing — real regression risk for marginal gain.
+Both are low value relative to the verification cost on this fragile
+block; revisit only if top-level QSPI_SCLK timing closure needs them.
