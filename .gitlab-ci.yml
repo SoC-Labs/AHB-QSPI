@@ -557,12 +557,17 @@ fpga-deploy:
     - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
     # build_design has no lease cost; do it under the lease anyway so a
     # single fpga-deploy job carries the change from clone → board.
-    - make -C "$WORK_DIR/fpga" build_design
+    - make -C "$WORK_DIR/fpga" build_design 2>&1 | tee fpga_build.log
     # `make stress` invokes with_lease.sh which detects the existing
     # FPGA_BOARD / FPGA_LEASE_TOKEN and reuses them. BOARD= is forwarded
     # to the wrapper for the assertion only — the lease isn't re-acquired.
+    # runner.py logs to stdout (incl. its end-of-run per-test summary and
+    # streamed failure lines), so tee'ing the stress console preserves
+    # the hardware-test verdict as a downloadable artifact. The
+    # `set -o pipefail` set in the lease block above still applies, so a
+    # stress failure fails the job (tee does not mask it).
     - export FPGA_BOARD FPGA_LEASE_TOKEN
-    - make -C "$WORK_DIR/fpga" stress BOARD="$FPGA_BOARD"
+    - make -C "$WORK_DIR/fpga" stress BOARD="$FPGA_BOARD" 2>&1 | tee fpga_stress.log
   after_script:
     - |
       if [ -f lease.json ]; then
@@ -570,10 +575,29 @@ fpga-deploy:
         token=$(jq -r .token lease.json)
         fpgahub lease release "$board" --token "$token" || true
       fi
+    # ---- Hardware-test evidence (mirrors the FC hand-off capture) ----
+    # Artifact paths are relative to the job working dir, so stage the
+    # build + stress console logs plus the Vivado build/package logs here
+    # (same $WORK_DIR->relative copy-back pattern the rest of the file
+    # uses). when:always means a failed stress still uploads its log.
+    - mkdir -p fpga_results
+    - mv fpga_build.log fpga_stress.log fpga_results/ 2>/dev/null || true
+    - cp lease.json fpga_results/ 2>/dev/null || true
+    - cp "$WORK_DIR/imp/fpga/run/"*.log fpga_results/ 2>/dev/null || true
+    - cp "$WORK_DIR/imp/fpga/run/"*.jou fpga_results/ 2>/dev/null || true
+    # NOTE: runner.py also writes machine-readable qspi_stress_summary.json
+    # / qspi_stress_failures.jsonl, but on the *board* under $DEST. Pulling
+    # those back belongs in the harness (run_stress.sh, under-lease scp) —
+    # doing it here would duplicate with_lease.sh's host resolution and
+    # break its "no hardcoded SSH coords" property. fpga_stress.log already
+    # carries the same per-test summary on stdout.
   artifacts:
     when: always
     paths:
       - lease.json
+      - fpga_results/
+    expose_as: "FPGA hardware stress"
+    expire_in: 30 days
 
 # ============================================================================
 # Stage 8: Cleanup
