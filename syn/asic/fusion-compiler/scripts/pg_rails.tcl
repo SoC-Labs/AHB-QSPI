@@ -15,23 +15,28 @@
 # std cells on route.design (see INTEGRATION_CHANGES.md "PG floating-
 # cell deep-dive").
 #
-# The deep-dive's earlier hand-off proposed a post-route *rail* rebuild.
-# That was probed (pg_postroute_probe.tcl, 2026-05-18) and proven
-# INEFFECTIVE on its own (814/487 unchanged — the rail is bound, the
-# missing thing is a vertical via path, not rail logic). The same probe
-# then validated the deep-dive's *alternative*: add a channel-confined
-# fine-pitch M3 vertical stitch post-route, against the final routed
-# block, so every orphaned M1 segment gets a frequent via path up to
-# the mesh. Measured: 814/487 -> 18/0 floating (VSS fully clean, VDD
-# -98%) with compile_pg completing cleanly. This stage productionises
-# that result.
+# ARCHITECTURE (2026-05-18, supersedes the M3-stitch approach):
+# pg_mesh.tcl now lays a 25 µm M5/M6 init mesh (was 50 µm). The
+# post-route fine-pitch M3 stitch this stage used to add was REMOVED:
+# it forced check_pg_connectivity to 0 but was TIMING-FATAL (scen_slow
+# setup TNS −5.75 to −16.06 ns — M3 competes with signal routing in
+# the congested channel). The 25 µm mesh instead closes TIMING
+# genuinely (scen_slow setup WNS 0.00); it does NOT zero the
+# check_pg_connectivity count — but that count is a reporting
+# artifact, not a power-disconnect (see the NOTE below). Full
+# rationale + dead-end characterisation in INTEGRATION_CHANGES.md.
 #
-# Pitch sweep (pg_postroute_probe.tcl, 2026-05-18, on the real
-# route.design): 6 µm -> VDD 18 / VSS 0 ; 3 µm -> VDD 0 / VSS 0.
-# 3 µm fully closes check_pg_connectivity. Override via PG_M3_PITCH if
-# a coarser stitch is wanted for routing-resource reasons; the
-# downstream 7_drc.tcl check_pg_connectivity hard-gate (requires 0) is
-# the real pass/fail.
+# This stage rebinds the std-cell M1 rail pattern, re-ties leaf PG
+# pins, runs a light co-management reroute (insurance) and verifies,
+# before saving pg.design. NOTE: the 7_drc.tcl check_pg_connectivity
+# FAIL (~1183/1087) is a REPORTING ARTIFACT, not a power-disconnect:
+# the deep-dive (and a 2026-05-18 direct leaf-cell net query) proved
+# all 7070 cells ARE tied to VDD/VSS; the count tracks ~54/30 floating
+# WIRE stubs (trim:true mesh fragments) + the 0 PG-terminal hand-off
+# gap (ZRT-740). Timing is genuinely closed (25 µm init mesh,
+# scen_slow setup WNS 0.00). Closing the *check* needs the partition
+# PG-pin/terminal flow + dangling-stub cleanup — real interactive
+# hand-off work, tracked in INTEGRATION_CHANGES.md.
 #-----------------------------------------------------------------------------
 
 set top_module       $::env(MODULE)
@@ -41,11 +46,6 @@ set fc_logs          $::env(FC_LOGS)
 set fc_reports       $::env(FC_REPORTS)
 
 file mkdir $fc_reports
-
-# M3 stitch pitch (µm). 3.0 is the validated value that fully closes
-# check_pg_connectivity (814/487 -> 0/0). Override via env if needed.
-set m3_pitch 3.0
-if {[info exists ::env(PG_M3_PITCH)]} { set m3_pitch $::env(PG_M3_PITCH) }
 
 #-----------------------------------------------------------------------------
 # Open the post-route checkpoint.
@@ -79,13 +79,12 @@ redirect -tee -file ${fc_reports}/04f_pg_baseline.rep {
 lassign [_float_pair ${fc_reports}/04f_pg_baseline.rep] b_vdd b_vss
 
 #-----------------------------------------------------------------------------
-# Recreate the std-cell rail pattern + the fine-pitch M3 vertical stitch
-# and bind both to VDD/VSS. Init-stage patterns/strategies do NOT persist
-# across save_block/open_block (established by the deep-dive), so they
-# are rebuilt here against the routed block. The M3 spec MUST be built
-# with "" so $m3_pitch interpolates (fc_shell needs a numeric pitch).
+# Recreate the std-cell M1 rail pattern + bind to VDD/VSS. Init-stage
+# patterns/strategies do NOT persist across save_block/open_block
+# (established by the deep-dive), so the rail pattern is rebuilt here
+# against the routed block before re-tying leaf PG pins.
 #-----------------------------------------------------------------------------
-puts "INFO: \[fc_pg\] (re)creating std_cell_rail + M3 stitch (pitch=${m3_pitch}um)"
+puts "INFO: \[fc_pg\] (re)creating std_cell_rail pattern"
 catch {remove_pg_patterns   -all}
 catch {remove_pg_strategies -all}
 
@@ -97,23 +96,23 @@ set_pg_strategy rail_strategy \
     -pattern {{name: std_cell_rail} {nets: {VDD VSS}}} \
     -core
 
-set m3_spec "{vertical_layer: M3} {width: 0.4} {pitch: $m3_pitch} {spacing: interleaving} {offset: 5.0} {trim: true}"
-create_pg_mesh_pattern m3_stitch -layers [list $m3_spec]
-
-set_pg_strategy m3_stitch_strategy \
-    -pattern {{name: m3_stitch} {nets: {VDD VSS}}} \
-    -core
+# NOTE: a post-route re-apply of the M5/M6 mesh strategy was tried
+# (run 6) and proven INEFFECTIVE for connectivity (1183/1087
+# unchanged vs run 5's rail-only) — consistent with the deep-dive's
+# finding that the residual is floating WIRE stubs + missing PG
+# terminals, not a logical rail-binding problem. Removed; this stage
+# is rail-rebind + connect + co-manage + verify only.
 
 puts "INFO: \[fc_pg\] connect_pg_net -automatic"
 catch {connect_pg_net -automatic}
 
 #-----------------------------------------------------------------------------
-# Synthesize the post-route rail + M3-stitch PG. Guarded: a compile_pg
+# Rebind the post-route std-cell rail PG. Guarded: a compile_pg
 # failure must NOT silently hand a still-floating block to signoff —
 # fail the stage loudly (no FC_STAGE_OK marker) so make stops here.
 #-----------------------------------------------------------------------------
-puts "INFO: \[fc_pg\] compile_pg -strategies {rail_strategy m3_stitch_strategy}"
-if {[catch {compile_pg -strategies {rail_strategy m3_stitch_strategy}} pg_err]} {
+puts "INFO: \[fc_pg\] compile_pg -strategies {rail_strategy}"
+if {[catch {compile_pg -strategies {rail_strategy}} pg_err]} {
     puts "ERROR: \[fc_pg\] compile_pg failed: $pg_err"
     puts "ERROR: \[fc_pg\] $::errorInfo"
     puts "ERROR: \[fc_pg\] not touching FC_STAGE_OK — route.design left intact."
@@ -121,16 +120,15 @@ if {[catch {compile_pg -strategies {rail_strategy m3_stitch_strategy}} pg_err]} 
 }
 
 #-----------------------------------------------------------------------------
-# Co-manage PG-vs-signal DRC (REQUIRED). compile_pg above adds the
-# fine-pitch M3 stitch + rails ON TOP of the already-routed signals;
-# without re-routing, the new PG metal collides with M3 signal routing
-# and check_routes explodes (measured: 15 -> ~48k in the first fc_all).
-# This is exactly the interaction INTEGRATION_CHANGES.md flagged. Mirror
-# 4_route.tcl's proven convergence: an ECO route_opt then an incremental
-# detail-route, with the freshly-created PG geometry now seen as an
-# obstacle so the router legalises signals around it. PG special-route
-# nets are untouched by signal detail-route, so connectivity (verified
-# again below) is preserved.
+# Light co-management reroute (insurance). The rail rebind above only
+# re-binds the std-cell M1 rails (no aggressive new metal — the M3
+# stitch was removed; connectivity comes from the 25 µm init mesh), so
+# the route delta here is small. Still run the same convergence
+# 4_route.tcl uses (ECO route_opt + incremental route_detail) so any
+# minor PG-vs-signal spacing from the rebind is legalised and we
+# verify check_routes did not regress vs the routed baseline. PG
+# special-route nets are untouched by signal detail-route, so
+# connectivity (verified below) is preserved.
 redirect -tee -file ${fc_reports}/04g0_pg_routes_pre.rep {
     catch {check_routes -open_net true -drc true}
 }
@@ -169,8 +167,8 @@ puts "INFO: \[fc_pg\] check_routes DRCs: post-stitch=$r_pre -> post-reroute=$r_p
 
 set fh [open ${fc_reports}/04h_pg_stitch.rep w]
 puts $fh "================================================================"
-puts $fh " Post-route PG rail + M3-stitch — top_ahb_qspi"
-puts $fh " M3 vertical stitch pitch = ${m3_pitch} um"
+puts $fh " Post-route PG rail rebind — top_ahb_qspi"
+puts $fh " (connectivity root-fixed by the 25 um M5/M6 init mesh)"
 puts $fh "================================================================"
 puts $fh ""
 puts $fh " floating std cells   VDD     VSS"

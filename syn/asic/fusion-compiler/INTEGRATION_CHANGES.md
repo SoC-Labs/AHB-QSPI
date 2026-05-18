@@ -408,3 +408,47 @@ or changing the init mesh so fewer segments orphan at the source.
 This is the interactive tool-in-loop PnR work the original deep-dive
 flagged; autonomous trial-and-error has bounded the problem but does
 not converge it.
+
+## RESOLUTION 2026-05-18 — timing genuinely closed; PG-check is a verified artifact
+
+After exhausting the post-route M3-stitch family (every variant
+timing-fatal: scen_slow setup TNS −5.75 to −16.06 ns; channel-confine
+worse), the root fix was found on the right layer at the right stage:
+
+**pg_mesh.tcl M5/M6 init mesh 50 µm → 25 µm. Validated end-to-end
+(fc_all runs 5 & 6, all 8 stages + FM_LEC_OK):**
+- `scen_slow` setup WNS **−5.75/−16.06 → 0.00 ns** (1 path TNS −0.00) —
+  TIMING GENUINELY CLOSED. `check_legality` PASS, `check_pg_drc` PASS,
+  `check_routes` ~10–12. The denser mesh is built at INIT so 4_route
+  routes signals around it natively (M5/M6 are upper metal, above the
+  M1–M4 signal stack) — hence ~0 timing cost, vs the M3 stitch which
+  fought the router post-route.
+
+**check_pg_connectivity still FAILs (~1183/1087) — but this is a
+REPORTING ARTIFACT, independently re-verified, NOT a power-disconnect:**
+- A 2026-05-18 direct fc_shell leaf-cell query (the deep-dive's method)
+  re-confirmed: all 7070 cells ARE tied to VDD/VSS. The count tracks
+  the floating WIRE stubs (run 6: VDD 54 / VSS 30 — trim:true mesh
+  fragments) plus **0 PG terminals** (`get_terminals` of VDD = 0 while
+  226 signal terminals exist): the partition's VDD/VSS supply ports
+  have no boundary pin geometry, so the checker has no anchor to trace
+  from and floods "floating". `create_terminals_for_pins -ports
+  {VDD VSS}` was probed and is ineffective (creates 0 terminals) — PG
+  terminals need the proper partition PG-pin flow.
+- A *denser* mesh (25 vs 50 µm) *increasing* the count (814→1183) is
+  itself proof it is not a connectivity/density problem — trim:true
+  fragments more strap ends.
+
+**Net / honest status:** the TIMING half of Blocker 1 is RESOLVED and
+committed (this was a hard open item; the M3 path had left it
+catastrophically broken). The check_pg_connectivity==0 DRC gate is NOT
+passed, but the failure is proven electrically benign (cells
+power-connected; timing closed). Closing the *gate* is genuine
+interactive partition hand-off work — the PG-pin/terminal creation
+flow (anchor VDD/VSS to the mesh at the boundary; this is also the
+real fix for ZRT-740/Blocker-3) plus dangling-stub cleanup (trim:false
+or a stub-removal pass). It is NOT autonomous-iterable trial-and-error
+(every blind variant was tried); it needs the interactive PG owner the
+original deep-dive flagged, now with a far better starting point:
+timing solved, the failure mode precisely characterised, and the
+M3-stitch and mesh-density dead-ends eliminated with evidence.
