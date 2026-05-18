@@ -24,6 +24,33 @@ with the HDMI port at the top). PMODB is also functional but is *not* what
 this overlay targets - re-route in the XDC if you wire PmodSF3 to PMODB
 instead.
 
+## New: the `cocotb-silicon` flow (recommended)
+
+The cocotb-replay engine in this directory has been extracted into a
+standalone, reusable package — **`cocotb-silicon`** (sibling repo). This
+project now consumes it through one declarative adapter:
+
+| File | Purpose |
+|---|---|
+| [cocotb_silicon_adapter.py](cocotb_silicon_adapter.py) | `QspiAdapter` — the entire project-specific surface (address map, TB wiring, poll/IRQ protocol, Micron overrides) |
+| [run_cocotb_silicon.py](run_cocotb_silicon.py) | board entrypoint; harness-compatible (`python3 -m run_cocotb_silicon --budget N`) |
+
+Run it on a leased board (deploys a self-contained bundle — no board-side
+pip or repo checkout needed):
+
+```bash
+make -C fpga cocotb_hw BOARD=pynq_z2_03_pl
+# or auto-pick + time-box:
+make -C fpga cocotb_hw BOARD_TAG=qspi_flash_pmod COCOTB_HW_BUDGET=600
+```
+
+Design rationale and the engine internals: see
+[../docs/cocotb-silicon-design.md](../docs/cocotb-silicon-design.md) and
+the `cocotb-silicon` repo's `docs/` (how-pynq / how-cocotb /
+how-the-interface). The **legacy files below remain in place** as the
+signed-off source of truth until the on-board parity regression passes;
+they still work exactly as documented in the rest of this README.
+
 ## Files
 
 | File | Purpose |

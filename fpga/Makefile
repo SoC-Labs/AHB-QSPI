@@ -83,6 +83,19 @@ FPGA_STRESS_RESULTS     := qspi_stress_summary.json qspi_stress_failures.jsonl
 FPGA_STRESS_RESULTS_DIR := $(BUILD_DIR)/stress
 FPGA_PROGRAM_TCL    := $(FPGA_DIR)/program_bitstream.tcl
 
+#-----------------------------------------------------------------------------
+# cocotb-silicon wiring — run the verif/cocotb suite on hardware via the
+# standalone `cocotb-silicon` package (see docs/cocotb-silicon-design.md).
+# The board run is driven by the SAME harness as `stress`; only the python
+# module differs (pynq/run_cocotb_silicon.py).
+#-----------------------------------------------------------------------------
+# Sibling checkout of the cocotb-silicon repo (override on the cmd line if
+# elsewhere). realpath is empty if absent; the stage step errors clearly.
+COCOTB_SILICON_DIR ?= $(realpath $(QSPI_HOME)/../cocotb-silicon)
+COCOTB_HW_STAGE    := $(BUILD_DIR)/cocotb_hw_stage
+# 0 => no wall-clock guard (run the whole suite). Override for a time box.
+COCOTB_HW_BUDGET   ?= 0
+
 # Pull in the reusable harness — defines program / deploy / stress /
 # ci_full / program_jtag_local / resolve_board on top of the FPGA_*
 # variables above.
@@ -130,3 +143,45 @@ build_design: package_ip
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+#-----------------------------------------------------------------------------
+# cocotb_hw — deploy + run the cocotb suite on a leased board via
+# cocotb-silicon. Reuses the shared harness verbatim (lease → deploy →
+# `python3 -m run_cocotb_silicon --budget N` → scp results back); the only
+# project-specific bit is staging a self-contained bundle so the board
+# import works without a repo checkout or pip on the board.
+#
+#   make -C fpga cocotb_hw BOARD=pynq_z2_03_pl
+#   make -C fpga cocotb_hw BOARD_TAG=qspi_flash_pmod COCOTB_HW_BUDGET=600
+#-----------------------------------------------------------------------------
+.PHONY: cocotb_hw stage_cocotb_hw
+
+# Flat bundle: pynq/ (incl. the adapter + entrypoint) + the cocotb_silicon
+# package + verif/cocotb/*.py, all side by side, so `python3 -m
+# run_cocotb_silicon` from the overlay cwd resolves every import.
+stage_cocotb_hw:
+	@echo "Staging cocotb-silicon bundle -> $(COCOTB_HW_STAGE)"
+	@rm -rf $(COCOTB_HW_STAGE)
+	@mkdir -p $(COCOTB_HW_STAGE)
+	@cp -r $(FPGA_PYNQ_SRC)/. $(COCOTB_HW_STAGE)/
+	@test -d "$(COCOTB_SILICON_DIR)/src/cocotb_silicon" || { \
+	    echo "ERROR: cocotb_silicon not found at '$(COCOTB_SILICON_DIR)/src'."; \
+	    echo "       set COCOTB_SILICON_DIR=<path to cocotb-silicon checkout>."; \
+	    exit 2; }
+	@cp -r $(COCOTB_SILICON_DIR)/src/cocotb_silicon $(COCOTB_HW_STAGE)/
+	@cp $(QSPI_HOME)/verif/cocotb/*.py $(COCOTB_HW_STAGE)/
+	@echo "Staged pynq/ + cocotb_silicon/ + verif/cocotb/*.py (flat)"
+
+# Mirrors harness/fpga.mk:stress but with module=run_cocotb_silicon and the
+# staged dir as the deploy source. FPGA_STRESS_RESULTS/_DIR are
+# target-scoped so the harness scp's the cocotb result JSON back.
+cocotb_hw: FPGA_STRESS_RESULTS     := qspi_cocotb_results.json
+cocotb_hw: FPGA_STRESS_RESULTS_DIR := $(BUILD_DIR)/cocotb_hw
+cocotb_hw: _require_harness_inputs _require_board stage_cocotb_hw \
+           $(FPGA_BIT) $(FPGA_BIN) $(FPGA_HWH)
+	$(WITH_LEASE) $(LEASE_TARGET) --ttl $(FPGAHUB_TTL) -- \
+	    bash $(FPGA_HARNESS_SCRIPTS)/deploy_and_stress.sh \
+	        "$(FPGA_BIT)" "$(FPGA_BIN)" "$(FPGA_HWH)" \
+	        "$(COCOTB_HW_STAGE)" "$(FPGA_DEST)" "$(FPGA_PASSWORD)" \
+	        "$(COCOTB_HW_BUDGET)" "run_cocotb_silicon" \
+	        "$(FPGA_FIRMWARE_NAME)"

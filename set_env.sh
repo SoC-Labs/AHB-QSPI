@@ -1,6 +1,16 @@
 export SOCLABS_AHB_QSPI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SOCLABS_SOCTOOLS_FLOW_DIR=$SOCLABS_AHB_QSPI_DIR/soctools_flow
 
+# cocotb-silicon: standalone package that replays the verif/cocotb suite on
+# hardware (see docs/cocotb-silicon-design.md). Default to a sibling
+# checkout; override COCOTB_SILICON_DIR before sourcing if it lives
+# elsewhere. Added to PYTHONPATH for host-side use (`make -C fpga cocotb_hw`
+# stages it onto the board independently of this).
+export COCOTB_SILICON_DIR="${COCOTB_SILICON_DIR:-$(cd "$SOCLABS_AHB_QSPI_DIR/../cocotb-silicon" 2>/dev/null && pwd)}"
+if [ -n "$COCOTB_SILICON_DIR" ] && [ -d "$COCOTB_SILICON_DIR/src/cocotb_silicon" ]; then
+    export PYTHONPATH="$COCOTB_SILICON_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+fi
+
 if [ ! -f $SOCLABS_AHB_QSPI_DIR/verif/VIP/SST26VF064B.v ]; then
     pushd $SOCLABS_AHB_QSPI_DIR
     make get_flash_model
