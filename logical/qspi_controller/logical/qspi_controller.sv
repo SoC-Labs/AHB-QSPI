@@ -399,14 +399,13 @@ reg QSPI_IO_e_int;
 // Negedge shift-out block — single top-level if-else chain required for
 // SpyGlass CDC synthesis (SYNTH_133).
 //
-// QSPI_WDATA_reg is loaded ONCE in the idle/default branch (the FSM is
-// always in IDLE/NO_FETCH immediately before any transaction starts, and
-// QSPI_WDATA is held stable by the APB WDATA registers for the whole
-// transaction). It is then only shifted in DATA_O. Previously it was
-// reloaded from QSPI_WDATA in every non-DATA_O branch, which forced DC to
-// build a 4-input mux on all 128 flops (the AOI22/OAI222 cells that
-// dominated combinational area). Loading it once collapses the D-side
-// cone to a 2-input idle-load / DATA_O-shift mux. (Task 1.)
+// This block holds only the QSPI pin-drive state that genuinely needs a
+// defined value out of reset: QSPI_SCLK_e (clock-enable, idle low),
+// QSPI_IO_o_reg (data out, idle 4'hF) and QSPI_IO_e_int (output-enable,
+// idle driving). The shift-register *storage* (op_code, addr_code,
+// qspi_mode_reg, QSPI_WDATA_reg) was moved to the no-reset block below
+// (Task 2). The if-else-on-current_state chain structure is preserved in
+// both blocks so the SYNTH_133 CDC contract still holds.
 always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
     if(~HRESETn) begin
         QSPI_SCLK_e <= 1'b0;
@@ -421,19 +420,13 @@ always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
         QSPI_SCLK_e <= 1'b0;
         QSPI_IO_o_reg <= 4'hF;
         QSPI_IO_e_int <= 1'b1;
-        op_code <= 8'h00;
-        addr_code <= 24'h000000;
-        qspi_mode_reg <= 8'h00;
-        QSPI_WDATA_reg <= 128'd0;
     end else if(current_state==OP) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg[3:0]<=op_code[7:4];
-            op_code[7:0] <= {op_code[3:0],4'h0};
         end else begin
             QSPI_IO_o_reg[3:0]<={3'h7, op_code[7]};
-            op_code[7:0] <= {op_code[6:0], 1'b0};
         end
     end else if(current_state == DATA_I) begin
         QSPI_IO_e_int <= 1'b0;
@@ -455,10 +448,8 @@ always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
         // actually the first legitimate nibble shift — do NOT suppress.
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg <= QSPI_WDATA_reg[3:0];
-            QSPI_WDATA_reg <= {4'h0, QSPI_WDATA_reg[127:4]};
         end else if(byte_counter != 5'h1F) begin
             QSPI_IO_o_reg[0] <= QSPI_WDATA_reg[0];
-            QSPI_WDATA_reg <= {1'b0, QSPI_WDATA_reg[127:1]};
         end else begin
             QSPI_SCLK_e <= 1'b0;  // suppress the spurious SPI-mode clock
         end
@@ -467,10 +458,8 @@ always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
         QSPI_SCLK_e <= 1'b1;
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg[3:0]<=addr_code[23:20];
-            addr_code[23:0] <= {addr_code[19:0],4'h0};
         end else begin
             QSPI_IO_o_reg[3:0]<={3'h7, addr_code[23]};
-            addr_code[23:0] <= {addr_code[22:0], 1'b0};
         end
     end else if(current_state == DUMMY) begin
         QSPI_IO_e_int <= 1'b0;
@@ -480,16 +469,66 @@ always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
         QSPI_SCLK_e <= 1'b1;
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg <= qspi_mode_reg[7:4];
+        end
+    end else begin
+        QSPI_SCLK_e<=1'b0;
+        QSPI_IO_o_reg<=4'hF;
+        QSPI_IO_e_int <= 1'b1;
+    end
+end
+
+// Shift-register storage bank — NO reset branch (Task 2).
+//
+// op_code, addr_code, qspi_mode_reg and QSPI_WDATA_reg are every one
+// loaded from a primary input (QSPI_CMD / QSPI_ADDR / mode-code /
+// QSPI_WDATA) in the idle/default branch before the FSM can leave IDLE,
+// so they are always written before any state that reads them. The
+// async-reset clear was therefore functionally redundant and only forced
+// DC onto DFFNRPQ_X1M (~12 um2) instead of plain DFFNQ (~10 um2) on 168
+// flops. Dropping the reset branch lets DC pick the smaller flop.
+//
+// The single if-else-on-current_state chain is mirrored from the block
+// above so the SYNTH_133 CDC structure is unchanged. The RHS reads here
+// (e.g. op_code[7:4]) and the pin-drive reads in the block above all
+// sample the pre-update value on the same negedge (non-blocking), so the
+// split is bit-exact with the original merged block.
+always @(negedge QSPI_SCLK_i) begin
+    if(soft_reset_sync) begin
+        // synchronous soft-reset via watchdog (kept: matches the
+        // pin-drive block's soft_reset behaviour; no async reset).
+        op_code <= 8'h00;
+        addr_code <= 24'h000000;
+        qspi_mode_reg <= 8'h00;
+        QSPI_WDATA_reg <= 128'd0;
+    end else if(current_state==OP) begin
+        if(qspi_qio_mode_latched==1'b1) begin
+            op_code[7:0] <= {op_code[3:0],4'h0};
+        end else begin
+            op_code[7:0] <= {op_code[6:0], 1'b0};
+        end
+    end else if(current_state == DATA_O) begin
+        if(qspi_qio_mode_latched==1'b1) begin
+            QSPI_WDATA_reg <= {4'h0, QSPI_WDATA_reg[127:4]};
+        end else if(byte_counter != 5'h1F) begin
+            QSPI_WDATA_reg <= {1'b0, QSPI_WDATA_reg[127:1]};
+        end
+    end else if(current_state == ADDR) begin
+        if(qspi_qio_mode_latched==1'b1) begin
+            addr_code[23:0] <= {addr_code[19:0],4'h0};
+        end else begin
+            addr_code[23:0] <= {addr_code[22:0], 1'b0};
+        end
+    end else if(current_state == MODE) begin
+        if(qspi_qio_mode_latched==1'b1) begin
             qspi_mode_reg <= {qspi_mode_reg[3:0], 4'b0};
         end
+    end else if(current_state == DATA_I || current_state == DUMMY) begin
+        // hold — DATA_I/DUMMY do not touch the shift-register bank
     end else begin
         op_code <= QSPI_CMD;
         addr_code <= {2'b00,QSPI_ADDR};
         qspi_mode_reg <= qspi_mode_code_latched;
         QSPI_WDATA_reg <= QSPI_WDATA;
-        QSPI_SCLK_e<=1'b0;
-        QSPI_IO_o_reg<=4'hF;
-        QSPI_IO_e_int <= 1'b1;
     end
 end
 always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
