@@ -477,3 +477,70 @@ hygiene follow-up already flagged above — a separate, substantial piece
 of work, not part of "the line-fill corruption." Not attempted in this
 pass (whack-a-mole risk + perturbing currently-green tests). Net
 session delta: 50→54, line-fill bug closed, full honest trail recorded.
+
+---
+
+## v2 — test-isolation follow-up CLOSED (2026-05-18, branch `agent/test-isolation-v2`)
+
+The flagged follow-up is now done. Full suite: **54/55 → 55/55**
+(0 unexpected fails; the 3 xfails — `test_qspi_partial_byte_read_
+ordering`, `test_xip_qpi_no_cont_read_no_nocmd`, `_warmup` — stay
+xfail-pass). TEST-HARNESS ONLY; no RTL touched.
+
+`test_xip_plain_spi_no_flash_write` (full-suite order) had **two
+stacked** shared-sim test-isolation defects; fixing the first exposed
+the second:
+
+**Defect 1 — flash MODE desync (the X/Z, root-caused above).** Its
+predecessor `test_xip_qpi_no_nocmd` leaves the flash in QPI
+*continuous-read* (`Mode_Configuration[7:4]===4'hA`). The old
+`SPI_RESET` sent a single QPI RSTQIO, which the SST26VF064B SQI
+interpreter (`verif/VIP/SST26VF064B.v` ~line 686) **swallows**: with
+continuous-read armed, `sqi_count===0` force-aborts the command loop
+(`sqi_count=8`) and re-triggers `SQI_HS_READ_trg` — the byte is
+consumed as a read continuation, never decoded as RSTQIO, so
+`SQI_SPI_mode` stays True and the following SPI-framed RSTEN/RST are
+mis-parsed by the still-active QPI interpreter; the model never fires
+its `reset` event → flash drives 'z' → AHB read X/Z (line ~1477).
+
+  *Fix:* hardened `SPI_RESET` in `verif/cocotb/SST26VF064B.py` —
+  order-independent, idempotent: (2) RSTQIO ×2 in QPI framing (1st
+  absorbs the continuous-read trap, which itself clears
+  `Mode_Configuration=8'hFF`; 2nd is now decoded as a real
+  `SQI_RSTQIO` → `SQI_SPI_mode=False`); (3) RSTEN+RST in QPI framing
+  (belt-and-braces); (4) controller→SPI framing, RSTEN+RST in SPI —
+  the definitive `reset` event (clears `SQI_SPI_mode`,
+  `Mode_Configuration`, every active read/program loop). Helper
+  `_flash_cmd_byte` de-dups the command-only-transaction pattern.
+
+**Defect 2 — flash DATA collision (exposed once the X/Z was gone).**
+With the mode desync fixed the read progressed to the data assertion
+and returned `0xDEADBEEF` for word 0 at flash `0x1000`. Cause:
+`test_bug1_rdata_latch` (test #6) page-programs `0xDEADBEEF` at
+`0x1000` and never erases; NOR program only clears bits, and the model
+`reset` event does **not** wipe `memory[]`; so test #26 (which expects
+fresh 0xFF at `0x1000`) reads the stale value. Same NOR-without-erase
+class as the line-fill collision, different address.
+
+  *Fix:* a true **erase-before-use** — new `SPI_SECTOR_ERASE`
+  primitive (WREN + global-protection-unlock + 0x20 Sector Erase +
+  BUSY spin) called at the top of `test_xip_plain_spi_no_flash_write`
+  to erase the `0x1000` sector. Now affordable purely because the tb
+  wrapper already overrides `defparam I0.Tse=1_000` (≈1 us vs the
+  datasheet 25 ms, ~25000×) — this is the `defparam` enabler the
+  earlier FINAL section flagged; with it, erase-before-use is the
+  *general, order-independent* cure (vs the one-off private-address
+  patch). Verified no test reads flash `0x1000` after #26, so the
+  added erase regresses nothing.
+
+**Why this is general, not a one-off:** the mode-recovery fix lives in
+the shared `SPI_RESET` reached (directly or via
+`init_qpi`/`_xip_baseline_minus`/`_xip_plain_spi_fill_body`) by every
+flash-touching test, so the whole suite is now flash-mode
+order-independent. `SPI_SECTOR_ERASE` is a reusable erase-before-use
+primitive for any future test needing a known-fresh region.
+
+Files: `verif/cocotb/SST26VF064B.py` (hardened `SPI_RESET`,
+`_flash_cmd_byte`, `SPI_SECTOR_ERASE`), `verif/cocotb/ahb_qspi_tests.py`
+(`test_xip_plain_spi_no_flash_write` erase + docstring). No RTL, no tb
+wrapper change (the enabling `defparam`s were already present).

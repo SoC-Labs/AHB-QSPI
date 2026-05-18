@@ -1420,25 +1420,41 @@ async def test_xip_qpi_no_nocmd(dut):
 
 @cocotb.test()
 async def test_xip_plain_spi_no_flash_write(dut):
-    """Plain-SPI XIP on an un-programmed flash (default 0xFF pattern).
+    """Plain-SPI XIP on an erased (all-0xFF) flash region.
 
-    Skips the SPI_WRITE_ENABLE / QPI_PAGE_PROGRAM / SPI_WRITE_DISABLE
-    sequence so the flash stays in its fresh-power-on state (SPI mode,
-    all 0xFF). That matches how `nanosoc-ethernet-flash-system`'s
-    `cocotb/soc_boot_flash` preloads the flash via `$readmemh` — no SPI
-    traffic ever touches the part before the XIP read starts. If this
-    passes, the other plain-SPI tests are failing because
-    SPI_WRITE_ENABLE / QPI_PAGE_PROGRAM left flash in a state the cache
-    can't talk to.
+    Models how `nanosoc-ethernet-flash-system`'s `cocotb/soc_boot_flash`
+    sees the part: a clean 0xFF region read over the plain-SPI XIP path
+    with no programmed data. If this passes, the other plain-SPI tests
+    are failing because SPI_WRITE_ENABLE / QPI_PAGE_PROGRAM left flash in
+    a state the cache can't talk to.
+
+    Test-isolation note (shared-sim): the suite runs every test in one
+    simulation with no flash reset between tests. Two hazards:
+
+      (a) Flash MODE desync. A predecessor (test_xip_qpi_no_nocmd) leaves
+          the flash in QPI continuous-read; the hardened SPI_RESET
+          (SST26VF064B.py) robustly recovers it — without that this
+          read Z'd out (X/Z on the AHB data path).
+
+      (b) Flash DATA collision. test_bug1_rdata_latch page-programs
+          0xDEADBEEF at flash 0x1000 and never erases it; NOR program
+          only clears bits, so this test (which expects fresh 0xFF at
+          0x1000) read 0xDEADBEEF for word 0. Cured generally by an
+          explicit SECTOR ERASE of the region below — true
+          erase-before-use, order-independent, made affordable by the
+          `defparam I0.Tse=1_000` in ahb_qspi_cocotb.v (~1 us vs 25 ms).
     """
     tb = TB(dut)
     await tb.cycle_reset()
     await SPI_RESET(dut, tb)
 
-    # Flash defaults to all-0xFF after power-on (per SST26VF064B model
-    # initial block). Expected read value is 0xFFFFFFFF for every word.
+    # The 4 KiB sector at 0x1000 is shared with test_bug1_rdata_latch
+    # (which programs 0xDEADBEEF there). Erase it so the region is
+    # genuinely fresh 0xFF regardless of test order. Expected read value
+    # is 0xFFFFFFFF for every word.
     addr = 0x1000
     expected = 0xFFFFFFFF
+    await SPI_SECTOR_ERASE(dut, tb, addr=addr)
 
     # Plain-SPI XIP setup.
     await tb.config_ahb_master.write(0x34, 0x02)  # CLK_DIV=2
