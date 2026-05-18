@@ -367,3 +367,44 @@ iterative pitch/topology tuning (or a targeted orphan-segment stitch +
 a tolerance on the strict-0 gate) to get PG=0 AND setup-timing closed
 AND M3 min-area clean — the tool-in-loop PnR iteration originally
 predicted. Each iteration is a full `fc_all`.
+
+## Channel-confined experiment — NEGATIVE result (2026-05-18, runs 3-4)
+
+Tested the deep-dive's "channel-confined fine-pitch M3 stitch"
+recommendation: confine the 3 µm M3 stitch to the orphaned-rail
+std-cell channel x=[316.8,653.2] (between the flash_cache_data macro
+columns; geometry derived from place_memories.tcl).
+
+- Run 3: failed fast — `set_pg_strategy -region` is not valid in this
+  fc_shell 2022.12 build (`CMD-010`). Real API probed: region
+  confinement is `-polygon {{x y} {x y} ...}` (pairs form; flat
+  8-number form rejected). The fail-loud guard worked (no marker,
+  canonical blocks untouched).
+- Run 4 (correct `-polygon`): PG connectivity stays **0/0** (so every
+  orphaned segment IS in that channel — confirms the deep-dive's
+  localisation) and `FM_LEC_OK` holds, BUT setup timing got **worse**,
+  not better: `scen_slow` setup TNS −5.75→**−16.06 ns**, 70→**137**
+  paths, vs the blanket variant.
+
+**Why (the crux of this blocker):** the orphaned-rail channel is *also*
+the worst congestion hotspot — a narrow std-cell band pinned between
+the two macro columns with the tag RAMs inside it. The blanket stitch
+diluted the M3-PG burden across spare-track core area; confining it
+concentrates all that M3 into the most timing-critical region. The
+orphan locus and the congestion locus coincide — which is exactly why
+init-stage compile_pg can't pre-empt it and why no 3 µm-pitch variant
+(blanket or confined) closes timing while meeting the strict PG==0
+gate (6 µm pitch leaves 18 floating; 3 µm is timing-fatal).
+
+**Status:** the channel-confine change was REVERTED (not committed —
+it is strictly worse). Committed state remains a983473 (blanket +
+co-management: PG 0/0, routes 11, `scen_slow` setup TNS −5.75 — the
+least-bad, honestly-documented variant). Untried levers for an
+interactive PG owner: relax the strict PG==0 DRC gate to a small
+tolerance + coarser pitch; a genuinely *sparse/targeted* stitch only
+at the specific orphaned M1 segments (not a uniform mesh); an
+alternate stitch layer that doesn't compete with M3 signal routing;
+or changing the init mesh so fewer segments orphan at the source.
+This is the interactive tool-in-loop PnR work the original deep-dive
+flagged; autonomous trial-and-error has bounded the problem but does
+not converge it.
