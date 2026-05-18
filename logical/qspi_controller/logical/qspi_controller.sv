@@ -397,8 +397,16 @@ end
 reg QSPI_IO_e_int;
 
 // Negedge shift-out block — single top-level if-else chain required for
-// SpyGlass CDC synthesis (SYNTH_133). QSPI_WDATA_reg load is merged into
-// every branch except DATA_O (where it is shifted instead).
+// SpyGlass CDC synthesis (SYNTH_133).
+//
+// QSPI_WDATA_reg is loaded ONCE in the idle/default branch (the FSM is
+// always in IDLE/NO_FETCH immediately before any transaction starts, and
+// QSPI_WDATA is held stable by the APB WDATA registers for the whole
+// transaction). It is then only shifted in DATA_O. Previously it was
+// reloaded from QSPI_WDATA in every non-DATA_O branch, which forced DC to
+// build a 4-input mux on all 128 flops (the AOI22/OAI222 cells that
+// dominated combinational area). Loading it once collapses the D-side
+// cone to a 2-input idle-load / DATA_O-shift mux. (Task 1.)
 always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
     if(~HRESETn) begin
         QSPI_SCLK_e <= 1'b0;
@@ -420,7 +428,6 @@ always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
     end else if(current_state==OP) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
-        QSPI_WDATA_reg <= QSPI_WDATA;
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg[3:0]<=op_code[7:4];
             op_code[7:0] <= {op_code[3:0],4'h0};
@@ -431,7 +438,6 @@ always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
     end else if(current_state == DATA_I) begin
         QSPI_IO_e_int <= 1'b0;
         QSPI_SCLK_e <= 1'b1;
-        QSPI_WDATA_reg <= QSPI_WDATA;
     end else if(current_state == DATA_O) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
@@ -459,7 +465,6 @@ always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
     end else if(current_state == ADDR) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
-        QSPI_WDATA_reg <= QSPI_WDATA;
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg[3:0]<=addr_code[23:20];
             addr_code[23:0] <= {addr_code[19:0],4'h0};
@@ -470,11 +475,9 @@ always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
     end else if(current_state == DUMMY) begin
         QSPI_IO_e_int <= 1'b0;
         QSPI_SCLK_e <= 1'b1;
-        QSPI_WDATA_reg <= QSPI_WDATA;
     end else if(current_state == MODE) begin
         QSPI_IO_e_int <=1'b1;
         QSPI_SCLK_e <= 1'b1;
-        QSPI_WDATA_reg <= QSPI_WDATA;
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg <= qspi_mode_reg[7:4];
             qspi_mode_reg <= {qspi_mode_reg[3:0], 4'b0};
