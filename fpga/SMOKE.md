@@ -132,13 +132,21 @@ make -C fpga stress BOARD=pynq_z2_01_pl FPGA_STRESS_BUDGET=60
 ```
 
 The stress runner writes a JSON summary to
-`./qspi_stress_summary.json` on the board. Expected final log lines:
+`./qspi_stress_summary.json` on the board, which the harness then scp's
+back into `imp/fpga/stress/` (this repo sets `FPGA_STRESS_RESULTS` /
+`FPGA_STRESS_RESULTS_DIR` in `fpga/Makefile`; pulled even on failure).
+Expected final log lines:
 
 ```
 stress.runner INFO STRESS RUN COMPLETE: 0 failure(s) across 6 test(s) in 1.4 min
 stress.runner INFO Summary written to ./qspi_stress_summary.json
+[stress] pulled qspi_stress_summary.json -> .../imp/fpga/stress/
+[stress] pulled qspi_stress_failures.jsonl -> .../imp/fpga/stress/
 [stress] done
 ```
+
+(A `WARNING: could not pull 'qspi_stress_failures.jsonl'` is benign —
+the runner only writes the failures file when there are failures.)
 
 Six phases run in this order: `soak`, `xip_torture`, `mode_flip`,
 `concurrent`, `clk_div_sweep`, `irq_storm`. **0 failures** is the

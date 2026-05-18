@@ -585,12 +585,11 @@ fpga-deploy:
     - cp lease.json fpga_results/ 2>/dev/null || true
     - cp "$WORK_DIR/imp/fpga/run/"*.log fpga_results/ 2>/dev/null || true
     - cp "$WORK_DIR/imp/fpga/run/"*.jou fpga_results/ 2>/dev/null || true
-    # NOTE: runner.py also writes machine-readable qspi_stress_summary.json
-    # / qspi_stress_failures.jsonl, but on the *board* under $DEST. Pulling
-    # those back belongs in the harness (run_stress.sh, under-lease scp) —
-    # doing it here would duplicate with_lease.sh's host resolution and
-    # break its "no hardcoded SSH coords" property. fpga_stress.log already
-    # carries the same per-test summary on stdout.
+    # runner.py's machine-readable qspi_stress_summary.json /
+    # qspi_stress_failures.jsonl are now scp'd off the board by the
+    # harness (run_stress.sh, under the active lease — see fpga/Makefile
+    # FPGA_STRESS_RESULTS*) into $(BUILD_DIR)/stress. Capture them too.
+    - cp -r "$WORK_DIR/imp/fpga/stress/." fpga_results/ 2>/dev/null || true
   artifacts:
     when: always
     paths:

@@ -14,6 +14,17 @@
 #   <python_module>  argument to `python3 -m`, e.g. 'stress.runner'
 #                    or 'tests.stress'. The runner must accept
 #                    `--budget <seconds>`.
+#
+# Optional env (opt-in; unset → behaves exactly as before):
+#   FPGA_STRESS_RESULTS      space-separated basenames the runner writes
+#                            into <dest_dir> on the board, e.g.
+#                            'qspi_stress_summary.json qspi_stress_failures.jsonl'.
+#                            scp'd back after the run.
+#   FPGA_STRESS_RESULTS_DIR  local dir to place them in
+#                            (default: ./fpga_stress_results).
+# Results are pulled even when the run FAILS (a partial summary aids
+# triage); a pull error only warns — the remote stress exit code stays
+# the pass/fail gate.
 #-----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -39,8 +50,33 @@ SSH_OPTS+=(
 )
 
 echo "[stress] running $MODULE on $PYNQ_HOST (budget=${BUDGET}s)"
+set +e
 ssh "${SSH_OPTS[@]}" "$PYNQ_HOST" "
     cd $DEST &&
     echo '$PASSWORD' | sudo -S python3 -u -m $MODULE --budget $BUDGET
 "
+rc=$?
+set -e
+
+# ── Best-effort: pull structured result files back off the board ─────────
+# Pulled even on rc!=0 so a failed run still yields its partial summary
+# for triage. scp reuses SSH_OPTS (incl. ProxyJump). A missing/failed
+# pull only warns; the remote stress rc below is the real gate.
+results="${FPGA_STRESS_RESULTS:-}"
+if [ -n "$results" ]; then
+    rdir="${FPGA_STRESS_RESULTS_DIR:-./fpga_stress_results}"
+    mkdir -p "$rdir"
+    for f in $results; do
+        if scp "${SSH_OPTS[@]}" "$PYNQ_HOST:$DEST/$f" "$rdir/" 2>/dev/null; then
+            echo "[stress] pulled $f -> $rdir/"
+        else
+            echo "[stress] WARNING: could not pull '$f' from $DEST (runner may not have written it)" >&2
+        fi
+    done
+fi
+
+if [ "$rc" -ne 0 ]; then
+    echo "[stress] FAILED (remote exit $rc)" >&2
+    exit "$rc"
+fi
 echo "[stress] done"

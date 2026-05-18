@@ -76,6 +76,11 @@ FPGA_PYNQ_SRC       := $(QSPI_HOME)/pynq
 FPGA_DEST           := /home/xilinx/qspi_overlay
 FPGA_FIRMWARE_NAME  := qspi.bin
 FPGA_STRESS_MODULE  := stress.runner
+# Pull runner.py's structured results back off the board after `make
+# stress` (its argparse defaults — see pynq/stress/runner.py). Land them
+# in the build tree next to $(RUN_DIR), so CI/after_script can grab them.
+FPGA_STRESS_RESULTS     := qspi_stress_summary.json qspi_stress_failures.jsonl
+FPGA_STRESS_RESULTS_DIR := $(BUILD_DIR)/stress
 FPGA_PROGRAM_TCL    := $(FPGA_DIR)/program_bitstream.tcl
 
 # Pull in the reusable harness — defines program / deploy / stress /

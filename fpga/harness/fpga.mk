@@ -45,6 +45,13 @@ FPGA_HARNESS_SCRIPTS := $(FPGA_HARNESS_DIR)/scripts
 #   FPGA_STRESS_MODULE python -m argument for `make stress`.  Required for
 #                      the stress target only; no default.
 #   FPGA_STRESS_BUDGET seconds budget for the stress runner.  Default: 300
+#   FPGA_STRESS_RESULTS      space-separated basenames the stress runner
+#                            writes into FPGA_DEST on the board; scp'd
+#                            back after `make stress` (even on failure).
+#                            Default: empty → no pull-back (opt-in per
+#                            project, so the shared harness stays generic).
+#   FPGA_STRESS_RESULTS_DIR  local dir for the pulled files.
+#                            Default: $(CURDIR)/fpga_stress_results
 #   FPGAHUB_TTL        Lease seconds.  Default: 3600
 #   FPGAHUB_METHOD     `fpgahub board program --method` selector
 #                      (e.g. `linux` for pynq_overlay).  Default: empty
@@ -67,6 +74,11 @@ FPGA_BIN             ?= $(FPGA_BIT:.bit=.bin)
 FPGA_FIRMWARE_NAME   ?= $(notdir $(FPGA_BIN))
 FPGA_PASSWORD        ?= xilinx
 FPGA_STRESS_BUDGET   ?= 300
+FPGA_STRESS_RESULTS      ?=
+FPGA_STRESS_RESULTS_DIR  ?= $(CURDIR)/fpga_stress_results
+# Exported so a project's value reaches the `bash run_stress.sh` recipe
+# environment (inherited through with_lease.sh) without a signature change.
+export FPGA_STRESS_RESULTS FPGA_STRESS_RESULTS_DIR
 FPGAHUB_TTL          ?= 3600
 FPGAHUB_METHOD       ?=
 FPGAHUB_FORCE        ?=
