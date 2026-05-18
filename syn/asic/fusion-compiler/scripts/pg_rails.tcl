@@ -121,13 +121,51 @@ if {[catch {compile_pg -strategies {rail_strategy m3_stitch_strategy}} pg_err]} 
 }
 
 #-----------------------------------------------------------------------------
-# Post-stitch connectivity + a concise stage report.
+# Co-manage PG-vs-signal DRC (REQUIRED). compile_pg above adds the
+# fine-pitch M3 stitch + rails ON TOP of the already-routed signals;
+# without re-routing, the new PG metal collides with M3 signal routing
+# and check_routes explodes (measured: 15 -> ~48k in the first fc_all).
+# This is exactly the interaction INTEGRATION_CHANGES.md flagged. Mirror
+# 4_route.tcl's proven convergence: an ECO route_opt then an incremental
+# detail-route, with the freshly-created PG geometry now seen as an
+# obstacle so the router legalises signals around it. PG special-route
+# nets are untouched by signal detail-route, so connectivity (verified
+# again below) is preserved.
+redirect -tee -file ${fc_reports}/04g0_pg_routes_pre.rep {
+    catch {check_routes -open_net true -drc true}
+}
+puts "INFO: \[fc_pg\] post-stitch route_opt (PG-vs-signal ECO relief)"
+if {[catch {route_opt -from final_route -to final_route} pg_ro_err]} {
+    puts "WARN: \[fc_pg\] post-stitch route_opt returned: $pg_ro_err"
+}
+puts "INFO: \[fc_pg\] post-stitch incremental route_detail (legalise vs PG)"
+if {[catch {route_detail -incremental true \
+                         -initial_drc_from_input true \
+                         -max_number_iterations 10} pg_rd_err]} {
+    puts "WARN: \[fc_pg\] post-stitch route_detail returned: $pg_rd_err"
+}
+
 #-----------------------------------------------------------------------------
-puts "INFO: \[fc_pg\] post-stitch check_pg_connectivity"
+# Post-stitch connectivity + route-DRC convergence + a concise report.
+#-----------------------------------------------------------------------------
+puts "INFO: \[fc_pg\] post-reroute check_pg_connectivity"
 redirect -tee -file ${fc_reports}/04g_pg_post.rep {
     catch {check_pg_connectivity}
 }
 lassign [_float_pair ${fc_reports}/04g_pg_post.rep] p_vdd p_vss
+redirect -tee -file ${fc_reports}/04g1_pg_routes_post.rep {
+    catch {check_routes -open_net true -drc true}
+}
+proc _drc_count {f} {
+    if {![file exists $f]} { return "?" }
+    set fh [open $f r]; set t [read $fh]; close $fh
+    if {[regexp {Total number of DRC[s]? *[:=] *([0-9]+)} $t -> n]} { return $n }
+    if {[regexp {([0-9]+) +total +DRC} $t -> n]} { return $n }
+    return "see-report"
+}
+set r_pre  [_drc_count ${fc_reports}/04g0_pg_routes_pre.rep]
+set r_post [_drc_count ${fc_reports}/04g1_pg_routes_post.rep]
+puts "INFO: \[fc_pg\] check_routes DRCs: post-stitch=$r_pre -> post-reroute=$r_post"
 
 set fh [open ${fc_reports}/04h_pg_stitch.rep w]
 puts $fh "================================================================"
@@ -138,10 +176,14 @@ puts $fh ""
 puts $fh " floating std cells   VDD     VSS"
 puts $fh " -----------------   -----   -----"
 puts $fh " baseline (route)    [format %5s $b_vdd]   [format %5s $b_vss]"
-puts $fh " after PG stitch     [format %5s $p_vdd]   [format %5s $p_vss]"
+puts $fh " after PG + reroute  [format %5s $p_vdd]   [format %5s $p_vss]"
 puts $fh ""
-puts $fh " Detail: reports/04f_pg_baseline.rep / reports/04g_pg_post.rep"
-puts $fh " Hard gate is 7_drc.tcl check_pg_connectivity (must be 0)."
+puts $fh " check_routes DRCs:  post-stitch $r_pre  ->  post-reroute $r_post"
+puts $fh ""
+puts $fh " Detail: 04f_pg_baseline / 04g_pg_post (PG conn);"
+puts $fh "         04g0_pg_routes_pre / 04g1_pg_routes_post (route DRC)"
+puts $fh " Hard gates (7_drc.tcl): check_pg_connectivity=0 AND"
+puts $fh " check_routes converged."
 puts $fh "================================================================"
 close $fh
 puts "INFO: \[fc_pg\] floating std cells: route VDD=$b_vdd VSS=$b_vss -> post VDD=$p_vdd VSS=$p_vss"

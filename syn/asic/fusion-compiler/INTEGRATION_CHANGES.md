@@ -332,3 +332,38 @@ the production stage end-to-end. Still to run on a runner: a full
 The remaining DRC item is `check_routes` (15, separately converging in
 `4_route.tcl`), which the M3 stitch must be re-checked against at the
 final pitch (PG metal vs signal spacing) on that full run.
+
+## fc_all end-to-end validation — 2026-05-18 (PG fix proven; timing tradeoff quantified)
+
+Two full `make fc_all` runs on the productionised `fc_pg` stage.
+
+**Run 1 (stitch only, no co-route):** all 8 stages + `FM_LEC_OK`.
+`check_pg_connectivity` PASS **0/0** end-to-end (was 814/487) — the
+M3-stitch closes the floating-cell blocker in the *full* flow, not just
+the standalone probe. BUT `check_routes` exploded **15 → 47,945**: the
+post-route M3 metal collides with signal routing — exactly the
+PG-vs-signal interaction this doc flagged. The standalone probe missed
+it (it only ran `check_pg_connectivity`, never `check_routes`).
+
+**Run 2 (co-management added to `pg_rails.tcl`):** after `compile_pg`
+the stage now runs `route_opt -from final_route` + incremental
+`route_detail` (mirrors `4_route.tcl`). Result: `check_routes`
+**47,947 → 11** (≈ the pre-existing "15, separately converging"
+residue), PG connectivity **still 0/0**, `FM_LEC_OK` holds. Total DRC
+gate **829 → 26** (11 routes + 14 `check_pg_drc` "minimal metal area on
+M3" + 58 `check_legality`).
+
+**Quantified tradeoff (the real remaining work):** the 3 µm M3 pitch
+(needed to hit the strict `check_pg_connectivity==0` gate) is
+route/timing-hostile. After co-route legalisation, `scen_slow` setup
+regressed **TNS −0.04 → −5.75 ns / 10 → 70 paths**. Probe sweep
+brackets the lever: 6 µm → 18 VDD-float/0-VSS (timing-friendly, fails
+strict-0 gate); 3 µm → 0/0 (gate-passing, timing-hostile). The 14
+`check_pg_drc` are min-metal-area on the short M3 stitch segments.
+
+**Status:** Blocker-1 connectivity is CLOSED end-to-end and the
+co-management is proven & committed. NOT yet tape-out-clean: needs
+iterative pitch/topology tuning (or a targeted orphan-segment stitch +
+a tolerance on the strict-0 gate) to get PG=0 AND setup-timing closed
+AND M3 min-area clean — the tool-in-loop PnR iteration originally
+predicted. Each iteration is a full `fc_all`.
