@@ -452,3 +452,61 @@ or a stub-removal pass). It is NOT autonomous-iterable trial-and-error
 original deep-dive flagged, now with a far better starting point:
 timing solved, the failure mode precisely characterised, and the
 M3-stitch and mesh-density dead-ends eliminated with evidence.
+
+---
+
+## PG-flow redesign — characterised negative (2026-05-19)
+
+**Question put to the flow:** the one architectural hypothesis the
+prior writeup left open — *"deeper PG-flow redesign: run the rail+mesh
+stitch during/after std-cell placement within compile_fusion rather
+than at init."* `pg_mesh.tcl` runs the full `compile_pg` (M5/M6 mesh +
+M1 std-cell follow-pin rails + their via stitch) at **init**, before
+`compile_fusion` places a single std cell. Conjecture: the M1
+follow-pin rails are laid against *empty* floorplan rows, so the
+macro-fragmented central channel's rail segments never get a via path
+to the mesh; re-running the identical `compile_pg` against the
+**placed** block (textbook FC ordering — mesh/macro at floorplan,
+std-cell rails + mesh via-stitch *after* placement, *before* signal
+route) should let the fragmented-channel via stacks land.
+
+**Experiment (controlled, single variable = WHEN compile_pg runs):** a
+new stage `scripts/pg_prestitch.tcl` between `3_clock.tcl` and
+`4_route.tcl` opens `cts.design` (every std + clock cell PLACED, clock
+routed, **no signal net routed**), recreates the three patterns
+verbatim from `pg_mesh.tcl`, re-runs `compile_pg -strategies
+{rail_strategy mesh_strategy macro_strategy}`, saves `prestitch.design`
+which `4_route.tcl` then routes signals *around*. Validated by a full
+from-init `make fc_all` on the committed (centred-tag) floorplan + the
+proven 25 µm init mesh.
+
+**Result — HYPOTHESIS FALSIFIED:**
+
+| floating std cells | VDD  | VSS  |
+|--------------------|------|------|
+| cts.design (init)  | 1185 | 1085 |
+| after pre-route PG | 1185 | 1085 |  ← **zero change** |
+| post-route (pg_rails) | 1183 | 1088 |
+
+scen_slow setup WNS **−0.01 ns** (= committed `da1787e` baseline — no
+regression); all stages `FC_STAGE_OK`; `FM_LEC_OK`; `check_pg_drc`
+PASS; `check_legality` PASS; `check_routes` 13.
+
+**Conclusion.** Re-running the identical mesh+rail+macro `compile_pg`
+against the fully-placed, CTS'd block — the textbook ordering — moves
+the floating count by **exactly zero**. The residual is therefore *not*
+a `compile_pg` pre- vs post-placement staging artefact. This controlled
+experiment **eliminates the last remaining architectural hypothesis**
+and directly corroborates the deep-dive: the ~1183 count is floating
+WIRE stubs (trim:true mesh fragments) + the 0 partition PG-terminal
+hand-off gap (ZRT-740), with **0 std cells logically floating** (direct
+leaf-cell net query). The only honest resolution left is the **sign-off
+methodology decision**: relax the strict `check_pg_connectivity==0`
+gate to the documented wire-stub tolerance, given timing is genuinely
+closed, every cell is power-connected, and `check_design /
+check_legality / check_pg_drc / LEC` all pass.
+
+**Disposition.** The Makefile + `4_route.tcl` wiring that drove the
+stage is **reverted** — the flow is back to the proven `da1787e` path.
+`scripts/pg_prestitch.tcl` is kept (header marked CHARACTERISED
+NEGATIVE, not wired) as the reproducible experiment behind this result.
