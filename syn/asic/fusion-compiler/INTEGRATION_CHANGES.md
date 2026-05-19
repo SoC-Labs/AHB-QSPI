@@ -683,3 +683,48 @@ Makefile/scripts left at the proven 970 default (the sweep used env
 overrides only) — adopting 1020, pursuing B2 (channel-local mesh
 thinning, untried, targets the signal-vs-mesh Shorts, no area cost),
 or a macro-column floorplan-topology redesign is the next decision.
+
+### Path B2 (channel-local mesh thin) characterised — NEGATIVE (2026-05-19)
+
+User chose B2 after B1. Implemented region-bounded PG: 25 µm dense
+mesh kept in the two macro-column zones (Blocker-1 timing density
+preserved there), 50 µm sparse mesh in the bus channel only (channel
+x=[324.8 .. 645.2], bounds auto-derived from placed macro bboxes),
+exact rectangular partition via set_pg_strategy -polygon. From-init
+make fc_all at the committed die 970 (pure B2 — width isolated):
+
+| metric            | baseline 970 | B2 970          |
+|-------------------|--------------|-----------------|
+| check_routes DRCs | 13 (11E/2S)  | **18 (17E/1S)** |
+| scen_slow setup WNS | −0.01      | **−0.02**       |
+| check_pg_conn     | 1183         | **222**         |
+| LEC               | OK           | OK              |
+
+**NEGATIVE for the route-DRC goal.** B2 cleared one signal-vs-PG-mesh
+Short (2→1, as hypothesised) but EOL spacing rose 11→17: the EOL
+violations sit on lower signal layers (M2–M4), not M5/M6, so freeing
+M5/M6 channel tracks does not relieve them, and the 25/50 µm region
+seam introduces new EOL contexts. It also regressed Blocker-1 timing
+(−0.01→−0.02 — the sparser channel PG costs margin, the flagged
+mesh-thin risk). Reverted (`git checkout pg_mesh.tcl`); the proven
+uniform-25 µm mesh is restored.
+
+**Side-finding (recorded, not pursued — out of scope; Blocker-1 is
+already resolved via the waiver):** region-bounded polygon mesh
+strategies cut the trim:true wire-stub artefact 1183→**222** at the
+same macro-zone density. If the check_pg_connectivity waiver is ever
+revisited for a stricter close, region-bounded strategies — decoupled
+from B2's timing/route regressions — are the lead worth exploring.
+
+**Both halves of Path B are now exhausted; NEITHER zeroes the route
+DRCs.** B1 (widen): non-monotonic, best 10 (1 short), timing
+preserved. B2 (mesh-thin): 18, timing −0.02, reverted. Combined with
+the PG dead-ends + exp C, the macro-column-channel route residual is
+comprehensively proven NOT autonomously zeroable — it is structural to
+the two-macro-column floorplan topology. Remaining genuine options:
+(i) adopt B1's die-1020 partial (13→10, 2→1 short, timing preserved,
+no PG-ceiling change, +5 % width) + Option A documented residual;
+(ii) a macro-column floorplan-topology redesign (only structural fix;
+large effort/risk, full re-validation); (iii) stop at proven die 970 +
+Option A. An owner PPA decision, fully characterised — not autonomous
+churn.
