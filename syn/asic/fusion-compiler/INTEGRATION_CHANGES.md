@@ -728,3 +728,50 @@ no PG-ceiling change, +5 % width) + Option A documented residual;
 large effort/risk, full re-validation); (iii) stop at proven die 970 +
 Option A. An owner PPA decision, fully characterised — not autonomous
 churn.
+
+### Floorplan-topology redesign — STRUCTURAL WIN + 2 costs (2026-05-19)
+
+Owner chose the topology redesign. Implemented: all 10 cache macros
+consolidated into ONE contiguous RIGHT block (tag col | way1 | way0,
+way0 at the right margin), ONE open std-cell field (≈441×190) on the
+left/centre — the inter-column channel that structurally caused the
+route residual is GONE. die 970×190 → 1230×190 (+27 % area, height
+kept at the proven 190). place_pins.tcl: 3 IRQ/debug nets moved
+RIGHT→TOP (RIGHT is now the macro block). From-init make fc_all:
+
+| metric              | baseline 970 | B1 1020 | topology 1230   |
+|---------------------|--------------|---------|-----------------|
+| check_routes DRCs   | 13           | 10      | **8 (best)**    |
+| — real Shorts       | 2            | 1       | **0 (gone)**    |
+| — opens             | 0            | 0       | 0               |
+| — residual class    | EOL+2 Short  | EOL+1 S | 6 EOL+2 diffnet |
+| scen_slow setup WNS | −0.01        | −0.01   | **−0.02**       |
+| check_pg_conn       | 1183 WAIVE   | 1240    | **1577 FAIL**   |
+| LEC                 | OK           | OK      | OK              |
+
+**Core promise delivered:** the structural fix ELIMINATED both real
+signal-vs-PG-mesh Shorts and gave the best route-DRC count of every
+approach; the residual 8 are now ALL minor manufacturability spacing
+(6 end-of-line + 2 diff-net spacing) — no electrical defects, no
+opens. This is a qualitatively far stronger, cleanly-waivable /
+chip-top-ECO position than the baseline's 2 real Shorts.
+
+**Two owner-relevant costs (the PG/timing/area re-validation this
+option explicitly carried):**
+1. Timing −0.01→−0.02 (bigger die, longer cache buses). Small, same
+   "recoverable rounding-level" class the pg_mesh.tcl header documents
+   for −0.01, but it gives back Blocker-1 margin.
+2. check_pg_connectivity 1183→1577 — past the 1300 waiver ceiling, so
+   the waiver GUARD correctly FAILs it (guard working as designed).
+   Same benign wire-stub mechanism (0 macros floating; deep-dive: 0
+   cells logically floating) scaled by the +27 % die; the ceiling was
+   characterised for the 970 die.
+
+Not a literal check_routes==0. The 3 script changes
+(place_memories/place_pins/Makefile) are IMPLEMENTED but LEFT
+UNCOMMITTED pending the owner decision — committing means also
+re-characterising the PG ceiling for the bigger die AND accepting
+−0.02, two consequential downstream calls. Recovery lead on file: the
+B2 side-finding (region-bounded polygon mesh strategies cut the
+wire-stub artefact 1183→222) applied to this topology could fix the
+1577; the −0.02 may be recoverable with a route_opt timing pass.
