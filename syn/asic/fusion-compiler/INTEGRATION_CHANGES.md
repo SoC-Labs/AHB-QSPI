@@ -558,3 +558,61 @@ spacing + 2, 0 open nets) in the congested std-cell band between the
 macro columns — a real, *separate*, pre-existing item carried at
 ~11–13 across every run including the `da1787e` baseline, unrelated to
 the PG artefact. Tracked next.
+
+---
+
+## Residual 13 check_routes DRCs — characterised (2026-05-19)
+
+With Blocker-1's PG-connectivity gate closed by the bounded waiver, the
+ONLY remaining `total_violations` are **13 check_routes DRCs**:
+**11 End-of-line spacing + 2 Short, 0 open nets, 0 antenna**.
+
+**Characterisation (4 escalating, API-confirmed fc_shell probes):**
+- The 13 are stable at ~11–13 across *every* flow run including the
+  committed `da1787e` baseline — a structural residual, not noise.
+- They are the **post-aggressive-cleanup floor**: 4_route.tcl already
+  runs route_auto → route_opt → route_opt hold_fix → route_detail×10 →
+  route_opt ECO → route_detail×10, converging 52 → ~22 → **13**. More
+  of the *same* iteration is diminishing-returns: the residual is
+  **congestion-bound, not iteration-bound**.
+- Located (per 4_route.tcl) in the congested std-cell band between the
+  macro columns, where the cache HRDATA/HWDATA wide buses and the
+  **25 µm M5/M6 PG mesh co-compete for tracks**. This residual is
+  therefore *structurally coupled to the Blocker-1 timing fix*: the
+  denser mesh that drove scen_slow setup WNS to −0.01 ns is precisely
+  what consumes the channel tracks these nets need. It is the cost
+  side of a real PPA trade, not a tool-config oversight.
+- Per-violation geometry is **not headless-extractable** in
+  FS-COMPILER_2022.12: a fresh `check_routes` does not persist a
+  queryable error-data block (`get_drc_error_data` → SEL-004 none),
+  `create_drc_error_data` errors, `check_routes -error_data` is
+  unsupported, and the transcript carries only the 11-EOL/2-short
+  tally. Coordinates are GUI-only (`gui_check_drc_errors`). Documented
+  here so this is not re-derived.
+
+**Why this is NOT a blanket-waiver case (unlike PG):** the 11 EOL
+spacings are minor manufacturability-rule violations (nets connected;
+no opens) — routinely closed at chip-top detailed route or accepted as
+a bounded partition residual. But the **2 Shorts are real electrical
+defects** (two nets touching — almost certainly signal-vs-PG-mesh in
+the congested band) and must NOT be waived. The PG wire-stub waiver
+precedent does not transfer.
+
+**Decision required (parallel to the PG conclusion — a human PPA call,
+not autonomous iteration):**
+- **A. Documented partition residual** — hand the 11 EOL + 2 short to
+  chip-top detailed-route ECO, with the 2 shorts explicitly flagged.
+  Common for macro-heavy partitions; weaker than the PG waiver because
+  of the 2 real shorts.
+- **B. Relieve the channel** — widen the central gap / die slightly,
+  or locally thin the PG mesh in the bus channel only (trading back
+  some Blocker-1 timing margin), then re-run route→signoff→drc→LEC.
+  A real PPA re-balance; multi-hour; ripples into PG/timing/LEC.
+- **C. One bounded targeted-reroute experiment** — higher route_detail
+  effort + congestion-aware route_opt (self-seeded; no coordinates
+  needed). Cheap (~30 min) but low probability of reaching 0 since the
+  residual is congestion-bound; worth one shot before committing to B.
+
+Recommendation: **C first** (cheap, self-contained, non-destructive),
+then **A or B** as an explicit owner decision if C does not reach 0 —
+do NOT silently launch the B re-balance.
