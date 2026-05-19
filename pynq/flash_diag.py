@@ -71,6 +71,55 @@ def _raw_cmd(apb, base, tag):
     return w
 
 
+def diag_resurrect(overlay):
+    """Aggressively try to get ANY response from a non-responsive flash.
+
+    Soft reset (0x66/0x99) does NOT wake a flash in Deep Power-Down -
+    only 0xAB (Release from DPD) does. Also sweep CLK_DIV (a marginal
+    Pmod/power/SI fault may only answer slowly) and try alternative ID /
+    SFDP / status opcodes. If every read is 0x00000000 / 0xffffffff
+    across all of these, the part is genuinely dead/absent."""
+    section("RESURRECT: deep-power-down release + CLK_DIV & opcode sweep")
+    apb = overlay.apb
+
+    def two(base):                                  # command-only strobe
+        apb.write(0x08, base)
+        apb.write(0x08, base | (1 << 8))
+        _wait_ctrl_idle(apb, "rx")
+        apb.write(0x04, 0x100)
+
+    apb.write(0x00, 0x0)                             # SPI framing, no XIP
+    apb.write(0x34, 0x5)                             # safe CLK_DIV
+    apb.write(0x0C, 0x0)
+
+    _p("-- Release from Deep Power-Down (0xAB) x3, ~1ms settle each --")
+    for _ in range(3):
+        two(0xAB)
+        time.sleep(0.001)
+    _raw_cmd(apb, 0xAB | (1 << 9) | (1 << 11), "RES-0xAB (device id)")
+
+    _p("\n-- RDID 0x9F across a CLK_DIV sweep (slow may rescue marginal) --")
+    for cd in (1, 2, 3, 5, 8, 16, 31):
+        apb.write(0x34, cd)
+        _raw_cmd(apb, 0x9F | (1 << 9) | (2 << 16), f"RDID CLK_DIV={cd:>2}")
+    apb.write(0x34, 0x5)
+
+    _p("\n-- alternative ID / SFDP / status opcodes --")
+    apb.write(0x0C, 0x0)
+    _raw_cmd(apb, 0x9E | (1 << 9) | (2 << 16), "RDID-0x9E")
+    apb.write(0x0C, 0x0)
+    _raw_cmd(apb, 0x90 | (1 << 9) | (1 << 11) | (1 << 16), "REMS-0x90")
+    apb.write(0x0C, 0x0)
+    _raw_cmd(apb, 0x5A | (1 << 9) | (1 << 11) | (8 << 12) | (3 << 16),
+             "SFDP-0x5A (expect 'SFDP'=0x50444653)")
+    _raw_cmd(apb, 0x70 | (1 << 9), "FLAG-STATUS-0x70 (Micron)")
+    _raw_cmd(apb, 0x05 | (1 << 9) | (3 << 16), "RDSR-0x05 (4-byte)")
+    _raw_cmd(apb, 0x35 | (1 << 9), "RDCR-0x35")
+    _p("\n   VERDICT: any RDATA above that is NOT 0x00000000 / 0xffffffff "
+       "= the flash answered something; all 00/ff on every opcode & speed "
+       "= no electrical response (dead / absent / unpowered Pmod).")
+
+
 def section(title):
     _p("\n" + "=" * 64)
     _p("== " + title)
@@ -196,6 +245,7 @@ def main():
 
     for fn in (lambda: diag_state(apb),
                preamble,
+               lambda: diag_resurrect(overlay),
                lambda: diag_state(apb),
                lambda: diag_reference(overlay),
                lambda: diag_state(apb),

@@ -165,8 +165,16 @@ class QspiAdapter(Adapter):
                     break
             apb.write(0x04, 0x100)                 # IRQ_CLR
 
-        apb.write(0x34, 0x5)                       # safe CLK_DIV (HCLK/10)
-        # QPI framing first: absorb any continuous-read trap, then RSTQIO,
+        apb.write(0x34, 0x5)                       # safe CLK_DIV (HCLK/10;
+                                                   # CLK_DIV=1 garbles RDID)
+        apb.write(0x00, 0x0)                       # SPI framing
+        # Release from Deep Power-Down (0xAB) FIRST. A soft reset
+        # (0x66/0x99) does NOT wake a flash in DPD - empirically this was
+        # the *only* thing that revived pynq_z2_01_pl (which then read a
+        # correct Micron ID + SFDP). Twice, with a tRDP settle.
+        cmd(0xAB); time.sleep(0.001)
+        cmd(0xAB); time.sleep(0.001)
+        # QPI framing: absorb any continuous-read trap, then RSTQIO,
         # then RSTEN+RST while still in QPI.
         apb.write(0x00, 0x1)                       # CTRL.QIO_MODE=1
         cmd(0xFF); cmd(0xFF)                       # exit cont-read / RSTQIO
@@ -176,8 +184,9 @@ class QspiAdapter(Adapter):
         cmd(0x66); cmd(0x99)                       # RSTEN + RST (SPI)
         time.sleep(0.002)                          # tRST settle (Micron ~tens of us)
         apb.write(0x08, 0x0); apb.write(0x0C, 0x0)  # quiesce CMD/ADDR
-        log.info("hardware_preamble: flash soft-reset issued "
-                 "(RSTEN/RST + continuous-read exit, SPI+QPI framing)")
+        log.info("hardware_preamble: flash reset issued "
+                 "(0xAB DPD-release + RSTEN/RST + continuous-read exit, "
+                 "SPI+QPI framing)")
 
     # ---- register-poll coroutines (verbatim bodies from qspi_ahb_shim.py) ----
 
