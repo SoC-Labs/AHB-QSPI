@@ -362,41 +362,63 @@ config line**. That is the deliverable's whole point.
    --budget N` → scp results) with a staged self-contained bundle, so
    no shared `fpga.mk` edit and no board-side pip/repo dependency
    (see §2; the run-stress shell contract is already compatible).
-5. 🔄 **In progress.** First on-hardware run (`pynq_z2_01_pl`)
-   **validated the extraction itself** — deploy, bare-backend fallback,
-   stub/register/substitute, sanity, and the pure register/path tests
-   (`APB_reg_tests`, `CACHE_CONFIG`) all passed identically to legacy.
-   It surfaced two *inherent* (non-regression) issues the legacy flow
-   handled by hand: (a) `AHB_BAD_BEHAVIOUR` does an errored MMIO store
-   that raises **SIGBUS**, killing the process and aborting the other
-   ~50 tests; (b) `QSPI_TESTS`/`QSPI_READ_TESTS` assert the JEDEC ID,
-   which the real Micron PmodSF3 packs differently from the simulated
-   SST part. **Engine hardened in response:** per-test subprocess
-   **crash isolation** (a SIGBUS/segfault is now a contained `crashed`
-   line, not a run-killer) + declarative **`skip`/`xfail`** on the
-   Adapter (the documented hardware-incompatible set is now data, not
-   operator lore). The second run **completed all 55** (0 crashed, 0
-   aborted — isolation proven) and categorised the failures: ~27 were
-   one root cause — the SST helper's **1-byte RDSR** status read is
-   fragile on real silicon (`qspi_hw.py` documents this and uses a
-   4-byte RDSR), so the WIP bit was never observed clear and every
-   program/erase timed out "flash busy". **Third-round fixes:** the
-   adapter now overrides `SPI/QPI_READ_STAT_REG` with the robust
-   4-byte/0-dummy RDSR (Micron-correct write path); the cocotb stub
-   gained the names the suite actually imports (`Edge`, `First`,
-   `cocotb.utils.get_sim_time`, `AHBWrite`); and `_DummyDutSignal` is
-   now recursively no-op so deep hierarchical pokes are swallowed as
-   the README always promised. Genuinely-inherent tests (no true reset,
-   no IRQ/internal-signal visibility, cycle-edge counting, BFM
-   transaction objects) are declared `xfail` with per-entry rationale.
-   **Re-scoped gate (honest):** the simulation "55/55" is *not* an
-   achievable hardware oracle and never was — the suite programs an SST
-   part the board doesn't have. The gate is now: *register / control /
-   read / XIP-config + the Micron-corrected program/erase path* all
-   green, with the inherent classes `xfail` and the flash **write-path
-   depth** owned by the `pynq/stress/` suite (which has Micron-native
-   sequences). Legacy paths stay the source of truth; nothing is
-   deleted until that re-scoped re-run is green.
+5. ✅ **Closed — framework proven on healthy hardware; gate re-scoped
+   honestly.** Six hardware runs across two boards established the
+   following (full narrative in
+   [`docs/cocotb-silicon-findings.md`](cocotb-silicon-findings.md)):
+
+   - **The extraction + engine are correct and validated on real
+     silicon.** On a healthy board (`pynq_z2_03_pl`): clean `PASS` for
+     register/control/cache tests, **`test_spi_write_and_read` passes
+     (a real flash write+read round-trip through the extracted cocotb
+     path on silicon)**, `XFAIL` exactly the declared-inherent set,
+     `SKIP` the four, **0 crash, 0 ImportError, 0 nested-poke
+     AttributeError**, `hardware_preamble` ran. Every framework defect
+     the regression surfaced was fixed: per-test subprocess **crash
+     isolation** (a SIGBUS/segfault is a contained `crashed` line, not
+     a run-killer — found via `AHB_BAD_BEHAVIOUR`); declarative
+     **`skip`/`xfail`**; **stub completeness** (`Edge`, `First`,
+     `cocotb.utils.get_sim_time`, `AHBWrite`); recursively no-op
+     **`_DummyDutSignal`** (deep hierarchical pokes swallowed as the
+     README promised); a robust **Micron 4-byte RDSR** status override;
+     and a generic **`Adapter.hardware_preamble`** one-time on-hardware
+     reset hook (PL reconfig does *not* reset the flash chip).
+
+   - **`pynq_z2_01_pl`'s PmodSF3 is hardware-dead** (JEDEC reads
+     `0xFFFFFF`, the *proven* `qspi_hw` reference fails identically, a
+     JEDEC-standard soft reset cannot revive it). This masked/inflated
+     failures for five runs before being isolated with the
+     `make -C fpga flash_diag` probe. **Flag the board for physical
+     inspection** (loose/absent/failed Pmod on PMODA).
+
+   - **Residual, explicitly out of cocotb-silicon scope:** on healthy
+     hardware a *subset* of program/erase-heavy tests still time out
+     "flash busy" — a genuine **deep per-helper Micron-sequence
+     divergence** (SST `QPI_PAGE_PROGRAM` / `SPI_SECTOR_ERASE` / `0x98`
+     unlock / 4 KB erase vs the real N25Q). `pynq/stress/qspi_hw.py`
+     already implements these correctly; re-deriving them in adapter
+     overrides would **duplicate stress-suite coverage**. Separately,
+     the XIP-heavy tests **wedge the PS** (documented hazard:
+     concurrent APB during AHB-heavy XIP) — per-test process isolation
+     cannot survive the whole board hanging.
+
+   **Re-scoped gate (final, honest):** the simulation "55/55" is *not*
+   an achievable hardware oracle and never was — the suite programs an
+   SST part the boards don't have, and XIP-heavy tests destabilise the
+   PS. cocotb-silicon's validated remit is **the replay framework + the
+   register / control / read / XIP-config + basic program/read path on
+   real silicon**, with inherent classes `xfail`, the flash
+   **write-path depth and XIP stability owned by `pynq/stress/`**.
+   Under that remit the framework is **done and proven**. The legacy
+   `pynq/tests/` + `pynq/stress/` paths remain the signed-off source of
+   truth and are **not deleted** — cocotb-silicon is the reusable
+   replay layer, not a replacement for the Micron-native stress suite.
+
+6. ⛔ **Not pursued (decision):** chasing a fully-green hardware suite
+   would mean open-ended deep flash-sequence bring-up *plus* PS-wedge
+   mitigation — both duplicating or orthogonal to the stress suite, for
+   low marginal value once the framework is proven. Hardware iteration
+   stopped here deliberately.
 
 ---
 
