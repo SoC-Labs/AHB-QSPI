@@ -899,3 +899,70 @@ slightly relaxed channel or local NDR.
 This is the honest terminal state of the autonomous PnR work on this
 partition. Everything verifiable is verified; everything reversible
 is on the proven path.
+
+### Signal-only M5/M6 routing blockage in bus channel — CATASTROPHIC NEGATIVE (2026-05-19)
+
+Hypothesis: the 2 Shorts are signal-vs-PG-mesh in the macro-column
+channel; a `create_routing_blockage -layers {M5 M6}` over the channel
+(signal-only — PG special routing unaffected) would make the shorts
+physically impossible by forbidding signal routing on the PG layers
+there. Implemented as pg_mesh.tcl Step 8, channel bounds from placed
+macro bboxes with 4 µm guard, env-toggleable via FC_BUS_BLOCKAGE.
+From-init make fc_all at baseline die 970:
+
+    blockage geometry: x=[328.8 .. 641.2] y=[0 .. 190] on M5 + M6
+
+| metric                | baseline 970 | + bus blockage    |
+|-----------------------|--------------|-------------------|
+| route DRCs            | 13           | **129** ❌        |
+| Shorts                | 2            | **69** ❌ (34× worse) |
+| EOL spacing           | 11           | 32                |
+| Diff-net + same-net + min-edge | 0   | 28                |
+| scen_slow setup WNS   | −0.01        | **−0.05** ❌      |
+| PG-conn               | 1183 WAIVE   | 1261 WAIVE        |
+| LEC                   | OK           | OK                |
+
+**HYPOTHESIS FALSIFIED.** The blockage made the Shorts dramatically
+WORSE (2 → 69) AND tanked timing (−0.05). M5/M6 in the channel were
+not carrying *conflicting* signals — they were carrying *useful*
+long-distance signal routing. Removing those tracks crammed bus
+traffic onto M2/M3/M4 + M7+ where it cannot fit, producing massive
+signal-vs-signal congestion shorts plus boundary-effect shorts at the
+blockage edges.
+
+**This is the strongest evidence yet that the 2 Shorts are NOT a
+systemic mechanism — they are SPECIFIC LOCALISED routing decisions
+the router makes in 1–2 spots.** Bulk-flow constraints (the only
+levers autonomous PnR can apply) cannot surgically target them; they
+just relocate congestion globally. The 2 Shorts genuinely require
+interactive ECO with knowledge of the exact geometry — GUI-only in
+FS-COMPILER_2022.12 (4 probes confirmed; create_drc_error_data fails;
+get_drc_error_data SEL-004; check_routes does not persist queryable
+error-data). REVERTED; partition stays on the proven da1787e baseline.
+
+### Updated final position (2026-05-19, second close-out)
+
+Adding the signal-blockage negative to the route-DRC lever table:
+
+| lever                                        | outcome   |
+|----------------------------------------------|-----------|
+| M3 post-route stitch                         | timing-fatal |
+| Pre-route compile_pg redesign (post-place)   | zero effect |
+| Mesh density 50/25, trim true/false          | no monotonic gain |
+| Path B1 (widen die)                          | non-monotonic |
+| Path B2 (channel mesh-thin)                  | route+timing worse |
+| Experiment C (max-effort reroute)            | zero movement |
+| Floorplan-topology redesign (right block)    | NONDETERMINISTIC (8 vs 17) |
+| Topology + region-mesh cost-recovery         | partial; route regressed |
+| Signal-only M5/M6 blockage in channel        | catastrophic (2 → 69 Shorts) |
+
+The 2 real Shorts are conclusively **NOT autonomously resolvable** in
+the partition flow. They are localised routing decisions of the FC
+router that require either: (a) chip-top detailed-route ECO with GUI
+access to the geometry; (b) interactive partition-level GUI ECO to
+hand-fix the 2 short markers (route_eco / change_layer on the exact
+nets); or (c) an RTL/cache-architecture change that alters the route
+topology. None of these are headless-autonomous from this position.
+The honest hand-off remains as documented in the prior section:
+13 route DRCs (11 EOL + 2 Shorts, 0 opens) as the characterised
+chip-top-ECO residual of this partition.
