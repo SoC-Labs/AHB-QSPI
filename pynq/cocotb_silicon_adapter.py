@@ -138,6 +138,47 @@ class QspiAdapter(Adapter):
         # the robust 4-byte/0-dummy RDSR encoding is identical.
         return await self._read_status_robust(dut, tb)
 
+    # ---- one-time hardware flash reset (the wedged-flash fix) ---------
+    # The flash_diag probe proved the "flash busy" failures are the
+    # PmodSF3 left wedged across runs: PL reconfiguration does NOT reset
+    # the flash chip, so a prior run's continuous-read/QPI/suspended
+    # state persists (JEDEC then reads 0xFFFFFF and every WIP poll hangs)
+    # - the proven qspi_hw reference fails identically. This issues a
+    # JEDEC-standard soft reset (0x66 RSTEN + 0x99 RST) plus a
+    # continuous-read exit (0xFF), order-independent & idempotent,
+    # mirroring SST26VF064B.SPI_RESET (Micron N25Q-compatible). Runs once
+    # in the engine parent before any test; the physical reset persists
+    # into the isolated workers.
+
+    def hardware_preamble(self, overlay):
+        import logging
+        import time
+        apb = overlay.apb
+        log = logging.getLogger("cocotb_silicon.preamble")
+
+        def cmd(op):
+            op &= 0xFF
+            apb.write(0x08, op)
+            apb.write(0x08, op | (1 << 8))         # ENABLE strobe
+            for _ in range(200000):                # bounded controller-BUSY wait
+                if not (apb.read(0x04) & 1):
+                    break
+            apb.write(0x04, 0x100)                 # IRQ_CLR
+
+        apb.write(0x34, 0x5)                       # safe CLK_DIV (HCLK/10)
+        # QPI framing first: absorb any continuous-read trap, then RSTQIO,
+        # then RSTEN+RST while still in QPI.
+        apb.write(0x00, 0x1)                       # CTRL.QIO_MODE=1
+        cmd(0xFF); cmd(0xFF)                       # exit cont-read / RSTQIO
+        cmd(0x66); cmd(0x99)                       # RSTEN + RST (QPI)
+        # SPI framing: definitive RSTEN+RST.
+        apb.write(0x00, 0x0)
+        cmd(0x66); cmd(0x99)                       # RSTEN + RST (SPI)
+        time.sleep(0.002)                          # tRST settle (Micron ~tens of us)
+        apb.write(0x08, 0x0); apb.write(0x0C, 0x0)  # quiesce CMD/ADDR
+        log.info("hardware_preamble: flash soft-reset issued "
+                 "(RSTEN/RST + continuous-read exit, SPI+QPI framing)")
+
     # ---- register-poll coroutines (verbatim bodies from qspi_ahb_shim.py) ----
 
     async def poll_busy_clear(self, dut, tb, timeout=None):

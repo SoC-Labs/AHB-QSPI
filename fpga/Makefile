@@ -185,3 +185,22 @@ cocotb_hw: _require_harness_inputs _require_board stage_cocotb_hw \
 	        "$(COCOTB_HW_STAGE)" "$(FPGA_DEST)" "$(FPGA_PASSWORD)" \
 	        "$(COCOTB_HW_BUDGET)" "run_cocotb_silicon" \
 	        "$(FPGA_FIRMWARE_NAME)"
+
+#-----------------------------------------------------------------------------
+# flash_diag — one-shot on-board ground-truth probe (pynq/flash_diag.py):
+# proven qspi_hw Micron path vs the raw cocotb-SST sequence, side by side.
+# Same staging/lease path as cocotb_hw; output is ssh-streamed (no result
+# file -> empty FPGA_STRESS_RESULTS so the harness skips the pull-back).
+#
+#   make -C fpga flash_diag BOARD_TAG=qspi_flash_pmod
+#-----------------------------------------------------------------------------
+.PHONY: flash_diag
+flash_diag: FPGA_STRESS_RESULTS :=
+flash_diag: _require_harness_inputs _require_board stage_cocotb_hw \
+            $(FPGA_BIT) $(FPGA_BIN) $(FPGA_HWH)
+	$(WITH_LEASE) $(LEASE_TARGET) --ttl $(FPGAHUB_TTL) -- \
+	    bash $(FPGA_HARNESS_SCRIPTS)/deploy_and_stress.sh \
+	        "$(FPGA_BIT)" "$(FPGA_BIN)" "$(FPGA_HWH)" \
+	        "$(COCOTB_HW_STAGE)" "$(FPGA_DEST)" "$(FPGA_PASSWORD)" \
+	        "0" "flash_diag" \
+	        "$(FPGA_FIRMWARE_NAME)"
