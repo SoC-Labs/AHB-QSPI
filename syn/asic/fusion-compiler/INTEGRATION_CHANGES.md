@@ -652,3 +652,34 @@ Both A and B trade something hard-won (A: ships 2 real shorts; B:
 gives back Blocker-1 timing). Neither is an autonomous decision —
 escalated to the partition owner with the trade-offs fully
 characterised, exactly as the PG gate was.
+
+### Path B chosen — B1 (widen die) characterised: does NOT zero (2026-05-19)
+
+User chose B (relieve the channel). Picked B1 (widen die) over B2
+(thin mesh) to preserve the 25 µm-mesh Blocker-1 timing fix. From-init
+make fc_all sweep (timing held at scen_slow setup WNS −0.01 ns at
+EVERY point — B1 design confirmed):
+
+| die_w | route DRCs | Short | EOL | PG-conn (wire-stub) |
+|-------|-----------|-------|-----|---------------------|
+| 970   | 13        | 2     | 11  | 1183                |
+| 1020  | 10        | 1     | 9   | 1240                |
+| 1100  | 11        | 2     | 8   | 1258                |
+
+**NON-MONOTONIC.** 970→1020 improved (one real Short cleared);
+1020→1100 regressed (Short returned, total 10→11). Widening does not
+systematically drive the count down — each die width gives a different
+placement and the EOL/Short hotspots merely RELOCATE in a 10–13 band.
+Same structural signature as the PG residual (floorplan perturbation
+moves it, no setting eliminates it). PG wire-stub count scales with
+mesh extent as predicted (1183→1258); at 1020 it stays under the
+ORIGINAL committed 1300 ceiling (no waiver re-characterisation needed).
+
+**B1 outcome:** best operating point die 1020/+50 µm — a real partial
+improvement (13→10 DRCs, 2→1 Short, timing preserved, within original
+PG ceiling, +5 % die width) but NOT a clean zero. Widening alone
+cannot zero the macro-column-channel residual. Committed
+Makefile/scripts left at the proven 970 default (the sweep used env
+overrides only) — adopting 1020, pursuing B2 (channel-local mesh
+thinning, untried, targets the signal-vs-mesh Shorts, no area cost),
+or a macro-column floorplan-topology redesign is the next decision.
