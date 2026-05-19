@@ -384,12 +384,18 @@ config line**. That is the deliverable's whole point.
      and a generic **`Adapter.hardware_preamble`** one-time on-hardware
      reset hook (PL reconfig does *not* reset the flash chip).
 
-   - **`pynq_z2_01_pl`'s PmodSF3 is hardware-dead** (JEDEC reads
-     `0xFFFFFF`, the *proven* `qspi_hw` reference fails identically, a
-     JEDEC-standard soft reset cannot revive it). This masked/inflated
-     failures for five runs before being isolated with the
-     `make -C fpga flash_diag` probe. **Flag the board for physical
-     inspection** (loose/absent/failed Pmod on PMODA).
+   - **`pynq_z2_01_pl`'s flash was in Deep Power-Down — not dead**
+     (corrected). Five runs read `0xFFFFFF` and a JEDEC-standard soft
+     reset couldn't revive it, wrongly suggesting a dead Pmod. The
+     `flash_diag` RESURRECT probe proved otherwise: **`0xAB`
+     Release-from-Deep-Power-Down** (which a soft reset cannot do) then
+     `RDID` at CLK_DIV≥2 returned the correct Micron ID + `SFDP`
+     signature, and the proven `qspi_hw` reference passed
+     (read-back `MATCH=True`). Fix: `hardware_preamble` now issues
+     `0xAB` before the RSTEN/RST + continuous-read-exit sequence —
+     generic, defensive, and equally applicable to any warm-reset /
+     XIP-boot C driver (a controller/PL/SoC reset does not reset the
+     flash chip).
 
    - **Residual, explicitly out of cocotb-silicon scope:** on healthy
      hardware a *subset* of program/erase-heavy tests still time out
