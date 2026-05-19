@@ -816,3 +816,86 @@ wire-stub artefact — 0 macros, 0 logically-floating — scaled by the
 explicit PG re-validation this owner-chosen option always carried).
 place_memories/place_pins/Makefile remain uncommitted pending the
 owner close-out decision.
+
+### Topology close-out attempt — NONDETERMINISM exposed, REVERTED (2026-05-19)
+
+Implemented the topology close-out atomically: re-characterised the PG
+waiver ceiling for the 1230 die (1300 -> 1750, same benign mechanism
+scaled with mesh extent), added a bounded check_routes waiver
+mirroring the PG one (HARD: 0 Shorts AND 0 opens; ceiling 12;
+FC_ROUTES_WAIVER=0 restores strict ==0), updated the RESULT footer to
+surface CLEAN (N WAIVERS). From-init make fc_all at die 1230,
+IDENTICAL scripts to the earlier topology run that gave the "0 Shorts"
+result (53ee4d9):
+
+| metric           | topology run 1 (53ee4d9) | topology run 2 (close-out) |
+|------------------|--------------------------|----------------------------|
+| route DRCs       | 8                        | **17**                     |
+| Shorts           | **0**                    | **2 (returned)**           |
+| EOL spacing      | 6                        | 13                         |
+| Diff-net spacing | 2                        | 2                          |
+| scen_slow setup  | -0.02                    | -0.01                      |
+| PG-conn          | 1577                     | 1548                       |
+| LEC              | OK                       | OK                         |
+
+**DECISIVE.** The 7_drc waiver edits run AFTER signoff and cannot
+affect route results -- so identical inputs (same topology scripts,
+same uniform -core 25 µm mesh) produced 8 / 0-Shorts in one run and
+17 / 2-Shorts in another. The topology redesign's route outcome is
+**NONDETERMINISTIC**, and the "structural elimination of both Shorts"
+was a single FAVOURABLE INSTANCE, not a deterministic improvement.
+The check_routes waiver guard CORRECTLY hard-FAILED on Shorts>0
+(designed to do exactly that). RESULT: 17 violations.
+
+Net vs baseline (this run): topology gives 17 DRCs + 2 Shorts + 1548
+PG-conn at +27 % die area, vs baseline's 13 DRCs + 2 Shorts + 1183
+PG-conn at the smaller die -- WORSE by every metric this time. Over
+the two samples (route DRCs 8 and 17), the topology range BRACKETS
+baseline 13: no robust improvement, just probabilistic relocation.
+
+**All 4 uncommitted scripts REVERTED** (place_memories.tcl,
+place_pins.tcl, Makefile, 7_drc.tcl): the partition stays on the
+proven da1787e baseline (970x190, 13 route DRCs incl. 2 real Shorts,
+scen_slow setup WNS -0.01, PG-conn 1183 WAIVE under the original 1300
+ceiling, LEC OK, all other gates PASS). No further mesh- or
+topology-iteration -- the data shows none of these levers
+deterministically zero the 2 real Shorts.
+
+---
+
+## Final position — fully characterised (2026-05-19)
+
+**Blocker 1 (PG-connectivity gate): RESOLVED.** Bounded, guarded,
+auditable waiver in 7_drc.tcl (f94130c, ffa565f). 1183 waived as the
+characterised-benign wire-stub artefact; 0 macros floating; 0 cells
+LOGICALLY floating (deep-dive); strict ==0 restored by
+FC_PG_CONN_WAIVER=0. Validated both ways.
+
+**Residual: 13 check_routes DRCs (11 EOL + 2 real Shorts, 0 opens).**
+Exhaustively characterised:
+
+| lever                                        | outcome   |
+|----------------------------------------------|-----------|
+| M3 post-route stitch                         | timing-fatal (-5.75 to -16.06 ns TNS) |
+| Pre-route compile_pg redesign (post-place)   | zero effect |
+| Mesh density 50/25, trim true/false          | no monotonic gain |
+| Path B1 (widen die)                          | non-monotonic, doesn't zero |
+| Path B2 (channel mesh-thin)                  | route worse, timing -0.02 |
+| Experiment C (max-effort reroute, 40 iters)  | zero movement |
+| Floorplan-topology redesign (right block)    | probabilistic (8 then 17, Shorts returned) |
+| Topology + region-mesh cost-recovery         | timing MET but route regressed |
+
+NO autonomous lever deterministically zeroes the 2 real Shorts. They
+are a structural residual of this partition (macros + wide cache
+buses + 25 um PG mesh + die area + the cln65lp routing rules) and
+require **chip-top detailed-route ECO** or a different cache/RTL
+topology (out of scope: this is the partition deliverable).
+Recommended hand-off note for the chip-top team: 13 route DRCs (11
+EOL spacing + 2 Shorts, 0 opens) in the central std-cell+cache-bus
+channel, characterised residual of the macro-column floorplan; both
+Shorts and the EOL spacings are absorbable by chip-top ECO on a
+slightly relaxed channel or local NDR.
+
+This is the honest terminal state of the autonomous PnR work on this
+partition. Everything verifiable is verified; everything reversible
+is on the proven path.
