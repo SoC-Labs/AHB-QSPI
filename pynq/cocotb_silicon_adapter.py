@@ -74,6 +74,26 @@ class QspiAdapter(Adapter):
     # PmodSF3 is Micron N25Q256A, not the SST the sim helper hardcodes.
     device_overrides = {"SST26VF064B.ID": 0x20BA1900}
 
+    # Tests that cannot be replayed on this board. Established by the
+    # on-hardware parity regression + pynq/README.md "Known caveats":
+    #   - AHB_BAD_BEHAVIOUR does an errored AHB write; on silicon that
+    #     MMIO store raises SIGBUS and kills the process (now contained
+    #     by per-test isolation, but still pointless to run).
+    #   - test_bug{1,2,3}_* poke internal DUT nets -> no-ops on hardware.
+    skip = (
+        "AHB_BAD_BEHAVIOUR",
+        "test_bug1_rdata_latch",
+        "test_bug2_enable_ack_latch",
+        "test_bug3_no_cmd_last_addr",
+    )
+    # Run but expected to fail: both assert the JEDEC ID byte-for-byte;
+    # the real Micron PmodSF3 packs it differently from the simulated SST
+    # part. Informative to keep running; not a regression.
+    xfail = (
+        "QSPI_TESTS",
+        "QSPI_READ_TESTS",
+    )
+
     # ---- register-poll coroutines (verbatim bodies from qspi_ahb_shim.py) ----
 
     async def poll_busy_clear(self, dut, tb, timeout=None):

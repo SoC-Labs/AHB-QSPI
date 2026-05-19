@@ -44,6 +44,13 @@ make -C fpga cocotb_hw BOARD=pynq_z2_03_pl
 make -C fpga cocotb_hw BOARD_TAG=qspi_flash_pmod COCOTB_HW_BUDGET=600
 ```
 
+Each test runs in its **own subprocess** (crash isolation), so the
+`AHB_BAD_BEHAVIOUR` SIGBUS no longer aborts the run; the documented
+hardware-incompatible tests are declared in the adapter's `skip` /
+`xfail` (see [cocotb_silicon_adapter.py](cocotb_silicon_adapter.py)) —
+the same exclusions this README's "Known caveats" describe, now data
+instead of a manual `-k` filter.
+
 Design rationale and the engine internals: see
 [../docs/cocotb-silicon-design.md](../docs/cocotb-silicon-design.md) and
 the `cocotb-silicon` repo's `docs/` (how-pynq / how-cocotb /

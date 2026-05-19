@@ -362,11 +362,23 @@ config line**. That is the deliverable's whole point.
    --budget N` → scp results) with a staged self-contained bundle, so
    no shared `fpga.mk` edit and no board-side pip/repo dependency
    (see §2; the run-stress shell contract is already compatible).
-5. ⏳ **Pending — needs a board lease.** Regression gate: a green
-   `make -C fpga cocotb_hw BOARD=…` on a leased PYNQ-Z2 must match the
-   pre-extraction pass/fail set exactly. This repo's existing 55/55
-   board run is the oracle. Until then the legacy paths remain the
-   source of truth and nothing is deleted.
+5. 🔄 **In progress.** First on-hardware run (`pynq_z2_01_pl`)
+   **validated the extraction itself** — deploy, bare-backend fallback,
+   stub/register/substitute, sanity, and the pure register/path tests
+   (`APB_reg_tests`, `CACHE_CONFIG`) all passed identically to legacy.
+   It surfaced two *inherent* (non-regression) issues the legacy flow
+   handled by hand: (a) `AHB_BAD_BEHAVIOUR` does an errored MMIO store
+   that raises **SIGBUS**, killing the process and aborting the other
+   ~50 tests; (b) `QSPI_TESTS`/`QSPI_READ_TESTS` assert the JEDEC ID,
+   which the real Micron PmodSF3 packs differently from the simulated
+   SST part. **Engine hardened in response:** per-test subprocess
+   **crash isolation** (a SIGBUS/segfault is now a contained `crashed`
+   line, not a run-killer) + declarative **`skip`/`xfail`** on the
+   Adapter (the documented hardware-incompatible set is now data, not
+   operator lore). A clean re-run is the remaining gate; the "55/55" is
+   the *simulation* oracle — on hardware the legacy flow always required
+   the same exclusions. Legacy paths stay the source of truth and
+   nothing is deleted until the re-run is green.
 
 ---
 
@@ -385,9 +397,17 @@ config line**. That is the deliverable's whole point.
   bitstream reload is). `reset_writes` is the agreed soft-reset
   contract; document that test isolation is best-effort, exactly as
   [`pynq/README.md`](../pynq/README.md) already warns.
-- **Result schema.** Define one stable JSON
-  (`{passed:[], failed:[{name,why}], sanity_ok:bool}`) so FPGAhub and
-  any other transport can parse it without coupling to internals.
+- **Result schema.** ✅ Stabilised (extended after the parity regression):
+  `{passed:[], failed:[{name,why}], crashed:[{name,why}], skipped:[],
+  xfailed:[{name,why}], xpassed:[], not_run:[], sanity_ok:bool}` so
+  FPGAhub and any other transport can parse it without coupling to
+  internals.
+- **Crash isolation + skip/xfail.** ✅ Delivered (driven by the parity
+  regression's SIGBUS finding). Each test runs in its own subprocess so a
+  process-killing test is a contained `crashed` line, not a run-killer;
+  the Adapter's `skip`/`xfail` make the known hardware-incompatible set
+  declarative instead of operator lore. This generalises to any adopter,
+  not just QSPI.
 - **Stress companion.** [`stress/`](../pynq/stress/) is a parallel,
   non-cocotb capability. If it proves reusable too, a sibling
   `cocotb-silicon-stress` (PRBS + sector-rotation + budgeted runner)
