@@ -67,7 +67,8 @@ class QspiAdapter(Adapter):
 
     patch_helpers = {
         "SST26VF064B": ["poll_busy_clear", "poll_busy_set", "wait_for_irq",
-                        "SET_QPI_MODE", "LEAVE_QPI_MODE"],
+                        "SET_QPI_MODE", "LEAVE_QPI_MODE",
+                        "SPI_READ_STAT_REG", "QPI_READ_STAT_REG"],
         "ahb_qspi_tests": ["poll_busy_clear", "wait_for_irq"],
     }
 
@@ -86,13 +87,56 @@ class QspiAdapter(Adapter):
         "test_bug2_enable_ack_latch",
         "test_bug3_no_cmd_last_addr",
     )
-    # Run but expected to fail: both assert the JEDEC ID byte-for-byte;
-    # the real Micron PmodSF3 packs it differently from the simulated SST
-    # part. Informative to keep running; not a regression.
+    # Run but a fail/crash is expected and informative, not a regression.
+    # Each entry is an *inherent* silicon limitation (see the design doc
+    # limitations table), not something a Micron-correct flash path fixes:
     xfail = (
-        "QSPI_TESTS",
-        "QSPI_READ_TESTS",
+        # flash JEDEC-ID asserted byte-for-byte vs the simulated SST part
+        "QSPI_TESTS", "QSPI_READ_TESTS",
+        # soft-reset can't reproduce the bitstream power-on default
+        "test_register_reset_values", "test_reset_during_transaction",
+        # read dut.IRQ_* directly - no signal visibility on silicon
+        "test_irq_lifecycle", "test_irq_multiple_commands",
+        # count QSPI_SCLK edges via sim-time - no clock to count on silicon
+        "test_spi_write_clock_count", "test_qpi_write_clock_count",
+        "test_spi_write_single_byte_clock_count",
+        # force internal DUT nets / CDC metastability - no such nodes on HW
+        "test_xip_hang_on_stuck_busy", "test_xip_timeout_recovery",
+        "test_cdc_ack_retry_after_watchdog",
+        "test_cdc_control_bus_metastability",
+        # builds explicit cocotbext.ahb AHBWrite transaction objects (a
+        # BFM construct with no MMIO equivalent)
+        "test_xip_cache_pipelined_rw_interleave_regression",
     )
+
+    # ---- Micron-correct flash status read (the write-path fix) --------
+    # The SST helper's SPI/QPI_READ_STAT_REG does a 1-byte RDSR
+    # (N_RW_BYTES=0, 2 dummy). pynq/stress/qspi_hw.py documents that the
+    # short-read DATA_I path is fragile on real silicon, so it uses a
+    # 4-byte RDSR (N_RW_BYTES=3, 0 dummy) - the well-tested full-word
+    # path. Without this the WIP bit is never observed clear and every
+    # page-program / erase times out "flash busy". Tests inspect bit 24
+    # (WIP = SR.0) and bit 25 (WEL = SR.1), i.e. they expect the status
+    # byte at [31:24]; the flash drives SR on all 4 received bytes so
+    # RDATA0 = 0xSRSRSRSR and (RDATA0>>24)&0xFF = SR.
+
+    async def _read_status_robust(self, dut, tb):
+        base = 0x05 | (1 << 9) | (3 << 16)        # RDSR | READ | N_RW=4
+        await tb.config_ahb_master.write(0x08, base)
+        await tb.config_ahb_master.write(0x08, base | (1 << 8))   # ENABLE
+        await self.wait_for_irq(dut, tb)
+        await self.poll_busy_clear(dut, tb)
+        data = await tb.config_ahb_master.read(0x10, 4)
+        sr = (int(data[0]['data'], 16) >> 24) & 0xFF
+        return sr << 24                            # SR -> bits[31:24]
+
+    async def SPI_READ_STAT_REG(self, dut, tb):
+        return await self._read_status_robust(dut, tb)
+
+    async def QPI_READ_STAT_REG(self, dut, tb):
+        # Framing (SPI vs QPI) follows CTRL.QIO_MODE set by the caller;
+        # the robust 4-byte/0-dummy RDSR encoding is identical.
+        return await self._read_status_robust(dut, tb)
 
     # ---- register-poll coroutines (verbatim bodies from qspi_ahb_shim.py) ----
 

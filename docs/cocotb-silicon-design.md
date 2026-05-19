@@ -375,10 +375,28 @@ config line**. That is the deliverable's whole point.
    **crash isolation** (a SIGBUS/segfault is now a contained `crashed`
    line, not a run-killer) + declarative **`skip`/`xfail`** on the
    Adapter (the documented hardware-incompatible set is now data, not
-   operator lore). A clean re-run is the remaining gate; the "55/55" is
-   the *simulation* oracle — on hardware the legacy flow always required
-   the same exclusions. Legacy paths stay the source of truth and
-   nothing is deleted until the re-run is green.
+   operator lore). The second run **completed all 55** (0 crashed, 0
+   aborted — isolation proven) and categorised the failures: ~27 were
+   one root cause — the SST helper's **1-byte RDSR** status read is
+   fragile on real silicon (`qspi_hw.py` documents this and uses a
+   4-byte RDSR), so the WIP bit was never observed clear and every
+   program/erase timed out "flash busy". **Third-round fixes:** the
+   adapter now overrides `SPI/QPI_READ_STAT_REG` with the robust
+   4-byte/0-dummy RDSR (Micron-correct write path); the cocotb stub
+   gained the names the suite actually imports (`Edge`, `First`,
+   `cocotb.utils.get_sim_time`, `AHBWrite`); and `_DummyDutSignal` is
+   now recursively no-op so deep hierarchical pokes are swallowed as
+   the README always promised. Genuinely-inherent tests (no true reset,
+   no IRQ/internal-signal visibility, cycle-edge counting, BFM
+   transaction objects) are declared `xfail` with per-entry rationale.
+   **Re-scoped gate (honest):** the simulation "55/55" is *not* an
+   achievable hardware oracle and never was — the suite programs an SST
+   part the board doesn't have. The gate is now: *register / control /
+   read / XIP-config + the Micron-corrected program/erase path* all
+   green, with the inherent classes `xfail` and the flash **write-path
+   depth** owned by the `pynq/stress/` suite (which has Micron-native
+   sequences). Legacy paths stay the source of truth; nothing is
+   deleted until that re-scoped re-run is green.
 
 ---
 
