@@ -598,6 +598,84 @@ fpga-deploy:
     expose_as: "FPGA hardware stress"
     expire_in: 30 days
 
+# ----------------------------------------------------------------------------
+# Nightly hardware-validation regression (scheduled — automatic).
+#
+# Purpose: "see when this breaks". Unlike fpga-deploy (manual, opt-in via
+# FPGAHUB_BOARD), this runs AUTOMATICALLY on GitLab *scheduled* pipelines
+# only, so it never contends for the shared board farm on every push, yet
+# still tracks hardware health over time.
+#
+#   Set up the schedule once:  GitLab → Project → Build → Pipeline
+#   schedules → New schedule (e.g. nightly `0 3 * * *` on the integration
+#   branch). $CI_PIPELINE_SOURCE == "schedule" is what gates this job —
+#   no CI variable needed.
+#
+# Board is PINNED to pynq_z2_03_pl: pynq_z2_01_pl's PmodSF3 is physically
+# dead and BOARD_TAG=qspi_flash_pmod auto-pick keeps landing on it
+# (docs/cocotb-silicon-findings.md). The lease is taken ONCE by
+# harness/scripts/with_lease.sh (which also does the chiplet-pair
+# `pair_required`→`--solo` retry z2_03 needs) and reused for both phases
+# via hw_regression_run.sh.
+#
+# Two phases, hard-gated (allow_failure omitted ⇒ false):
+#   1. stress.hw_healthcheck — fast go/no-go (PIDR/CIDR + JEDEC +
+#      erase/program/readback); fails in ~tens of seconds on a dead board.
+#   2. stress.ci_regression  — the PS-stable phase subset (soak, mode_flip,
+#      clk_div_sweep, irq_storm). xip_torture/concurrent are excluded
+#      because they wedge the Zynq PS on healthy silicon
+#      (docs/cocotb-silicon-findings.md); see the PROMOTION PATH note in
+#      pynq/stress/ci_regression.py for re-enabling them.
+#
+# Per-phase pass/fail is published as JUnit so the pipeline/MR test tab
+# shows exactly which phase regressed and when.
+fpga-hw-regression:
+  stage: fpga-deploy
+  needs: [clone]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+  variables:
+    FPGAHUB_TTL: "5400"
+    QSPI_CI_STRESS_BUDGET: "300"
+  script:
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    # Build the bitstream BEFORE leasing — Vivado needs no board, so don't
+    # hold the shared lease through a ~10 min synth.
+    - make -C "$WORK_DIR/fpga" build_design 2>&1 | tee fpga_build.log
+    # One lease for both phases. with_lease.sh acquires pynq_z2_03_pl
+    # (pair_required→--solo handled), exports FPGA_BOARD/FPGA_LEASE_TOKEN,
+    # runs the driver (whose nested `make stress` calls reuse the lease),
+    # and releases on every exit path — so no after_script release needed.
+    - |
+      bash "$WORK_DIR/fpga/harness/scripts/with_lease.sh" \
+        --board pynq_z2_03_pl --ttl "$FPGAHUB_TTL" -- \
+        bash "$WORK_DIR/pynq/scripts/hw_regression_run.sh"
+  after_script:
+    # Mirror fpga-deploy's evidence capture. Artifact paths are relative
+    # to the job dir, so copy the build tree's stress results back here.
+    - mkdir -p fpga_results
+    - mv "$WORK_DIR/fpga_build.log" "$WORK_DIR/fpga_healthcheck.log" "$WORK_DIR/fpga_stress.log" fpga_results/ 2>/dev/null || true
+    - cp -r "$WORK_DIR/imp/fpga/stress/." fpga_results/ 2>/dev/null || true
+    - cp "$WORK_DIR/imp/fpga/run/"*.log fpga_results/ 2>/dev/null || true
+    # qspi_stress_summary.json → JUnit (synthetic failure if it's missing,
+    # e.g. the run hung — so the gate stays unambiguous).
+    - |
+      python3 "$WORK_DIR/pynq/scripts/stress_summary_to_junit.py" \
+        fpga_results/qspi_stress_summary.json \
+        fpga_results/qspi_stress_failures.jsonl \
+        -o hw_regression_junit.xml || true
+  artifacts:
+    when: always
+    paths:
+      - fpga_results/
+      - hw_regression_junit.xml
+    reports:
+      junit:
+        - hw_regression_junit.xml
+    expose_as: "Nightly HW regression"
+    expire_in: 30 days
+
 # ============================================================================
 # Stage 8: Cleanup
 # ============================================================================
