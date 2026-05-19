@@ -20,7 +20,7 @@ that the `pynq/stress/` suite already owns.**
 | 6 | **`03_pl`** (`flash_diag`) | healthy | `qspi_hw.jedec_id()=0x20ba19`, erase+program+**read-back MATCH=True**. Framework + preamble + overlay all work on good hardware. |
 | 6b | **`03_pl`** (full suite) | framework proven; PS wedged on XIP | Clean `PASS` incl. **`test_spi_write_and_read` (real flash write/read on silicon)**, correct `XFAIL`/`SKIP`, 0 crash. Aborted mid-run when XIP-heavy tests **hung the PS** (SSH timeout). |
 | 7 | `01_pl` (`flash_diag` RESURRECT) | **`01_pl` is ALIVE** | `0xAB` Release-from-DPD ×3, then `RDID`@CLK_DIV≥2 → `0x19ba2000` (Micron, lane order), `SFDP`→`'SFDP'`, flag-status `0x80`; `qspi_hw` reference then **passes (read-back MATCH=True)**. The "dead" verdict (runs 1–5b) was **Deep Power-Down**, which only `0xAB` clears. `CLK_DIV=1` garbles RDID; use ≥2. |
-| 8 | `01_pl` (full suite, `0xAB`-preamble) | re-validation | `hardware_preamble` now issues `0xAB` before `0x66/0x99`; full `cocotb_hw` re-run on the (alive) `01_pl` for real parity numbers. |
+| 8 | `01_pl` (full suite, `0xAB`-preamble) | **clean, complete** | First trustworthy run: **completed end-to-end** (no PS-wedge/SSH abort), `sanity_ok`, **9 pass / 28 fail / 14 xfail / 4 skip / 0 crash / 0 not-run**. Pass set incl. `test_spi_write_and_read` (real flash write+read on silicon). 28 fail = **27 "flash busy"** (deep Micron program/erase divergence — stress-suite territory) + 1 `test_rdata_regs_readonly` (no-true-reset state-bleed). The `0xAB` preamble made `01_pl` fully usable; prior 01_pl runs were inflated by the DPD red herring, the `03_pl` run aborted on PS-wedge — this one is the authoritative parity datapoint. |
 
 ## What is proven
 
