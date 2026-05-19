@@ -616,3 +616,39 @@ not autonomous iteration):**
 Recommendation: **C first** (cheap, self-contained, non-destructive),
 then **A or B** as an explicit owner decision if C does not reach 0 —
 do NOT silently launch the B re-balance.
+
+### Experiment C result — NEGATIVE (2026-05-19)
+
+Ran the cheap, non-destructive congestion-aware reroute on a copy of
+signoff.design: app-effort pushed up, then `route_opt -from
+final_route` + `route_detail -incremental ×40`, **two full passes**.
+
+    baseline           : 13 DRCs / 0 opens
+    pass1 route_opt     : 13 / 0
+    pass1 route_detail  : 13 / 0
+    pass2 route_opt     : 13 / 0
+    pass2 route_detail  : 13 / 0
+    FINAL              : 13 / 0     (no movement at all)
+
+Zero change across two max-effort passes → the residual is
+**definitively congestion-bound, not effort/iteration-bound**. More
+automated routing cannot clear it; the stock 4_route.tcl convergence
+is already at the true floor. Option C is exhausted (clean negative,
+parallel to the PG dead-ends). signoff.design left byte-intact;
+throwaway block + scratch script removed.
+
+**Decision is now A vs B — a genuine human PPA call (NOT autonomous):**
+- **A.** Accept the 11 EOL + 2 short as a documented partition
+  residual handed to chip-top detailed-route ECO, the 2 shorts
+  explicitly flagged. Cheapest; weaker than the PG waiver (2 real
+  shorts in the deliverable).
+- **B.** Relieve the macro-column channel — widen the central gap /
+  die, or locally thin the 25 µm PG mesh in the bus channel only
+  (trading back Blocker-1 timing margin), then re-run
+  route→signoff→drc→LEC. Multi-hour PPA re-balance; ripples into
+  PG/timing/LEC; the only path that genuinely zeroes the count.
+
+Both A and B trade something hard-won (A: ships 2 real shorts; B:
+gives back Blocker-1 timing). Neither is an autonomous decision —
+escalated to the partition owner with the trade-offs fully
+characterised, exactly as the PG gate was.
