@@ -775,3 +775,44 @@ re-characterising the PG ceiling for the bigger die AND accepting
 B2 side-finding (region-bounded polygon mesh strategies cut the
 wire-stub artefact 1183→222) applied to this topology could fix the
 1577; the −0.02 may be recoverable with a route_opt timing pass.
+
+### Cost-recovery attempt (region-bounded mesh on topology) — PARTIAL (2026-05-19)
+
+Owner chose "recover both costs, keep the win". Applied the B2
+side-finding to the new topology: replaced the single -core 25 µm mesh
+strategy with TWO polygon strategies (std-field | macro-block, split
+x=438, SAME 25 µm density — explicitly NOT B2's thinning). From-init
+make fc_all (die 1230, default ceiling 1300):
+
+| metric              | topology-only | topology + region-mesh |
+|---------------------|---------------|------------------------|
+| check_routes DRCs   | 8             | 12                     |
+| — real Shorts       | 0             | 1 (regressed)          |
+| scen_slow setup     | -0.02         | 0 violated — MET       |
+| check_pg_conn       | 1577 FAIL     | 1454 FAIL (still >1300)|
+| LEC                 | OK            | OK                     |
+
+**Partial: 1 of 2 costs recovered, but the route win was lost.**
+- Timing FULLY recovered (-0.02 -> MET, better than baseline) at
+  unchanged 25 µm density — proves the topology timing cost is
+  genuinely recoverable and NOT intrinsic.
+- PG-conn NOT recovered to in-band (1577 -> 1454, still > 1300).
+  B2's 1183 -> 222 was a 3-region split on the OLD split-column
+  topology; the 2-region split on the new contiguous topology does
+  not replicate it — the trim-stub reduction is partition-specific
+  and did not transfer.
+- Route REGRESSED 8 -> 12 and reintroduced 1 real Short (region seam
+  at x=438). "Keep the win" was lost.
+
+Net: region-mesh trades the 0-Shorts route win for timing and does
+not fix PG-conn -> net worse than topology-only. REVERTED
+(git checkout pg_mesh.tcl); no further mesh-partition iteration (that
+is the characterised PG anti-pattern). **Strongest deliverable =
+topology-only**: route 8 (all benign spacing, 0 Shorts, 0 opens),
+LEC OK; residual costs timing -0.02 (rounding class, same as the
+-0.01 the pg_mesh header already documents) + PG-conn 1577 (benign
+wire-stub artefact — 0 macros, 0 logically-floating — scaled by the
++27 % die; needs the ceiling re-characterised for the 1230 die, the
+explicit PG re-validation this owner-chosen option always carried).
+place_memories/place_pins/Makefile remain uncommitted pending the
+owner close-out decision.
