@@ -492,3 +492,47 @@ error browser** rather than a definitive answer. The list still
 narrows what to look at by ~1000× vs no information at all, and the
 RTL/layer/region of the top hits validates the §4–5 analysis of where
 the Shorts originate.
+
+---
+
+## Path D v2 result — EXHAUSTED (2026-05-20)
+
+Owner-requested final automatic attempt. Three-phase fc_shell script
+on a copy of `signoff.design`:
+
+| phase | DRCs | Shorts | EOL | notes |
+|---|---|---|---|---|
+| Baseline (most recent regen) | 18 | **3** | 14 | start state |
+| A — `route_eco` (no -nets, DRC-driven) | 17 | **3** | 14 | tool's own scan |
+| B — `route_eco -nets <top-50 candidates>` | 17 | **3** | 14 | bulk targeted |
+| C — `route_opt -from final_route` + `route_detail` ×30 | **12** | **3** | 9 | max-effort cleanup |
+
+**Phase A** is the decisive datapoint: `route_eco` invoked without
+`-nets` performs the tool's intended DRC-driven ECO — scan the
+design's own `check_routes` violations and fix what it can. It cleared
+exactly **1 DRC** and **0 Shorts**. The previous v1 explanation
+("Topology ECO not run, no qualifying violations or in frozen nets")
+applies here too: the 3 Shorts don't qualify for `route_eco`'s
+internal fix heuristic.
+
+**Phase C** is a useful side-finding: an extra `route_opt -from
+final_route` + 30-iteration incremental `route_detail` pass after
+Phases A+B reduced EOL violations 14 → 9. The committed flow's
+4_route.tcl is therefore NOT at the floor for EOL cleanup — wiring an
+extra cleanup pass at signoff could safely cut total DRCs by ~5
+without touching Shorts (and without harming timing, since route_opt
+already converges in 4_route.tcl). Optional follow-up.
+
+**The 3 Shorts are conclusively immune to every FC auto-ECO mechanism
+tried**: `route_eco`/`route_zrt_eco_route_nets`, `route_opt`,
+`route_detail`, candidate-list-targeted ECO, full-design DRC-driven
+ECO. Eleventh distinct autonomous lever; all-negative for Shorts.
+
+The script is preserved as
+[scripts/path_d_eco.tcl](../syn/asic/fusion-compiler/scripts/path_d_eco.tcl)
+for reproducibility — non-destructive (saves to `signoff_pathd.design`
+alias only, never overwrites the committed signoff). Run with
+`cd work && fc_shell -f ../scripts/path_d_eco.tcl`.
+
+**Recommendation re-confirmed: the 3 Shorts genuinely require Path A
+(GUI ECO) or Path B (chip-top hand-off).** Section 7 stands.
