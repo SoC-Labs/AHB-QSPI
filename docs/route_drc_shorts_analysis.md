@@ -426,3 +426,69 @@ experiment narrative lives in
 The cache RTL referenced above is at
 [logical/cache_subsytem/logical/cache_subsystem.v](../logical/cache_subsytem/logical/cache_subsystem.v)
 and [logical/cache_models/tsmc65/cache_ram.v](../logical/cache_models/tsmc65/cache_ram.v).
+
+---
+
+## Addendum (2026-05-20) — headless DEF-parsing diagnostic
+
+A python tool — `syn/asic/fusion-compiler/tools/find_def_shorts.py` —
+was written to attempt headless extraction of Short geometry from the
+routed DEF by detecting same-layer different-net rectangle
+intersections, since `check_routes` does not persist queryable error
+data in this fc_shell build.
+
+**Outcome: useful as a candidate generator, NOT as a definitive
+detector.** The DEF contains routed wire segments but not the LEF
+spacing/min-overlap/EOL rules the DRC engine uses, so naive
+rectangle-intersection over-counts dramatically. On the freshly
+regenerated baseline DEF (18 DRCs incl. 3 Shorts), the tool produces:
+
+| filtering stage              | candidate clusters |
+|------------------------------|--------------------|
+| all-pairs (raw)              | 56 994             |
+| PG (SPECIALNETS) skipped     | (default)          |
+| CTS/opt-tmp/HFSNET filtered  | **10 382**         |
+| min overlap-area ≥ 0.001 µm² | (default)          |
+
+The top-area entries are *plausible Short candidates* in the right
+physical regions (central std-cell channel + AHB pin band), correlating
+exactly with the RTL analysis of §4:
+
+```
+  #  layer     x (µm)     y (µm)    area µm²  net A   /   net B
+  1     M4     228.50     111.80     34.16    PRDATA[12]  /  PRDATA[24]
+  2     M2     232.70       3.60     23.35    HADDR[20]   /  HRESP
+  3     M2     266.60       1.00     15.21    HWDATA[17]  /  HWDATA[8]
+  4     M5     376.60      67.40     14.60    HRESETn     /  u_cache_subsystem/RAMCLD0ADDR[5]
+  5     M2     270.10       4.00     11.87    HADDR[11]   /  HWDATA[5]
+  ...
+```
+
+Entry #4 is particularly interesting: it directly matches the
+"cache-bus vs control-net crossing in the central channel" pattern
+the RTL analysis predicted as the most likely Short class.
+
+**The remaining filter the tool cannot apply without a DRC deck:** the
+LEF rules that turn "bbox-near" into "actual electrical short" (true
+metal-metal overlap, EOL extension, parallel-run length limits).
+Implementing those is essentially rebuilding a DRC engine — beyond
+scope of a diagnostic.
+
+**Practical use:**
+
+```
+# Default: skip PG + CTS, area-sort, top 30
+python3 tools/find_def_shorts.py outputs/top_ahb_qspi.def
+
+# Show segment-level detail for the top hits
+python3 tools/find_def_shorts.py outputs/top_ahb_qspi.def --show-segments
+
+# Include CTS / PG (more noise but complete coverage)
+python3 tools/find_def_shorts.py outputs/top_ahb_qspi.def --include-cts --include-pg
+```
+
+Treat the top ~10 candidates as a **shortlist to verify in the GUI
+error browser** rather than a definitive answer. The list still
+narrows what to look at by ~1000× vs no information at all, and the
+RTL/layer/region of the top hits validates the §4–5 analysis of where
+the Shorts originate.
