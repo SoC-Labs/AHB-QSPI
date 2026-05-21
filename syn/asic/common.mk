@@ -21,7 +21,7 @@ export FLIST := $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_ASIC.flist
 # Migrated 2026-05-21 from 12-track Arm sc12 -> 9-track TSMC tcbn65lp.
 # Standard cln65lp corners: wc = SS @ 0.9 V / 125 C, tc = TT @ 1.0 V /
 # 25 C, bc = FF @ 1.1 V / -40 C (foundry naming).
-export TARGET_LIB     ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/stclib/9-track/tcbn65lp-set/tcbn65lp_220a_FE/TSMCHOME/digital/Front_End/timing_power_noise/NLDM/tcbn65lp_220a/tcbn65lpwc.db
+export TARGET_LIB     ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/stclib/9-track/tcbn65lp-set/tcbn65lp_220a_FE/TSMCHOME/digital/Front_End/timing_power_noise/NLDM/tcbn65lp_220a/tcbn65lpwc1d081d08.db
 
 # ── Memory macro libraries ─────────────────────────────────────────────────
 # top_ahb_qspi instantiates two cache ways (cache_subsystem.v): each way's
@@ -61,11 +61,13 @@ export TF_FILE        ?= $(PHYS_IP_PATH)/Back_End/milkyway/tcbn65lp_200a/techfil
 export MW_REF_LIB     ?= $(PHYS_IP_PATH)/Back_End/milkyway/tcbn65lp_200a/tcbn65lp_9lmT2
 
 # ── Multi-corner .db libraries (tcbn65lp std cells) ────────────────────────
-# wc/tc/bc = TSMC standard cln65lp LP corners (0.9/1.0/1.1 V).
+# Corners aligned with the cache-macro characterisation (1.08/1.20/
+# 1.32 V) so the macro Liberty + std-cell Liberty link at one corner.
+# File naming: wcXdYYZdWW = wc-process at X.YY V core / Z.WW V io.
 export DB_PATH        ?= $(PHYS_IP_PATH)/Front_End/timing_power_noise/NLDM/tcbn65lp_220a
-export DB_SS          ?= $(DB_PATH)/tcbn65lpwc.db
-export DB_FF          ?= $(DB_PATH)/tcbn65lpbc.db
-export DB_TT          ?= $(DB_PATH)/tcbn65lptc.db
+export DB_SS          ?= $(DB_PATH)/tcbn65lpwc1d081d08.db
+export DB_FF          ?= $(DB_PATH)/tcbn65lpbc1d321d32.db
+export DB_TT          ?= $(DB_PATH)/tcbn65lptc1d21d2.db
 
 # ── TLU+ parasitic extraction models ─────────────────────────────────────
 # The TSMC tcbn65lp distribution does not ship TLU+ files itself — those

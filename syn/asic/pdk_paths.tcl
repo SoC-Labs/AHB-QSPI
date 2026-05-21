@@ -34,15 +34,21 @@ set cln65lp_tech_file       $cln65lp_tech_path/milkyway/tcbn65lp_200a/techfiles/
 set cln65lp_lef_file        $cln65lp_tech_path/lef/tcbn65lp_200a/lef/tcbn65lp_9lmT2.lef
 
 # Standard Cell libraries (9-track TSMC tcbn65lp, NLDM)
+# Corners aligned with the cache-macro characterisation (1.08 / 1.20 /
+# 1.32 V) — matching the cache-macro corners eliminates the
+# corner-mismatch synthesiser/STA warnings the default
+# wc.db/tc.db/bc.db (0.9 / 1.0 / 1.1 V) would otherwise cause when
+# the flash_cache_* .db files are linked alongside.
+# File naming: wcXdYYZdWW = wc-process at X.YY V (core) / Z.WW V (io).
 set standard_cell_lef_file                  $cln65lp_tech_path/lef/tcbn65lp_200a/lef/tcbn65lp_9lmT2.lef
 set standard_cell_gds_file                  $standard_cell_base_path/Back_End/celtic/tcbn65lp_200a/tcbn65lp.gds
 set _NLDM                                   $standard_cell_base_path/Front_End/timing_power_noise/NLDM/tcbn65lp_220a
-set standard_cell_db_file_ss_0p90v_125C     $_NLDM/tcbn65lpwc.db
-set standard_cell_lib_file_ss_0p90v_125C    $_NLDM/tcbn65lpwc.lib
-set standard_cell_db_file_tt_1p00v_25C      $_NLDM/tcbn65lptc.db
-set standard_cell_lib_file_tt_1p00v_25C     $_NLDM/tcbn65lptc.lib
-set standard_cell_db_file_ff_1p10v_m40C     $_NLDM/tcbn65lpbc.db
-set standard_cell_lib_file_ff_1p10v_m40C    $_NLDM/tcbn65lpbc.lib
+set standard_cell_db_file_ss_1p08v_125C     $_NLDM/tcbn65lpwc1d081d08.db
+set standard_cell_lib_file_ss_1p08v_125C    $_NLDM/tcbn65lpwc1d081d08.lib
+set standard_cell_db_file_tt_1p20v_25C      $_NLDM/tcbn65lptc1d21d2.db
+set standard_cell_lib_file_tt_1p20v_25C     $_NLDM/tcbn65lptc1d21d2.lib
+set standard_cell_db_file_ff_1p32v_m40C     $_NLDM/tcbn65lpbc1d321d32.db
+set standard_cell_lib_file_ff_1p32v_m40C    $_NLDM/tcbn65lpbc1d321d32.lib
 set standard_cell_antenna_file              $cln65lp_tech_path/celtic/tcbn65lp_200a/tcbn65lp_antenna.cl
 
 # ── B) Arm IO library (chip-top pad ring) ──────────────────────────────────
@@ -51,9 +57,9 @@ set io_base_path                /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/I
 
 set io_lef_file                 $io_base_path/Back_End/lef/tpdn65lpnv2od3_140b/mt_2/9lm/lef/tpdn65lpnv2od3_9lm.lef
 set io_gds_file                 $io_base_path/Back_End/celtic/tpdn65lpnv2od3_200a/tpdn65lpnv2od3.gds
-set io_db_file_ss_0p90v_125C    $io_base_path/Front_End/timing_power_noise/NLDM/tpdn65lpnv2od3_200a/tpdn65lpnv2od3wc.db
-set io_db_file_tt_1p00v_25C     $io_base_path/Front_End/timing_power_noise/NLDM/tpdn65lpnv2od3_200a/tpdn65lpnv2od3tc.db
-set io_db_file_ff_1p10v_m40C    $io_base_path/Front_End/timing_power_noise/NLDM/tpdn65lpnv2od3_200a/tpdn65lpnv2od3bc.db
+set io_db_file_ss_1p08v_125C    $io_base_path/Front_End/timing_power_noise/NLDM/tpdn65lpnv2od3_200a/tpdn65lpnv2od3wc.db
+set io_db_file_tt_1p20v_25C     $io_base_path/Front_End/timing_power_noise/NLDM/tpdn65lpnv2od3_200a/tpdn65lpnv2od3tc.db
+set io_db_file_ff_1p32v_m40C    $io_base_path/Front_End/timing_power_noise/NLDM/tpdn65lpnv2od3_200a/tpdn65lpnv2od3bc.db
 set io_antenna_file             $io_base_path/Back_End/celtic/tpdn65lpnv2od3_200a/tpdn65lpnv2od3_antenna.cl
 
 # ── C) Arm power-management kit (cln16fcll001, cross-process) ──────────────

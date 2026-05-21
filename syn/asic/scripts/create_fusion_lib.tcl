@@ -64,16 +64,16 @@ catch {set_message_info -id NDM-032 -limit 5}
 puts "INFO: \[lib\] Building cln65lp (9-track tcbn65lp std cells)"
 puts "INFO: \[lib\]   tech : $cln65lp_tech_file"
 puts "INFO: \[lib\]   LEF  : $standard_cell_lef_file"
-puts "INFO: \[lib\]   ss   : $standard_cell_db_file_ss_0p90v_125C"
-puts "INFO: \[lib\]   tt   : $standard_cell_db_file_tt_1p00v_25C"
-puts "INFO: \[lib\]   ff   : $standard_cell_db_file_ff_1p10v_m40C"
+puts "INFO: \[lib\]   ss   : $standard_cell_db_file_ss_1p08v_125C"
+puts "INFO: \[lib\]   tt   : $standard_cell_db_file_tt_1p20v_25C"
+puts "INFO: \[lib\]   ff   : $standard_cell_db_file_ff_1p32v_m40C"
 puts "INFO: \[lib\]   Out  : $output_lib_cln65lp"
 
 file delete -force $output_lib_cln65lp
 create_fusion_lib \
-    -dbs  [list $standard_cell_db_file_ss_0p90v_125C \
-                $standard_cell_db_file_tt_1p00v_25C  \
-                $standard_cell_db_file_ff_1p10v_m40C] \
+    -dbs  [list $standard_cell_db_file_ss_1p08v_125C \
+                $standard_cell_db_file_tt_1p20v_25C  \
+                $standard_cell_db_file_ff_1p32v_m40C] \
     -lefs [list $cln65lp_lef_file $standard_cell_lef_file] \
     -technology $cln65lp_tech_file \
     $output_lib_cln65lp
@@ -114,9 +114,9 @@ if {[file exists $io_lef_file]} {
     puts "INFO: \[lib\]   Out : $output_lib_io"
     file delete -force $output_lib_io
     create_fusion_lib \
-        -dbs  [list $io_db_file_ss_0p90v_125C \
-                    $io_db_file_tt_1p00v_25C  \
-                    $io_db_file_ff_1p10v_m40C] \
+        -dbs  [list $io_db_file_ss_1p08v_125C \
+                    $io_db_file_tt_1p20v_25C  \
+                    $io_db_file_ff_1p32v_m40C] \
         -lefs $io_lef_file \
         -technology $cln65lp_tech_file \
         $output_lib_io
