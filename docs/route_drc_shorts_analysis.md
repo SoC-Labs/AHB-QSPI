@@ -536,3 +536,52 @@ alias only, never overwrites the committed signoff). Run with
 
 **Recommendation re-confirmed: the 3 Shorts genuinely require Path A
 (GUI ECO) or Path B (chip-top hand-off).** Section 7 stands.
+
+---
+
+## Path C — now wired and runnable (2026-05-21)
+
+Path C previously read "only if your site has TSMC65 runset". On
+this host the TSMC Calibre PDK + the matching `1p9m_6X2Z0U` rule deck
++ Calibre `v2023.1` (at `/eda/mentor/calibre/`) are ALL present, so
+the dormant signoff DRC hook has been wired in:
+
+```
+# new files
+syn/asic/pdk_paths.tcl                # shared PDK / cell / memory paths
+syn/asic/calibre/Makefile             # make calibre_drc target
+syn/asic/calibre/run_drc.sh           # Calibre nmDRC runner
+```
+
+Run with:
+
+```
+make -C syn/asic/calibre calibre_drc
+# defaults: stack 1p9m_6X2Z0U, GDS = outputs/top_ahb_qspi.gds.gz,
+#           deck  = /home/dwn1c21/.../1p9m_6X2Z0U/calibre.drc,
+#           bin   = /eda/mentor/calibre/bin/calibre
+# override:  STACK=1p9m_6X1Z1U  /  TSMC65_DRC_DECK=<path>
+```
+
+Outputs in `syn/asic/calibre/work/`:
+- `top_ahb_qspi.drc.summary` — per-rule violation counts (PASS/FAIL)
+- `top_ahb_qspi.drc.db` — ASCII results database with **exact (x, y)
+  coordinates** for every violation
+- `top_ahb_qspi.drc.log` — Calibre stdout/stderr
+
+With those coordinates in hand, **Path A (GUI ECO) becomes much
+faster**: instead of clicking through the FC error browser to discover
+the net pair, you read the net pair + bbox out of the Calibre report,
+jump straight to it in the GUI, and apply the ECO. End-to-end Shorts
+fix in ~5 min per Short rather than 15.
+
+Alternatively, the Calibre report can be handed to chip-top
+integration together with the rest of the partition package (Path B
+hand-off) — the chip-top team will have already-prepared rule
+coordinates rather than re-deriving them.
+
+(`syn/asic/pdk_paths.tcl` also captures the wider-project chip-top
+paths — IO library, PMK/RET, SRAM_32K, ROM_VIA — as a single source
+of truth for when the partition is integrated. Most of those paths
+aren't reachable from this host and aren't used by the partition; they
+sit in pdk_paths.tcl so the chip-top context isn't lost.)

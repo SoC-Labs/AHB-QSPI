@@ -1,0 +1,6 @@
+work/
+*.svdb/
+*.drc.db
+*.drc.summary
+*.drc.log
+*.drc.results

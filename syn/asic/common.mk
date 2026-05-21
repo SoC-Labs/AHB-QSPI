@@ -75,6 +75,27 @@ export GDS_MEM_FCD     ?= $(MEM_BASE)/flash_cache_data/flash_cache_data.gds2
 export GDS_MEM_FCT     ?= $(MEM_BASE)/flash_cache_tag/flash_cache_tag.gds2
 export GDS_MERGE_FILES ?= $(GDS_STDCELL) $(GDS_MEM_FCD) $(GDS_MEM_FCT)
 
+# ── Shared PDK / cell-library / memory paths ─────────────────────────────
+# Single-source-of-truth for the chip-top + partition flows: the Tcl
+# file syn/asic/pdk_paths.tcl carries every external path the flow
+# touches. Below are the parallel Make-variable forms (Make can't
+# source Tcl), kept in sync — edit syn/asic/pdk_paths.tcl for the
+# documentation/Tcl side, and edit this block for the Make side.
+# Only the subset the PARTITION uses is materialised above (PHYS_IP_PATH
+# et al.); the chip-top-only paths (IO, PMK, RET, SRAM_32K, ROM_VIA)
+# are captured here for the wider-project context.
+export CLN65LP_TECH_PATH       ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/stclib/12-track/tcbn65lpbwp12t-set/tcbn65lpbwp12t_200b_FE/TSMCHOME/digital/Back_End
+export CLN65LP_TECH_FILE       ?= $(CLN65LP_TECH_PATH)/milkyway/tcbn65lpbwp12t_200a/techfiles/tsmcn65_9lmT2.tf
+export CLN65LP_LEF_FILE        ?= $(CLN65LP_TECH_PATH)/lef/tcbn65lpbwp12t_140b/lef/tcbn65lpbwp12t_9lmT2.lef
+export STANDARD_CELL_BASE_PATH ?= /research/AAA/phys_ip_library/arm/tsmc/cln65lp/sc12_base_rvt/r0p0
+export IO_BASE_PATH            ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/IO2.5V/iolib/linear/tpdn65lpnv2od3_200a_FE/TSMCHOME/digital
+export PMK_BASE_PATH           ?= /research/AAA/phys_ip_library/arm/tsmc/cln16fcll001/sc9mcpp96c_pmk_svt_c24/r2p0
+export RET_BASE_PATH           ?= /research/AAA/phys_ip_library/arm/tsmc/cln16fcll001/sc9mcpp96c_rklo_lvt_svt_c20_c24/r1p0
+# TSMC Calibre signoff DRC deck — pre-set to the 1p9m_6X2Z0U variant
+# matching the TF_FILE 1p9m_6x2z stack; override via STACK= or
+# TSMC65_DRC_DECK= when invoking `make calibre_drc`.
+export TSMC65_CALIBRE_PDK      ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/pdk/Calibre
+
 # ── Design constraints ─────────────────────────────────────────────────────
 # top_ahb_qspi has two boundary clocks (HCLK + PCLK, both 4 ns in the
 # existing dc_synthesis_core.tcl baseline) plus a divided-by-2 generated
