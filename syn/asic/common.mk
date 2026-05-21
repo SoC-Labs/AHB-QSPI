@@ -17,10 +17,11 @@ export TOP    ?= $(MODULE)
 # nested flist. Use the SIM flist for behavioural cache_ram models instead.
 export FLIST := $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_ASIC.flist
 
-# ── Cell libraries (TSMC 65nm LP, sc12 RVT) ────────────────────────────────
-# 1.08 V slow corner — paired with the 1.08 V SRAM macro corners below so
-# every link library sits at the same operating point.
-export TARGET_LIB     ?= /research/AAA/phys_ip_library/arm/tsmc/cln65lp/sc12_base_rvt/r0p0/db/sc12_cln65lp_base_rvt_ss_typical_max_1p08v_125c.db
+# ── Cell libraries (TSMC 65nm LP, 9-track tcbn65lp) ───────────────────────
+# Migrated 2026-05-21 from 12-track Arm sc12 -> 9-track TSMC tcbn65lp.
+# Standard cln65lp corners: wc = SS @ 0.9 V / 125 C, tc = TT @ 1.0 V /
+# 25 C, bc = FF @ 1.1 V / -40 C (foundry naming).
+export TARGET_LIB     ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/stclib/9-track/tcbn65lp-set/tcbn65lp_220a_FE/TSMCHOME/digital/Front_End/timing_power_noise/NLDM/tcbn65lp_220a/tcbn65lpwc.db
 
 # ── Memory macro libraries ─────────────────────────────────────────────────
 # top_ahb_qspi instantiates two cache ways (cache_subsystem.v): each way's
@@ -48,29 +49,37 @@ export MEM_DBS_FF     := $(if $(wildcard $(FCD_DB_FF)),$(FCD_DB_FF) $(FCT_DB_FF)
 # Link libraries — target + every macro corner present
 export LINK_LIBS      ?= $(TARGET_LIB) $(MEM_DBS_SS)
 
-# ── Physical references (TSMC 65nm LP, 1p9m_6x2z stack) ───────────────────
-export PHYS_IP_PATH   ?= /research/AAA/phys_ip_library/arm/tsmc/cln65lp
-export STDCELL_VERILOG ?= $(PHYS_IP_PATH)/sc12_base_rvt/r0p0
-export TF_FILE        ?= $(PHYS_IP_PATH)/arm_tech/r2p0/milkyway/1p9m_6x2z/sc12_tech.tf
-export MW_REF_LIB     ?= $(PHYS_IP_PATH)/sc12_base_rvt/r0p0/milkyway/1p9m_6x2z/sc12_cln65lp_base_rvt
+# ── Physical references (TSMC 65nm LP tcbn65lp, 9-track, 9-layer-metal T2)
+# Tech file = 9LM T2 stack from the TSMC tcbn65lp_220a FE distribution.
+# LEF + .db + GDS likewise come direct from the TSMC distribution
+# (foundry-original, no Arm-wrapper). The CLN65LP_TECH_PATH below is
+# the user's /home/dwn1c21 mirror — adjust on systems where TSMCHOME
+# lives elsewhere.
+export PHYS_IP_PATH   ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/stclib/9-track/tcbn65lp-set/tcbn65lp_220a_FE/TSMCHOME/digital
+export STDCELL_VERILOG ?= $(PHYS_IP_PATH)/Front_End/verilog/tcbn65lp_200a
+export TF_FILE        ?= $(PHYS_IP_PATH)/Back_End/milkyway/tcbn65lp_200a/techfiles/tsmcn65_9lmT2.tf
+export MW_REF_LIB     ?= $(PHYS_IP_PATH)/Back_End/milkyway/tcbn65lp_200a/tcbn65lp_9lmT2
 
-# ── Multi-corner .db libraries (sc12 std cells) ────────────────────────────
-export DB_PATH        ?= $(PHYS_IP_PATH)/sc12_base_rvt/r0p0/db
-export DB_SS          ?= $(DB_PATH)/sc12_cln65lp_base_rvt_ss_typical_max_1p08v_125c.db
-export DB_FF          ?= $(DB_PATH)/sc12_cln65lp_base_rvt_ff_typical_min_1p32v_m40c.db
+# ── Multi-corner .db libraries (tcbn65lp std cells) ────────────────────────
+# wc/tc/bc = TSMC standard cln65lp LP corners (0.9/1.0/1.1 V).
+export DB_PATH        ?= $(PHYS_IP_PATH)/Front_End/timing_power_noise/NLDM/tcbn65lp_220a
+export DB_SS          ?= $(DB_PATH)/tcbn65lpwc.db
+export DB_FF          ?= $(DB_PATH)/tcbn65lpbc.db
+export DB_TT          ?= $(DB_PATH)/tcbn65lptc.db
 
 # ── TLU+ parasitic extraction models ─────────────────────────────────────
-export TLUPLUS_PATH   ?= $(PHYS_IP_PATH)/arm_tech/r2p0/synopsys_tluplus/1p9m_6x2z
+# The TSMC tcbn65lp distribution does not ship TLU+ files itself — those
+# live under the TSMC pdk subtree, alongside the Calibre/rcx files.
+# Override if your site mirrors them elsewhere.
+export TLUPLUS_PATH   ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/pdk/StarRC/cln65lp_9lmT2
 export TLUPLUS_MAP    ?= $(TLUPLUS_PATH)/tluplus.map
 
 # ── GDS stream-out — layer map + macro/stdcell GDS to merge ────────────────
 # write_gds in 6_partition_export.tcl needs (a) a Synopsys-format layer
 # map and (b) the GDS of every reference cell (std cells + macros) so
-# the output stream-out is self-contained. Without -merge_files the
-# emitted GDS contains only the partition's metal/via shapes — chip-
-# top would have to merge the std-cell + macro GDS itself at LVS time.
-export GDS_LAYER_MAP   ?= $(PHYS_IP_PATH)/arm_tech/r2p0/milkyway/1p9m_6x2z/stream_out_layer_map
-export GDS_STDCELL     ?= $(PHYS_IP_PATH)/sc12_base_rvt/r0p0/gds2/sc12_cln65lp_base_rvt.gds2
+# the output stream-out is self-contained.
+export GDS_LAYER_MAP   ?= $(PHYS_IP_PATH)/Back_End/milkyway/tcbn65lp_200a/techfiles/tsmc_layer_map
+export GDS_STDCELL     ?= $(PHYS_IP_PATH)/Back_End/celtic/tcbn65lp_200a/tcbn65lp.gds
 export GDS_MEM_FCD     ?= $(MEM_BASE)/flash_cache_data/flash_cache_data.gds2
 export GDS_MEM_FCT     ?= $(MEM_BASE)/flash_cache_tag/flash_cache_tag.gds2
 export GDS_MERGE_FILES ?= $(GDS_STDCELL) $(GDS_MEM_FCD) $(GDS_MEM_FCT)
