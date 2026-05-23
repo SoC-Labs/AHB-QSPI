@@ -2,20 +2,35 @@
 #-----------------------------------------------------------------------------
 # PYNQ board discovery via serial console.
 #
-# Finds the PYNQ-Z2's FT2232 UART by its stable /dev/serial/by-id/ symlink
-# on the USB host (mapstone-dev), wakes the serial console, logs in if
-# needed, runs `ip -br addr` + `hostname`, parses the result, and writes
-# pynq/board.json so downstream scripts/tests know how to reach the board
-# after a power-cycle.
+# SSHes into the host where the board's FTDI is attached (`host_dev_host`
+# from `fpgahub board status`), opens its UART, wakes the serial console,
+# logs in if needed, runs `ip -br addr` + `hostname`, parses the result,
+# and writes pynq/board.json so downstream scripts/tests know how to
+# reach the board after a power-cycle.
 #
 # Usage:
-#   pynq/scripts/refresh_board.sh                # defaults (host, creds, serial)
-#   PYNQ_LOGIN_USER=root pynq/scripts/refresh_board.sh
+#   BOARD=pynq_z2_03_pl pynq/scripts/refresh_board.sh
+#   BOARD=pynq_z2_03_pl PYNQ_SERIAL_GLOB='/dev/serial/by-id/usb-Xilinx_TUL_*-if01-port0' \
+#       pynq/scripts/refresh_board.sh
+#
+# Inputs (env):
+#   BOARD                fpgahub board name (required unless PYNQ_SSH_HOST set)
+#   PYNQ_SSH_HOST        bypass fpgahub: explicit ssh target (user@host)
+#   PYNQ_SERIAL_GLOB     glob for the serial device on the USB host
+#                        (default: /dev/serial/by-id/usb-Xilinx_TUL*-if01-port0)
+#   PYNQ_LOGIN_USER      default xilinx
+#   PYNQ_LOGIN_PASS      default xilinx
+#   PYNQ_BOARD_JSON      output file; default ../board.json
 #-----------------------------------------------------------------------------
 
 set -euo pipefail
 
-SSH_HOST="${PYNQ_SSH_HOST:-mapstone-dev.ecs.soton.ac.uk}"
+BOARD="${BOARD:-}"
+SSH_HOST="${PYNQ_SSH_HOST:-}"
+
+# Default serial glob — works for any FTDI-based PYNQ-Z2 (by-id symlink
+# pattern is stable across cable plug-ins). Override per-board if your
+# lab has multiple boards plugged into the same host.
 SERIAL_GLOB="${PYNQ_SERIAL_GLOB:-/dev/serial/by-id/usb-Xilinx_TUL*-if01-port0}"
 LOGIN_USER="${PYNQ_LOGIN_USER:-xilinx}"
 LOGIN_PASS="${PYNQ_LOGIN_PASS:-xilinx}"
@@ -24,9 +39,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUT_FILE="${PYNQ_BOARD_JSON:-$REPO_ROOT/pynq/board.json}"
 
+# Resolve dev-host from fpgahub unless PYNQ_SSH_HOST is explicit.
+if [ -z "$SSH_HOST" ]; then
+    if [ -z "$BOARD" ]; then
+        echo "[refresh_board] ERROR: set BOARD=<fpgahub-name> or PYNQ_SSH_HOST=<host>" >&2
+        exit 2
+    fi
+    if ! command -v fpgahub >/dev/null 2>&1; then
+        echo "[refresh_board] ERROR: fpgahub not on PATH" >&2
+        exit 127
+    fi
+    SSH_HOST="$(fpgahub board status "$BOARD" --json \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("host_dev_host") or "")')"
+    if [ -z "$SSH_HOST" ] || [ "$SSH_HOST" = "null" ]; then
+        echo "[refresh_board] ERROR: board '$BOARD' has no host_dev_host" >&2
+        exit 1
+    fi
+fi
+
 echo "[refresh_board] probing via $SSH_HOST ($SERIAL_GLOB)..." >&2
 
-# Remote Python probe. Stdlib only (mapstone-dev has no pyserial). The
+# Remote Python probe. Stdlib only (USB host has no pyserial). The
 # script prints JSON on stdout; progress/debug go to stderr.
 REMOTE_OUTPUT=$(
     ssh -o ConnectTimeout=10 "$SSH_HOST" \

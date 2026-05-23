@@ -3,13 +3,16 @@
 # and ASIC synthesis (TSMC 65nm).
 #
 # Stages:
-#   1. setup      - Clone repo, validate tool paths, fetch dependencies
-#   2. lint       - Verilator lint
-#   3. cdc        - SpyGlass CDC analysis
-#   4. regression - Cocotb regression with VCS code coverage
-#   5. coverage   - Merge VCS coverage and generate report
-#   6. synthesis  - ASIC synthesis with Design Compiler (TSMC 65nm)
-#   7. cleanup    - Remove workspace
+#   1. setup       - Clone repo, validate tool paths, fetch dependencies
+#   2. lint        - Verilator lint
+#   3. cdc         - SpyGlass CDC analysis
+#   4. regression  - Cocotb regression with VCS code coverage
+#   5. coverage    - Merge VCS coverage and generate report
+#   6. synthesis   - ASIC synthesis with Design Compiler (TSMC 65nm),
+#                    + opt-in Fusion Compiler partition PnR + LEC
+#                    (manual, gated on RUN_FC_PNR)
+#   7. fpga-deploy - Manual fpgahub-driven deploy + stress (needs FPGAHUB_BOARD/FPGAHUB_BOARD_TAG)
+#   8. cleanup     - Remove workspace
 
 stages:
   - setup
@@ -18,6 +21,7 @@ stages:
   - regression
   - coverage
   - synthesis
+  - fpga-deploy
   - cleanup
 
 variables:
@@ -186,7 +190,9 @@ hal-lint:
     - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
     - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
     - export PATH="$XCELIUM_HOME/tools/bin:$PATH"
-    - echo "HAL version:" && hal -version 2>&1 | head -1
+    # `| head -1` SIGPIPEs the tool under pipefail — keep the banner non-fatal.
+    - echo "HAL version:"
+    - hal -version 2>&1 | head -1 || true
     # Lint standalone modules (no external IP dependencies)
     - make -C "$WORK_DIR/lint" lint-standalone 2>&1 | tee hal_lint_standalone.log
     # Lint all modules including top-level (requires CG092 + Corstone-101)
@@ -256,7 +262,9 @@ cocotb-regression:
   script:
     - echo "Python version:" && python3 --version
     - echo "cocotb version:" && python3 -m cocotb --version || cocotb-config --version
-    - echo "VCS version:" && vcs -ID 2>&1 | head -1
+    # `| head -1` SIGPIPEs the tool under pipefail — keep the banner non-fatal.
+    - echo "VCS version:"
+    - vcs -ID 2>&1 | head -1 || true
     # Run cocotb tests with VCS code coverage
     - |
       export SIM_TOP_DIR="$WORK_DIR/simulate/sim"
@@ -361,7 +369,14 @@ dc-synth-tsmc65:
     - export PATH="$DC_HOME/bin:$PATH"
     - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
     - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
-    - echo "Design Compiler version:" && dc_shell -version 2>&1 | head -3
+    # Informational banner only. `dc_shell -version` prints >3 lines, so
+    # `head -3` closes the pipe early and dc_shell dies on SIGPIPE (exit
+    # 141). Under the runner's `set -o pipefail` that aborts the whole
+    # job *before synthesis runs* — which is exactly the "No files to
+    # upload" failure (after_script finds no reports). `|| true` makes
+    # the banner non-fatal; the real dc_shell run below still gates.
+    - echo "Design Compiler version:"
+    - dc_shell -version 2>&1 | head -3 || true
     - mkdir -p "$WORK_DIR/imp/ASIC"
     - |
       cd "$WORK_DIR/asic/TSMC65nm"
@@ -404,8 +419,265 @@ dc-synth-tsmc65:
       - top_ahb_qspi_qor.rep
     expire_in: 30 days
 
+# Fusion Compiler partition PnR + Formality LEC (TSMC 65nm).
+#
+# Runs the full hierarchical partition flow (init→synth→cts→route→
+# signoff→export→DRC) THEN Formality LEC via `make fc_all`, then
+# re-verifies the hand-off drop with verify_partition_handoff.sh.
+#
+# Opt-in + manual + allow_failure on purpose:
+#   - it is a multi-hour place&route run, not something to block every
+#     push on (cf. dc-synth-tsmc65 above which is only synthesis);
+#   - the flow is not yet silicon-validated (see
+#     syn/asic/fusion-compiler/INTEGRATION_CHANGES.md — verified only by
+#     Tcl info-complete + make -n, never a live fc_shell run).
+#
+# PROMOTION PATH — once a clean `make fc_all` + verify run is achieved
+# on the runner: drop `allow_failure`, drop `when: manual`, and widen
+# the rule (e.g. run on the integration branch) so it becomes a real
+# gate. The Makefiles already self-enforce FC_STAGE_OK / FM_LEC_OK, so
+# a non-zero exit here is trustworthy.
+fc-pnr-lec-tsmc65:
+  stage: synthesis
+  when: manual
+  needs: [clone, preflight]
+  tags:
+    - vcs
+  rules:
+    - if: '$RUN_FC_PNR != ""'
+  allow_failure: true
+  script:
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    # FC / Formality tool paths are set by the flow Makefiles themselves
+    # (FC_BIN_DIR / FM_BIN_DIR), so nothing to export here.
+    - echo "Fusion Compiler partition flow + LEC for top_ahb_qspi"
+    - make -C "$WORK_DIR/syn/asic/fusion-compiler" fc_all 2>&1 | tee fc_all.log
+    # Hand-off self-check: re-hash every delivered file against the
+    # manifest FC wrote, and surface scenario/hold coverage.
+    - "$WORK_DIR/syn/asic/scripts/verify_partition_handoff.sh"
+    # Echo the DRC tier-0/1/1b summary into the job log.
+    - make -C "$WORK_DIR/syn/asic/fusion-compiler" drc_summary || true
+  after_script:
+    - mkdir -p fc_reports
+    - cp "$WORK_DIR/syn/asic/fusion-compiler/reports/"*.rep      fc_reports/ 2>/dev/null || true
+    - cp "$WORK_DIR/syn/asic/fusion-compiler/reports/06_abstract_manifest.txt" fc_reports/ 2>/dev/null || true
+    - cp "$WORK_DIR/syn/asic/formality/reports/"*.rep            fc_reports/ 2>/dev/null || true
+    - cp fc_all.log fc_reports/ 2>/dev/null || true
+    # ---- Partition hand-off drop for downstream hierarchical FC ----
+    # GitLab artifact paths are relative to the job working dir (NOT
+    # $WORK_DIR), so stage the drop here with the same copy-back pattern
+    # every job in this file uses. fc_handoff/ is self-contained: the
+    # outputs/ payload + its SHA256 manifest + the NDM design library +
+    # a consumer README, so a parent FC pipeline can fetch this one
+    # directory and either open_lib the block or verify-and-consume the
+    # physical/timing views.
+    - mkdir -p fc_handoff
+    - cp -r "$WORK_DIR/syn/asic/fusion-compiler/outputs/." fc_handoff/ 2>/dev/null || true
+    # Manifest lives in reports/, not outputs/ — copy it alongside the
+    # payload so verify_partition_handoff.sh works with one dir.
+    - cp "$WORK_DIR/syn/asic/fusion-compiler/reports/06_abstract_manifest.txt" fc_handoff/ 2>/dev/null || true
+    # NDM design library (lib/tech/attach + all stage blocks, ~24M).
+    # The FC-native partition abstract is the block
+    #   top_ahb_qspi.dlib:top_ahb_qspi/signoff.design
+    # Tar it so a parent FC pipeline can fetch and open_lib it directly.
+    # 6_partition_export.tcl's NOTE: this .dlib IS the partition abstract
+    # for FC's hierarchical PnR flow (ETM is unavailable in fc 2022.12).
+    - |
+      DLIB="$WORK_DIR/syn/asic/fusion-compiler/work/top_ahb_qspi.dlib"
+      if [ -d "$DLIB" ]; then
+        tar -C "$WORK_DIR/syn/asic/fusion-compiler/work" \
+            -czf fc_handoff/top_ahb_qspi.dlib.tar.gz top_ahb_qspi.dlib \
+          && echo "Packaged NDM: fc_handoff/top_ahb_qspi.dlib.tar.gz" \
+          || echo "WARNING: NDM .dlib package failed (non-fatal)"
+      else
+        echo "WARNING: top_ahb_qspi.dlib not found — NDM not packaged"
+      fi
+    - |
+      cat > fc_handoff/HANDOFF_README.txt <<'EOF'
+      AHB-QSPI partition hand-off — top_ahb_qspi (TSMC 65nm)
+
+      Physical/timing payload : ./ — LEF/DEF/GDS/UPF/Verilog/SDC +
+                                per-scenario SDF/SPEF, each SHA256-pinned
+                                in 06_abstract_manifest.txt (provenance:
+                                source signoff block + scenario coverage).
+      FC-native abstract      : top_ahb_qspi.dlib.tar.gz
+                                  tar xzf top_ahb_qspi.dlib.tar.gz
+                                  open_lib  top_ahb_qspi.dlib
+                                  open_block top_ahb_qspi.dlib:top_ahb_qspi/signoff.design
+      LEC sign-off            : fc_reports/03_verify_summary.rep
+                                (RTL vs post-layout netlist).
+      Verify this drop        : run, from the repo,
+                                  syn/asic/scripts/verify_partition_handoff.sh \
+                                    <thisdir>/06_abstract_manifest.txt <thisdir>
+                                exit 0 = every file present & SHA matches.
+      EOF
+  artifacts:
+    when: always
+    paths:
+      - fc_reports/
+      - fc_handoff/
+    expose_as: "FC partition hand-off"
+    expire_in: 30 days
+
 # ============================================================================
-# Stage 7: Cleanup
+# Stage 7: FPGA Deploy (manual — requires a live fpgahub daemon + board)
+# ============================================================================
+#
+# Acquires a board via fpgahub (by name or capability), then runs
+# `make stress` from the fpga Makefile. The Makefile's helpers detect
+# the existing FPGA_BOARD/FPGA_LEASE_TOKEN env and re-use the outer lease
+# (no nested acquire). after_script releases cleanly so a failed job
+# never leaks the board. Gated on FPGAHUB_BOARD / FPGAHUB_BOARD_TAG CI
+# variables — leave both unset and the job is skipped.
+
+fpga-deploy:
+  stage: fpga-deploy
+  when: manual
+  needs: [clone]
+  rules:
+    - if: '$FPGAHUB_BOARD != "" || $FPGAHUB_BOARD_TAG != ""'
+  variables:
+    FPGAHUB_TTL: "3600"
+    FPGAHUB_WAIT: "600"
+  script:
+    - |
+      set -euo pipefail
+      if [ -n "${FPGAHUB_BOARD:-}" ]; then
+        fpgahub lease acquire "$FPGAHUB_BOARD" \
+          --ttl "$FPGAHUB_TTL" --wait "$FPGAHUB_WAIT" --json > lease.json
+      else
+        fpgahub lease acquire --capability "$FPGAHUB_BOARD_TAG" \
+          --ttl "$FPGAHUB_TTL" --wait "$FPGAHUB_WAIT" --json > lease.json
+      fi
+      export FPGA_BOARD="$(jq -r .board lease.json)"
+      export FPGA_LEASE_TOKEN="$(jq -r .token lease.json)"
+      echo "Leased $FPGA_BOARD (token=${FPGA_LEASE_TOKEN:0:8}…)"
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    # build_design has no lease cost; do it under the lease anyway so a
+    # single fpga-deploy job carries the change from clone → board.
+    - make -C "$WORK_DIR/fpga" build_design 2>&1 | tee fpga_build.log
+    # `make stress` invokes with_lease.sh which detects the existing
+    # FPGA_BOARD / FPGA_LEASE_TOKEN and reuses them. BOARD= is forwarded
+    # to the wrapper for the assertion only — the lease isn't re-acquired.
+    # runner.py logs to stdout (incl. its end-of-run per-test summary and
+    # streamed failure lines), so tee'ing the stress console preserves
+    # the hardware-test verdict as a downloadable artifact. The
+    # `set -o pipefail` set in the lease block above still applies, so a
+    # stress failure fails the job (tee does not mask it).
+    - export FPGA_BOARD FPGA_LEASE_TOKEN
+    - make -C "$WORK_DIR/fpga" stress BOARD="$FPGA_BOARD" 2>&1 | tee fpga_stress.log
+  after_script:
+    - |
+      if [ -f lease.json ]; then
+        board=$(jq -r .board lease.json)
+        token=$(jq -r .token lease.json)
+        fpgahub lease release "$board" --token "$token" || true
+      fi
+    # ---- Hardware-test evidence (mirrors the FC hand-off capture) ----
+    # Artifact paths are relative to the job working dir, so stage the
+    # build + stress console logs plus the Vivado build/package logs here
+    # (same $WORK_DIR->relative copy-back pattern the rest of the file
+    # uses). when:always means a failed stress still uploads its log.
+    - mkdir -p fpga_results
+    - mv fpga_build.log fpga_stress.log fpga_results/ 2>/dev/null || true
+    - cp lease.json fpga_results/ 2>/dev/null || true
+    - cp "$WORK_DIR/imp/fpga/run/"*.log fpga_results/ 2>/dev/null || true
+    - cp "$WORK_DIR/imp/fpga/run/"*.jou fpga_results/ 2>/dev/null || true
+    # runner.py's machine-readable qspi_stress_summary.json /
+    # qspi_stress_failures.jsonl are now scp'd off the board by the
+    # harness (run_stress.sh, under the active lease — see fpga/Makefile
+    # FPGA_STRESS_RESULTS*) into $(BUILD_DIR)/stress. Capture them too.
+    - cp -r "$WORK_DIR/imp/fpga/stress/." fpga_results/ 2>/dev/null || true
+  artifacts:
+    when: always
+    paths:
+      - lease.json
+      - fpga_results/
+    expose_as: "FPGA hardware stress"
+    expire_in: 30 days
+
+# ----------------------------------------------------------------------------
+# Nightly hardware-validation regression (scheduled — automatic).
+#
+# Purpose: "see when this breaks". Unlike fpga-deploy (manual, opt-in via
+# FPGAHUB_BOARD), this runs AUTOMATICALLY on GitLab *scheduled* pipelines
+# only, so it never contends for the shared board farm on every push, yet
+# still tracks hardware health over time.
+#
+#   Set up the schedule once:  GitLab → Project → Build → Pipeline
+#   schedules → New schedule (e.g. nightly `0 3 * * *` on the integration
+#   branch). $CI_PIPELINE_SOURCE == "schedule" is what gates this job —
+#   no CI variable needed.
+#
+# Board is PINNED to pynq_z2_03_pl: pynq_z2_01_pl's PmodSF3 is physically
+# dead and BOARD_TAG=qspi_flash_pmod auto-pick keeps landing on it
+# (docs/cocotb-silicon-findings.md). The lease is taken ONCE by
+# harness/scripts/with_lease.sh (which also does the chiplet-pair
+# `pair_required`→`--solo` retry z2_03 needs) and reused for both phases
+# via hw_regression_run.sh.
+#
+# Two phases, hard-gated (allow_failure omitted ⇒ false):
+#   1. stress.hw_healthcheck — fast go/no-go (PIDR/CIDR + JEDEC +
+#      erase/program/readback); fails in ~tens of seconds on a dead board.
+#   2. stress.ci_regression  — the PS-stable phase subset (soak, mode_flip,
+#      clk_div_sweep, irq_storm). xip_torture/concurrent are excluded
+#      because they wedge the Zynq PS on healthy silicon
+#      (docs/cocotb-silicon-findings.md); see the PROMOTION PATH note in
+#      pynq/stress/ci_regression.py for re-enabling them.
+#
+# Per-phase pass/fail is published as JUnit so the pipeline/MR test tab
+# shows exactly which phase regressed and when.
+fpga-hw-regression:
+  stage: fpga-deploy
+  needs: [clone]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+  variables:
+    FPGAHUB_TTL: "5400"
+    QSPI_CI_STRESS_BUDGET: "300"
+  script:
+    - export SOCLABS_AHB_QSPI_DIR="$WORK_DIR"
+    - export ARM_IP_LIBRARY_PATH="$ARM_IP_LIBRARY_PATH"
+    # Build the bitstream BEFORE leasing — Vivado needs no board, so don't
+    # hold the shared lease through a ~10 min synth.
+    - make -C "$WORK_DIR/fpga" build_design 2>&1 | tee fpga_build.log
+    # One lease for both phases. with_lease.sh acquires pynq_z2_03_pl
+    # (pair_required→--solo handled), exports FPGA_BOARD/FPGA_LEASE_TOKEN,
+    # runs the driver (whose nested `make stress` calls reuse the lease),
+    # and releases on every exit path — so no after_script release needed.
+    - |
+      bash "$WORK_DIR/fpga/harness/scripts/with_lease.sh" \
+        --board pynq_z2_03_pl --ttl "$FPGAHUB_TTL" -- \
+        bash "$WORK_DIR/pynq/scripts/hw_regression_run.sh"
+  after_script:
+    # Mirror fpga-deploy's evidence capture. Artifact paths are relative
+    # to the job dir, so copy the build tree's stress results back here.
+    - mkdir -p fpga_results
+    - mv "$WORK_DIR/fpga_build.log" "$WORK_DIR/fpga_healthcheck.log" "$WORK_DIR/fpga_stress.log" fpga_results/ 2>/dev/null || true
+    - cp -r "$WORK_DIR/imp/fpga/stress/." fpga_results/ 2>/dev/null || true
+    - cp "$WORK_DIR/imp/fpga/run/"*.log fpga_results/ 2>/dev/null || true
+    # qspi_stress_summary.json → JUnit (synthetic failure if it's missing,
+    # e.g. the run hung — so the gate stays unambiguous).
+    - |
+      python3 "$WORK_DIR/pynq/scripts/stress_summary_to_junit.py" \
+        fpga_results/qspi_stress_summary.json \
+        fpga_results/qspi_stress_failures.jsonl \
+        -o hw_regression_junit.xml || true
+  artifacts:
+    when: always
+    paths:
+      - fpga_results/
+      - hw_regression_junit.xml
+    reports:
+      junit:
+        - hw_regression_junit.xml
+    expose_as: "Nightly HW regression"
+    expire_in: 30 days
+
+# ============================================================================
+# Stage 8: Cleanup
 # ============================================================================
 
 cleanup:

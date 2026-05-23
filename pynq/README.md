@@ -24,6 +24,40 @@ with the HDMI port at the top). PMODB is also functional but is *not* what
 this overlay targets - re-route in the XDC if you wire PmodSF3 to PMODB
 instead.
 
+## New: the `cocotb-silicon` flow (recommended)
+
+The cocotb-replay engine in this directory has been extracted into a
+standalone, reusable package — **`cocotb-silicon`** (sibling repo). This
+project now consumes it through one declarative adapter:
+
+| File | Purpose |
+|---|---|
+| [cocotb_silicon_adapter.py](cocotb_silicon_adapter.py) | `QspiAdapter` — the entire project-specific surface (address map, TB wiring, poll/IRQ protocol, Micron overrides) |
+| [run_cocotb_silicon.py](run_cocotb_silicon.py) | board entrypoint; harness-compatible (`python3 -m run_cocotb_silicon --budget N`) |
+
+Run it on a leased board (deploys a self-contained bundle — no board-side
+pip or repo checkout needed):
+
+```bash
+make -C fpga cocotb_hw BOARD=pynq_z2_03_pl
+# or auto-pick + time-box:
+make -C fpga cocotb_hw BOARD_TAG=qspi_flash_pmod COCOTB_HW_BUDGET=600
+```
+
+Each test runs in its **own subprocess** (crash isolation), so the
+`AHB_BAD_BEHAVIOUR` SIGBUS no longer aborts the run; the documented
+hardware-incompatible tests are declared in the adapter's `skip` /
+`xfail` (see [cocotb_silicon_adapter.py](cocotb_silicon_adapter.py)) —
+the same exclusions this README's "Known caveats" describe, now data
+instead of a manual `-k` filter.
+
+Design rationale and the engine internals: see
+[../docs/cocotb-silicon-design.md](../docs/cocotb-silicon-design.md) and
+the `cocotb-silicon` repo's `docs/` (how-pynq / how-cocotb /
+how-the-interface). The **legacy files below remain in place** as the
+signed-off source of truth until the on-board parity regression passes;
+they still work exactly as documented in the rest of this README.
+
 ## Files
 
 | File | Purpose |
@@ -43,12 +77,30 @@ From the repo root on your build machine:
 ```bash
 source set_env.sh
 cd fpga
-make build_design          # produces imp/fpga/output/pynq-z2/qspi.{bit,hwh}
-make deploy PYNQ_HOST=xilinx@pynq.local
+make build_design                       # produces imp/fpga/output/pynq-z2/qspi.{bit,hwh}
+make deploy BOARD=pynq_z2_03_pl         # acquire fpgahub lease, scp, fpga_manager, release
+# OR auto-pick any free PYNQ-Z2 with PmodSF3:
+make deploy BOARD_TAG=qspi_flash_pmod
 ```
 
-This SCPs the bitstream, .hwh, and the entire `pynq/` directory to
-`/home/xilinx/qspi_overlay/` on the board.
+`make deploy` acquires a fpgahub lease, resolves the board's `host_ssh`
+/ `host_proxy` from `fpgahub board status`, SCPs the bitstream + .hwh +
+the entire `pynq/` directory to `/home/xilinx/qspi_overlay/`, hot-loads
+via `fpga_manager`, and releases the lease on exit (even on Ctrl-C or
+errors). `make stress` does the same plus the pynq stress runner.
+
+For programming via JTAG (no PYNQ Linux):
+
+```bash
+make program BOARD=pynq_z2_03_pl        # vivado_jtag plugin via fpgahub
+```
+
+> **Auth note:** `make program` uses `fpgahub board program`, which is
+> an admin endpoint requiring a Bearer token (`FPGAHUB_TOKEN=…`). mTLS
+> client certs cover lease/status/deploy, but not programming. Ask the
+> fpgahub admin to `fpgahub token create <you> --role write` and export
+> the token, or use `make deploy` (PYNQ-Linux `fpga_manager` path), which
+> needs only a lease.
 
 ## Running on the PYNQ board
 

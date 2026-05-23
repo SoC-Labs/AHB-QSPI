@@ -168,6 +168,18 @@ reg         qspi_cont_read_latched;
 reg [7:0]   qspi_mode_code_latched;
 reg         qspi_no_cmd_latched;
 
+// Task 4 — ±1 comparator feeds, precomputed ONCE when the control bus
+// is captured (they depend only on the latched dummy-cycles / N_RW_BYTES
+// which are constant for the whole transaction). This lifts the
+// subtractor/adder out of the QSPI_SCLK next-state cone (DUMMY exit) and
+// the DATA_I capture guard, where it sat on the critical 14-level path.
+// Bit-exact with the original `latched-1` / `latched+1` for every
+// reachable input: DUMMY is only entered when dummy-cycles!=0 (so the
+// -1 never underflows in the reachable case), and N_RW_BYTES is a 4-bit
+// field (max 0xF) so +1 (max 0x10) never wraps the 5-bit width.
+reg [3:0]   qspi_dummy_cycles_m1;   // = qspi_dummy_cycles_latched - 1
+reg [4:0]   qspi_n_rw_bytes_p1;     // = qspi_n_rw_bytes_latched  + 1
+
 always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     if(~HRESETn) begin
         qspi_n_rw_bytes_latched   <= 5'h0;
@@ -179,6 +191,8 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
         qspi_cont_read_latched    <= 1'b0;
         qspi_mode_code_latched    <= 8'h0;
         qspi_no_cmd_latched       <= 1'b0;
+        qspi_dummy_cycles_m1      <= 4'h0;
+        qspi_n_rw_bytes_p1        <= 5'h1;
     end else if (soft_reset_sync) begin
         // synchronous soft-reset via watchdog
         qspi_n_rw_bytes_latched   <= 5'h0;
@@ -190,6 +204,8 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
         qspi_cont_read_latched    <= 1'b0;
         qspi_mode_code_latched    <= 8'h0;
         qspi_no_cmd_latched       <= 1'b0;
+        qspi_dummy_cycles_m1      <= 4'h0;
+        qspi_n_rw_bytes_p1        <= 5'h1;
     end else if (QSPI_enable_sync_rise) begin
         // Capture the synced control bus on the cycle enable_sync rises.
         // The 3-FF enable chain (vs 2-FF on the control bus) guarantees
@@ -205,6 +221,8 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
         qspi_cont_read_latched    <= qspi_cont_read_sync;
         qspi_mode_code_latched    <= qspi_mode_code_sync;
         qspi_no_cmd_latched       <= qspi_no_cmd_sync;
+        qspi_dummy_cycles_m1      <= qspi_dummy_cycles_sync - 4'h1;
+        qspi_n_rw_bytes_p1        <= qspi_n_rw_bytes_sync  + 5'h1;
     end
     // Enable not rising -> hold latched values
 end
@@ -229,9 +247,9 @@ always_comb begin
     QSPI_ENABLE_ACK = 1'b0;
     case(current_state)
         IDLE: begin
-            if(QSPI_enable_sync==1'b1 && qspi_no_cmd_latched==1'b0) begin
+            if(QSPI_enable_sync && !qspi_no_cmd_latched) begin
                 next_state = OP;
-            end else if(QSPI_enable_sync==1'b1 && qspi_no_cmd_latched==1'b1) begin
+            end else if(QSPI_enable_sync && qspi_no_cmd_latched) begin
                 if(last_QSPI_ADDR==QSPI_ADDR)
                     next_state = NO_FETCH;
                 else
@@ -241,7 +259,7 @@ always_comb begin
         end
         NO_FETCH: begin
             QSPI_ENABLE_ACK = 1'b1;
-            if(QSPI_enable_sync==1'b0)
+            if(!QSPI_enable_sync)
                 next_state = IDLE;
         end
         OP: begin
@@ -330,7 +348,7 @@ always_comb begin
         end
         DUMMY: begin
             // Next state decision from DUMMY
-            if(dummy_counter >= (qspi_dummy_cycles_latched - 1)) begin
+            if(dummy_counter >= qspi_dummy_cycles_m1) begin
                 if(qspi_write_latched)
                     next_state = DATA_O;
                 else if(qspi_read_latched)
@@ -397,32 +415,44 @@ end
 reg QSPI_IO_e_int;
 
 // Negedge shift-out block — single top-level if-else chain required for
-// SpyGlass CDC synthesis (SYNTH_133). QSPI_WDATA_reg load is merged into
-// every branch except DATA_O (where it is shifted instead).
+// SpyGlass CDC synthesis (SYNTH_133).
+//
+// This block holds only the QSPI pin-drive state that genuinely needs a
+// defined value out of reset: QSPI_SCLK_e (clock-enable, idle low),
+// QSPI_IO_o_reg (data out, idle 4'hF) and QSPI_IO_e_int (output-enable,
+// idle driving). The shift-register *storage* (op_code, addr_code,
+// qspi_mode_reg, QSPI_WDATA_reg) was moved to the no-reset block below
+// (Task 2). The if-else-on-current_state chain structure is preserved in
+// both blocks so the SYNTH_133 CDC contract still holds.
 always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
-    if(~HRESETn || soft_reset_sync) begin
+    if(~HRESETn) begin
+        // ONLY the pin-drive state is reset here. op_code / addr_code /
+        // qspi_mode_reg / QSPI_WDATA_reg are owned EXCLUSIVELY by the
+        // no-reset shift-storage block below (Task 2): driving them here
+        // too made them dual-always-block nets — DC ELAB-366 multi-driver
+        // (VCS tolerated it as the two writes are mutually exclusive,
+        // which is why cocotb passed but synthesis failed). They are
+        // loaded from primary inputs in that block's idle/default branch
+        // before the FSM can leave IDLE, so they need no async reset.
         QSPI_SCLK_e <= 1'b0;
         QSPI_IO_o_reg <= 4'hF;
         QSPI_IO_e_int <= 1'b1;
-        op_code <= 8'h00;
-        addr_code <= 24'h000000;
-        qspi_mode_reg <= 8'h00;
-        QSPI_WDATA_reg <= 128'd0;
+    end else if (soft_reset_sync) begin
+        // synchronous soft-reset via watchdog (matches the pattern at L182)
+        QSPI_SCLK_e <= 1'b0;
+        QSPI_IO_o_reg <= 4'hF;
+        QSPI_IO_e_int <= 1'b1;
     end else if(current_state==OP) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
-        QSPI_WDATA_reg <= QSPI_WDATA;
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg[3:0]<=op_code[7:4];
-            op_code[7:0] <= {op_code[3:0],4'h0};
         end else begin
             QSPI_IO_o_reg[3:0]<={3'h7, op_code[7]};
-            op_code[7:0] <= {op_code[6:0], 1'b0};
         end
     end else if(current_state == DATA_I) begin
         QSPI_IO_e_int <= 1'b0;
         QSPI_SCLK_e <= 1'b1;
-        QSPI_WDATA_reg <= QSPI_WDATA;
     end else if(current_state == DATA_O) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
@@ -440,44 +470,90 @@ always @(negedge QSPI_SCLK_i or negedge HRESETn) begin
         // actually the first legitimate nibble shift — do NOT suppress.
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg <= QSPI_WDATA_reg[3:0];
-            QSPI_WDATA_reg <= {4'h0, QSPI_WDATA_reg[127:4]};
         end else if(byte_counter != 5'h1F) begin
             QSPI_IO_o_reg[0] <= QSPI_WDATA_reg[0];
-            QSPI_WDATA_reg <= {1'b0, QSPI_WDATA_reg[127:1]};
         end else begin
             QSPI_SCLK_e <= 1'b0;  // suppress the spurious SPI-mode clock
         end
     end else if(current_state == ADDR) begin
         QSPI_IO_e_int <= 1'b1;
         QSPI_SCLK_e <= 1'b1;
-        QSPI_WDATA_reg <= QSPI_WDATA;
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg[3:0]<=addr_code[23:20];
-            addr_code[23:0] <= {addr_code[19:0],4'h0};
         end else begin
             QSPI_IO_o_reg[3:0]<={3'h7, addr_code[23]};
-            addr_code[23:0] <= {addr_code[22:0], 1'b0};
         end
     end else if(current_state == DUMMY) begin
         QSPI_IO_e_int <= 1'b0;
         QSPI_SCLK_e <= 1'b1;
-        QSPI_WDATA_reg <= QSPI_WDATA;
     end else if(current_state == MODE) begin
         QSPI_IO_e_int <=1'b1;
         QSPI_SCLK_e <= 1'b1;
-        QSPI_WDATA_reg <= QSPI_WDATA;
         if(qspi_qio_mode_latched==1'b1) begin
             QSPI_IO_o_reg <= qspi_mode_reg[7:4];
-            qspi_mode_reg <= {qspi_mode_reg[3:0], 4'b0};
         end
+    end else begin
+        QSPI_SCLK_e<=1'b0;
+        QSPI_IO_o_reg<=4'hF;
+        QSPI_IO_e_int <= 1'b1;
+    end
+end
+
+// Shift-register storage bank — NO reset branch (Task 2).
+//
+// op_code, addr_code, qspi_mode_reg and QSPI_WDATA_reg are every one
+// loaded from a primary input (QSPI_CMD / QSPI_ADDR / mode-code /
+// QSPI_WDATA) in the idle/default branch before the FSM can leave IDLE,
+// so they are always written before any state that reads them. The
+// async-reset clear was therefore functionally redundant and only forced
+// DC onto DFFNRPQ_X1M (~12 um2) instead of plain DFFNQ (~10 um2) on 168
+// flops. Dropping the reset branch lets DC pick the smaller flop.
+//
+// The single if-else-on-current_state chain is mirrored from the block
+// above so the SYNTH_133 CDC structure is unchanged. The RHS reads here
+// (e.g. op_code[7:4]) and the pin-drive reads in the block above all
+// sample the pre-update value on the same negedge (non-blocking), so the
+// split is bit-exact with the original merged block.
+always @(negedge QSPI_SCLK_i) begin
+    // Truly reset-free — Task 2 *as specified* (no async AND no
+    // synchronous reset on this 168-flop bank). Agent B's first cut
+    // kept a soft_reset_sync clear here, which still costs a 168-wide
+    // sync-reset D-mux and defeats Task 2's intended DFFNQ saving. On
+    // HRESETn or a watchdog soft-reset the FSM returns to IDLE (posedge
+    // block); the idle/default branch below then reloads op_code /
+    // addr_code / qspi_mode_reg / QSPI_WDATA_reg from their primary
+    // inputs within one SCLK, before the FSM can re-enter OP — so an
+    // explicit clear is functionally redundant (the loaded-before-use
+    // invariant that already justified dropping the async reset).
+    if(current_state==OP) begin
+        if(qspi_qio_mode_latched==1'b1) begin
+            op_code[7:0] <= {op_code[3:0],4'h0};
+        end else begin
+            op_code[7:0] <= {op_code[6:0], 1'b0};
+        end
+    end else if(current_state == DATA_O) begin
+        if(qspi_qio_mode_latched==1'b1) begin
+            QSPI_WDATA_reg <= {4'h0, QSPI_WDATA_reg[127:4]};
+        end else if(byte_counter != 5'h1F) begin
+            QSPI_WDATA_reg <= {1'b0, QSPI_WDATA_reg[127:1]};
+        end
+    end else if(current_state == ADDR) begin
+        if(qspi_qio_mode_latched==1'b1) begin
+            addr_code[23:0] <= {addr_code[19:0],4'h0};
+        end else begin
+            addr_code[23:0] <= {addr_code[22:0], 1'b0};
+        end
+    end else if(current_state == MODE) begin
+        if(qspi_qio_mode_latched==1'b1) begin
+            qspi_mode_reg <= {qspi_mode_reg[3:0], 4'b0000};
+        end
+    end else if(current_state == DATA_I || current_state == DUMMY) begin
+        // hold — DATA_I/DUMMY do not touch the shift-register bank
     end else begin
         op_code <= QSPI_CMD;
         addr_code <= {2'b00,QSPI_ADDR};
         qspi_mode_reg <= qspi_mode_code_latched;
         QSPI_WDATA_reg <= QSPI_WDATA;
-        QSPI_SCLK_e<=1'b0;
-        QSPI_IO_o_reg<=4'hF;
-        QSPI_IO_e_int <= 1'b1;
     end
 end
 always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
@@ -503,18 +579,18 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     end else begin
         if(current_state==OP) begin
             data_in_reg <= 128'd0;
-            op_counter<=op_counter+1;
+            op_counter<=op_counter + 3'h1;
         end else begin
             op_counter <= 3'h0;
         end
 
         if(current_state==DATA_I || current_state ==DATA_O) begin
-            data_counter <= data_counter + 1;
+            data_counter <= data_counter + 3'h1;
             if(qspi_qio_mode_latched==1'b0 && data_counter == 3'h7) begin
-                byte_counter <= byte_counter+1;
+                byte_counter <= byte_counter + 5'h1;
                 data_counter <= 3'h0;
             end else if (qspi_qio_mode_latched==1'b1 && data_counter >= 3'h1) begin
-                byte_counter <= byte_counter+1;
+                byte_counter <= byte_counter + 5'h1;
                 data_counter <= 3'h0;
             end
         end else begin
@@ -523,13 +599,13 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
         end
 
         if(current_state == DUMMY) begin
-            dummy_counter <= dummy_counter + 1;
+            dummy_counter <= dummy_counter + 4'h1;
         end else begin
             dummy_counter <= 4'h0;
         end
 
         if(current_state == ADDR) begin
-            addr_counter <= addr_counter + 1;
+            addr_counter <= addr_counter + 5'h1;
             if(next_state != ADDR)
                 last_QSPI_ADDR <= QSPI_ADDR;
         end else begin
@@ -537,17 +613,17 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
         end
 
         if(current_state == MODE) begin
-            mode_counter <= mode_counter + 1;
+            mode_counter <= mode_counter + 1'b1;
         end else begin
             mode_counter <= 1'b1;
         end
 
         if(current_state == DATA_I) begin
             if(qspi_qio_mode_latched==1'b1) begin
-                if(byte_counter!=qspi_n_rw_bytes_latched+1)
+                if(byte_counter!=qspi_n_rw_bytes_p1)
                     data_in_reg <= {data_in_reg[123:0], QSPI_IO_i};
             end else begin
-                if(byte_counter!=qspi_n_rw_bytes_latched+1)
+                if(byte_counter!=qspi_n_rw_bytes_p1)
                     data_in_reg <= {data_in_reg[126:0], QSPI_IO_i[1]};
             end
         end
@@ -555,26 +631,39 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     end
 end
 
-// RDATA output — purely combinational, no latch
+// RDATA output — purely combinational, no latch.
+//
+// qspi_n_rw_bytes_latched is 5 bits; the case tags below are width-
+// matched 5-bit literals (was 4-bit, which raised 16 UELCIT lint
+// warnings — selector 5b vs tag 4b). N_RW_BYTES is a 4-bit register
+// field (apb_qspi_regs.rdl: N_RW_BYTES[4], range 0x0..0xF = 1..16
+// bytes) zero-extended into this 5-bit port at the single instantiation
+// site (top_ahb_qspi.v: `{1'b0, QSPI_N_RW_BYTES}`), so values 0x10..0x1F
+// are not reachable in the current design. The default arm therefore
+// returns the full 16-byte view rather than 128'd0: if a future change
+// ever widens the field or drives bit[4], a read degrades gracefully to
+// "all captured bytes" instead of silently returning zero (the prior
+// behaviour gave no error indication — see qspi_controller_optimisation
+// _plan.md Task 3/7).
 always_comb begin
     case(qspi_n_rw_bytes_latched)
-        4'h0:   QSPI_RDATA = {{120{1'b0}}, data_in_reg[7:0 ]};
-        4'h1:   QSPI_RDATA = {{112{1'b0}}, data_in_reg[15:0]};
-        4'h2:   QSPI_RDATA = {{104{1'b0}}, data_in_reg[23:0]};
-        4'h3:   QSPI_RDATA = {{96{1'b0}},  data_in_reg[31:0]};
-        4'h4:   QSPI_RDATA = {{88{1'b0}},  data_in_reg[31:0], data_in_reg[39:32]};
-        4'h5:   QSPI_RDATA = {{80{1'b0}},  data_in_reg[31:0], data_in_reg[47:32]};
-        4'h6:   QSPI_RDATA = {{72{1'b0}},  data_in_reg[31:0], data_in_reg[55:32]};
-        4'h7:   QSPI_RDATA = {{64{1'b0}},  data_in_reg[31:0], data_in_reg[63:32]};
-        4'h8:   QSPI_RDATA = {{56{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[71:64]};
-        4'h9:   QSPI_RDATA = {{48{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[79:64]};
-        4'hA:   QSPI_RDATA = {{40{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[87:64]};
-        4'hB:   QSPI_RDATA = {{32{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64]};
-        4'hC:   QSPI_RDATA = {{24{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[103:96]};
-        4'hD:   QSPI_RDATA = {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
-        4'hE:   QSPI_RDATA = {{8{1'b0}},   data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
-        4'hF:   QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
-        default: QSPI_RDATA = 128'd0;
+        5'h00:  QSPI_RDATA = {{120{1'b0}}, data_in_reg[7:0 ]};
+        5'h01:  QSPI_RDATA = {{112{1'b0}}, data_in_reg[15:0]};
+        5'h02:  QSPI_RDATA = {{104{1'b0}}, data_in_reg[23:0]};
+        5'h03:  QSPI_RDATA = {{96{1'b0}},  data_in_reg[31:0]};
+        5'h04:  QSPI_RDATA = {{88{1'b0}},  data_in_reg[31:0], data_in_reg[39:32]};
+        5'h05:  QSPI_RDATA = {{80{1'b0}},  data_in_reg[31:0], data_in_reg[47:32]};
+        5'h06:  QSPI_RDATA = {{72{1'b0}},  data_in_reg[31:0], data_in_reg[55:32]};
+        5'h07:  QSPI_RDATA = {{64{1'b0}},  data_in_reg[31:0], data_in_reg[63:32]};
+        5'h08:  QSPI_RDATA = {{56{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[71:64]};
+        5'h09:  QSPI_RDATA = {{48{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[79:64]};
+        5'h0A:  QSPI_RDATA = {{40{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[87:64]};
+        5'h0B:  QSPI_RDATA = {{32{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64]};
+        5'h0C:  QSPI_RDATA = {{24{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[103:96]};
+        5'h0D:  QSPI_RDATA = {{16{1'b0}},  data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[111:96]};
+        5'h0E:  QSPI_RDATA = {{8{1'b0}},   data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[119:96]};
+        5'h0F:  QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
+        default: QSPI_RDATA = {data_in_reg[31:0], data_in_reg[63:32], data_in_reg[95:64], data_in_reg[127:96]};
     endcase
 end
 

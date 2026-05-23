@@ -96,11 +96,14 @@ flash_cache_data data_ram_0_word_3_i (
 wire    cs_tag0;
 assign  cs_tag0         = TAG_CS & (TAG_WE | TAG_RD);
 
+// flash_cache_tag is compiled with write_mask=on (see flash_cache_tag.spec),
+// so WEN is an 11-bit per-bit write enable — replicate the active-low
+// TAG_WE across every bit to write the whole word.
 flash_cache_tag tag_ram_0_i (
     .Q(TAG_RDATA),
     .CLK(CLK),
     .CEN(~cs_tag0),
-    .WEN(~TAG_WE),
+    .WEN({11{~TAG_WE}}),
     .A(TAG_ADDR),
     .D(TAG_WDATA),
     .EMA(3'b010),
