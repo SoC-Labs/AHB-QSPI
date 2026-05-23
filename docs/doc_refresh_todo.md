@@ -68,7 +68,8 @@ run).
       waiver close-out), how to review (key commits + key files),
       what's still open (the user-action items from the punchlist).
 
-- [ ] **Commit + push** the doc bundle as one logical commit.
+- [x] **Commit + push** the doc bundle as one logical commit.
+      Pushed as `4725d64` on `feat-nanosoc_int`.
 
 ## Notes
 
