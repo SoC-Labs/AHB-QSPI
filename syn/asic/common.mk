@@ -21,7 +21,7 @@ export FLIST := $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_ASIC.flist
 # Migrated 2026-05-21 from 12-track Arm sc12 -> 9-track TSMC tcbn65lp.
 # Standard cln65lp corners: wc = SS @ 0.9 V / 125 C, tc = TT @ 1.0 V /
 # 25 C, bc = FF @ 1.1 V / -40 C (foundry naming).
-export TARGET_LIB     ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/stclib/9-track/tcbn65lp-set/tcbn65lp_220a_FE/TSMCHOME/digital/Front_End/timing_power_noise/NLDM/tcbn65lp_220a/tcbn65lpwc1d081d08.db
+export TARGET_LIB     ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/stclib/9-track/tcbn65lp-set/tcbn65lp_220a_FE/TSMCHOME/digital/Front_End/timing_power_noise/NLDM/tcbn65lp_220a/tcbn65lpwc.db
 
 # ── Memory macro libraries ─────────────────────────────────────────────────
 # top_ahb_qspi instantiates two cache ways (cache_subsystem.v): each way's
@@ -61,27 +61,36 @@ export TF_FILE        ?= $(PHYS_IP_PATH)/Back_End/milkyway/tcbn65lp_200a/techfil
 export MW_REF_LIB     ?= $(PHYS_IP_PATH)/Back_End/milkyway/tcbn65lp_200a/tcbn65lp_9lmT2
 
 # ── Multi-corner .db libraries (tcbn65lp std cells) ────────────────────────
-# Corners aligned with the cache-macro characterisation (1.08/1.20/
-# 1.32 V) so the macro Liberty + std-cell Liberty link at one corner.
-# File naming: wcXdYYZdWW = wc-process at X.YY V core / Z.WW V io.
+# Use BASE variants (wc/tc/bc) — full 816 std cells at 1.08/1.20/1.32 V
+# (matching cache-macro corners). The dual-voltage variants
+# (wc1d081d08 etc.) are 28-cell IO/ISO/level-shifter libraries, NOT
+# std-cell libraries; they would be linked separately only for
+# multi-voltage pad-ring flows (not this partition).
 export DB_PATH        ?= $(PHYS_IP_PATH)/Front_End/timing_power_noise/NLDM/tcbn65lp_220a
-export DB_SS          ?= $(DB_PATH)/tcbn65lpwc1d081d08.db
-export DB_FF          ?= $(DB_PATH)/tcbn65lpbc1d321d32.db
-export DB_TT          ?= $(DB_PATH)/tcbn65lptc1d21d2.db
+export DB_SS          ?= $(DB_PATH)/tcbn65lpwc.db
+export DB_FF          ?= $(DB_PATH)/tcbn65lpbc.db
+export DB_TT          ?= $(DB_PATH)/tcbn65lptc.db
 
 # ── TLU+ parasitic extraction models ─────────────────────────────────────
-# The TSMC tcbn65lp distribution does not ship TLU+ files itself — those
-# live under the TSMC pdk subtree, alongside the Calibre/rcx files.
-# Override if your site mirrors them elsewhere.
-export TLUPLUS_PATH   ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/pdk/StarRC/cln65lp_9lmT2
+# TLU+ is PDK data (parasitic extraction model for the cln65lp 1p9m_6x2z
+# metal stack) — library-independent of the std-cell choice (sc12 vs
+# tcbn65lp). The TSMC tcbn65lp distribution on this host does NOT ship
+# TLU+ at this path; the Arm-supplied PDK mirror at /research/AAA/ has
+# the matching deck. Source from there.
+export TLUPLUS_PATH   ?= /research/AAA/phys_ip_library/arm/tsmc/cln65lp/arm_tech/r2p0/synopsys_tluplus/1p9m_6x2z
 export TLUPLUS_MAP    ?= $(TLUPLUS_PATH)/tluplus.map
 
 # ── GDS stream-out — layer map + macro/stdcell GDS to merge ────────────────
-# write_gds in 6_partition_export.tcl needs (a) a Synopsys-format layer
-# map and (b) the GDS of every reference cell (std cells + macros) so
-# the output stream-out is self-contained.
-export GDS_LAYER_MAP   ?= $(PHYS_IP_PATH)/Back_End/milkyway/tcbn65lp_200a/techfiles/tsmc_layer_map
-export GDS_STDCELL     ?= $(PHYS_IP_PATH)/Back_End/celtic/tcbn65lp_200a/tcbn65lp.gds
+# Layer map is also PDK data (Synopsys-format Milkyway -> GDS layer
+# numbers); reuse the Arm-supplied deck (matches the 1p9m_6x2z stack).
+# Std-cell GDS: the tcbn65lp distribution on this host does NOT ship a
+# .gds for the cells (only LEF, .db, .v are present). Leaving
+# GDS_STDCELL empty — write_gds will skip stdcell merge and emit a
+# partition GDS that contains only the partition's routing/via metal +
+# the cache-macro GDS. Chip-top integration must merge the tcbn65lp
+# stdcell GDS at LVS time (foundry-shipped under a separate distribution).
+export GDS_LAYER_MAP   ?= /research/AAA/phys_ip_library/arm/tsmc/cln65lp/arm_tech/r2p0/milkyway/1p9m_6x2z/stream_out_layer_map
+export GDS_STDCELL     ?=
 export GDS_MEM_FCD     ?= $(MEM_BASE)/flash_cache_data/flash_cache_data.gds2
 export GDS_MEM_FCT     ?= $(MEM_BASE)/flash_cache_tag/flash_cache_tag.gds2
 export GDS_MERGE_FILES ?= $(GDS_STDCELL) $(GDS_MEM_FCD) $(GDS_MEM_FCT)

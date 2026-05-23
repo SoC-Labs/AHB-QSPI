@@ -35,7 +35,7 @@ LC_BIN_DIR   = /eda/synopsys/2022-23/RHELx86/LC_2022.12/bin
 export PATH := $(FC_BIN_DIR):$(ICC2_BIN_DIR):$(LC_BIN_DIR):$(PATH)
 
 # ── Library / fusion-lib ──────────────────────────────────────────────────
-LEF_FILE     = $(PHYS_IP_PATH)/sc12_base_rvt/r0p0/lef/sc12_cln65lp_base_rvt.lef
+LEF_FILE     = $(PHYS_IP_PATH)/Back_End/lef/tcbn65lp_200a/lef/tcbn65lp_9lmT2.lef
 export LEF_FILE
 export FUSION_LIB := $(FC_DIR)/libs/sc12_lib
 

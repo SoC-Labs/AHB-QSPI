@@ -42,35 +42,38 @@ if [[ "$PARTITION_GDS" == *.gz ]]; then
     fi
 fi
 
-# Generate the per-run runset. The TSMC deck is generic; the runset
-# sets LAYOUT PATH / PRIMARY / OUTPUT before INCLUDE-ing the deck.
-runset="$CALIBRE_WORK/${MODULE}_drc.runset"
-cat > "$runset" <<EOF
-//
-// Auto-generated Calibre nmDRC runset for $MODULE
-// Stack: 1p9m_6X2Z0U (matches common.mk TF_FILE = 1p9m_6x2z)
-//
-LAYOUT PATH    "$gds_in"
-LAYOUT PRIMARY "$MODULE"
-LAYOUT SYSTEM  GDSII
+# The TSMC deck is a self-contained runset (no INCLUDEs), with
+# placeholders at lines 174-178 that must be substituted:
+#   LAYOUT PATH    "GDSFILENAME"
+#   LAYOUT PRIMARY "TOPCELLNAME"
+#   DRC RESULTS DATABASE "DRC_RES.db"
+#   DRC SUMMARY REPORT   "DRC.rep"
+# (Wrapping with INCLUDE produces SPC1 "superfluous specification
+# statement" because the deck already declares LAYOUT SYSTEM etc.)
+# We sed-copy the deck with the placeholders pointed at our work dir
+# and ASCII keyword added to the results database so coords are
+# human-readable.
+deck_run="$CALIBRE_WORK/${MODULE}_drc.runset"
+# Override deck PRECISION (default 1000 = 1nm/DBU) to 10000
+# (0.1nm/DBU) so it matches the FC-exported GDS database precision.
+# Rule values in the deck are in µm (user units) so they are
+# unaffected by the precision change; only the DBU granularity used
+# for coordinate snapping changes.
+sed -e "s|\"GDSFILENAME\"|\"$gds_in\"|"                                      \
+    -e "s|\"TOPCELLNAME\"|\"$MODULE\"|"                                      \
+    -e "s|\"DRC_RES.db\"|\"$CALIBRE_WORK/${MODULE}.drc.db\" ASCII|"          \
+    -e "s|\"DRC.rep\"|\"$CALIBRE_WORK/${MODULE}.drc.summary\" REPLACE HIER|" \
+    -e "s|^PRECISION\s\+[0-9]\+|PRECISION    10000|"                         \
+    "$TSMC65_DRC_DECK" > "$deck_run"
 
-DRC RESULTS DATABASE   "$CALIBRE_WORK/${MODULE}.drc.db" ASCII
-DRC SUMMARY REPORT     "$CALIBRE_WORK/${MODULE}.drc.summary" REPLACE HIER
-DRC MAXIMUM RESULTS    1000
-DRC MAXIMUM VERTEX     4096
-
-// Pull in the TSMC cln65lp 1p9m_6X2Z0U deck.
-INCLUDE "$TSMC65_DRC_DECK"
-EOF
-
-echo "INFO: runset written: $runset"
+echo "INFO: runset (placeholders substituted): $deck_run"
 echo "INFO: deck   : $TSMC65_DRC_DECK"
 echo "INFO: layout : $gds_in (primary cell: $MODULE)"
 echo "INFO: launching calibre nmDRC ..."
 
 # nmDRC = native multi-threaded DRC. -hier = hierarchical, -64 = 64-bit
 # binary, -turbo enables multi-CPU. Logs go to ${MODULE}.drc.log.
-"$CALIBRE_BIN" -drc -hier -64 -turbo "$runset" \
+"$CALIBRE_BIN" -drc -hier -64 -turbo "$deck_run" \
     2>&1 | tee "$CALIBRE_WORK/${MODULE}.drc.log"
 
 # Quick verdict summary

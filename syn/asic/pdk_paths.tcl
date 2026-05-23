@@ -34,21 +34,24 @@ set cln65lp_tech_file       $cln65lp_tech_path/milkyway/tcbn65lp_200a/techfiles/
 set cln65lp_lef_file        $cln65lp_tech_path/lef/tcbn65lp_200a/lef/tcbn65lp_9lmT2.lef
 
 # Standard Cell libraries (9-track TSMC tcbn65lp, NLDM)
-# Corners aligned with the cache-macro characterisation (1.08 / 1.20 /
-# 1.32 V) — matching the cache-macro corners eliminates the
-# corner-mismatch synthesiser/STA warnings the default
-# wc.db/tc.db/bc.db (0.9 / 1.0 / 1.1 V) would otherwise cause when
-# the flash_cache_* .db files are linked alongside.
-# File naming: wcXdYYZdWW = wc-process at X.YY V (core) / Z.WW V (io).
+# Use BASE variants (wc/tc/bc) — these contain the full 816 std cells
+# at 1.08 / 1.20 / 1.32 V (matching the cache-macro corners). The
+# dual-voltage variants (wcXdYYZdWW) contain only 28 multi-voltage
+# IO/ISO/level-shifter cells and are NOT a std-cell library; they
+# would be linked separately only for a flow that uses multi-voltage
+# pad-ring infrastructure (not this partition).
+#
+# Library names inside the .db:  tcbn65lpwc, tcbn65lptc, tcbn65lpbc
+# Operating conditions in .lib:  WCCOM,      NCCOM,      BCCOM
 set standard_cell_lef_file                  $cln65lp_tech_path/lef/tcbn65lp_200a/lef/tcbn65lp_9lmT2.lef
 set standard_cell_gds_file                  $standard_cell_base_path/Back_End/celtic/tcbn65lp_200a/tcbn65lp.gds
 set _NLDM                                   $standard_cell_base_path/Front_End/timing_power_noise/NLDM/tcbn65lp_220a
-set standard_cell_db_file_ss_1p08v_125C     $_NLDM/tcbn65lpwc1d081d08.db
-set standard_cell_lib_file_ss_1p08v_125C    $_NLDM/tcbn65lpwc1d081d08.lib
-set standard_cell_db_file_tt_1p20v_25C      $_NLDM/tcbn65lptc1d21d2.db
-set standard_cell_lib_file_tt_1p20v_25C     $_NLDM/tcbn65lptc1d21d2.lib
-set standard_cell_db_file_ff_1p32v_m40C     $_NLDM/tcbn65lpbc1d321d32.db
-set standard_cell_lib_file_ff_1p32v_m40C    $_NLDM/tcbn65lpbc1d321d32.lib
+set standard_cell_db_file_ss_1p08v_125C     $_NLDM/tcbn65lpwc.db
+set standard_cell_lib_file_ss_1p08v_125C    $_NLDM/tcbn65lpwc.lib
+set standard_cell_db_file_tt_1p20v_25C      $_NLDM/tcbn65lptc.db
+set standard_cell_lib_file_tt_1p20v_25C     $_NLDM/tcbn65lptc.lib
+set standard_cell_db_file_ff_1p32v_m40C     $_NLDM/tcbn65lpbc.db
+set standard_cell_lib_file_ff_1p32v_m40C    $_NLDM/tcbn65lpbc.lib
 set standard_cell_antenna_file              $cln65lp_tech_path/celtic/tcbn65lp_200a/tcbn65lp_antenna.cl
 
 # ── B) Arm IO library (chip-top pad ring) ──────────────────────────────────

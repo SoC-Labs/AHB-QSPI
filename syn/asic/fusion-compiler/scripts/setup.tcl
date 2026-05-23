@@ -23,7 +23,14 @@ set CORE_VOLTAGE 1.08
 # the cache + interface registers — re-enable (and add proper
 # SVF/`set_user_match` guidance) once the partition is being closed
 # for real silicon.
-set _icg_cells [get_lib_cells -quiet [list */PREICG_* */ICGT_*]]
+# tcbn65lp ICG cell families (replaces sc12 PREICG_/ICGT_ patterns):
+#   CKLHQD*  — latch-based integrated clock gating (the LEC-problematic
+#               family — same SVF guidance gap the original comment
+#               documents)
+#   CKLNQD*  — latch-free ICG variant
+# (CKBD* clock buffers and CKAN2D* clock AND-gates are NOT ICGs and
+# remain enabled.)
+set _icg_cells [get_lib_cells -quiet [list */CKLHQD* */CKLNQD*]]
 if {[sizeof_collection $_icg_cells] > 0} {
     set_attribute $_icg_cells dont_use true
     puts "INFO: \[setup\] [sizeof_collection $_icg_cells] ICG lib_cells marked dont_use"

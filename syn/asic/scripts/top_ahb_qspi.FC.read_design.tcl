@@ -176,8 +176,8 @@ create_corner slow
 create_scenario -mode func -corner slow -name scen_slow
 set_operating_conditions \
     -analysis_type on_chip_variation \
-    -max ss_typical_max_1p08v_125c -min ss_typical_max_1p08v_125c \
-    -library sc12_cln65lp_base_rvt_ss_typical_max_1p08v_125c
+    -max WCCOM -min WCCOM \
+    -library tcbn65lpwc
 
 set have_ff_mems 0
 if {[info exists ::env(MEM_DBS_FF)] && [string trim $::env(MEM_DBS_FF)] ne ""} {
@@ -189,8 +189,8 @@ if {$have_ff_mems} {
     create_scenario -mode func -corner fast -name scen_fast
     set_operating_conditions \
         -analysis_type on_chip_variation \
-        -max ff_typical_min_1p32v_m40c -min ff_typical_min_1p32v_m40c \
-        -library sc12_cln65lp_base_rvt_ff_typical_min_1p32v_m40c
+        -max BCCOM -min BCCOM \
+        -library tcbn65lpbc
 } else {
     puts "INFO: MEM_DBS_FF empty — skipping scen_fast (no FF macro libraries bound)"
 }
