@@ -23,7 +23,7 @@ clean and ready.
 =================================================================
   check_design / check_legality / check_pg_drc / pre_timing /
     check_mv_design / check_pin_placement / check_clock_trees  PASS
-  check_pg_connectivity   WAIVE  (1008 wire-stubs ≤ 1300, 0 macros)
+  check_pg_connectivity   WAIVE  (~1020 wire-stubs ≤ 1300, 0 macros)
   check_routes            WAIVE  (3 DRCs ≤ 5 incl. 2 Shorts, 0 opens)
   Formality LEC           FM_LEC_OK
   scen_slow setup WNS    -0.01 ns  (rounding-class)
@@ -59,7 +59,7 @@ before relying on it.
 
 ## Two waived items — what they are + what you do with them
 
-### 1. `check_pg_connectivity` — 1008 floating wire-stubs
+### 1. `check_pg_connectivity` — ~1020 floating wire-stubs
 
 **Not a real disconnect.** The deep-dive (see
 [INTEGRATION_CHANGES.md](../syn/asic/fusion-compiler/INTEGRATION_CHANGES.md)
@@ -70,10 +70,12 @@ before relying on it.
 - `check_pg_drc` PASSES (0 errors)
 - 0 *macros* floating — exactly what would be a real disconnect
 
-The 1008 are **floating WIRE STUBS** — trimmed mesh-strap fragments
+The ~1020 are **floating WIRE STUBS** — trimmed mesh-strap fragments
 from the 25 µm M5/M6 PG mesh with `trim:true`, plus a 0
 partition-PG-terminal hand-off gap (ZRT-740). The mechanism is
-documented; the count is bounded and tracks mesh extent.
+documented; the count is bounded and tracks mesh extent. Observed
+run-to-run range across the 1008–1024 band (≈1.6%) at the same
+commit — well under the 1300 ceiling.
 
 **Chip-top action:** when wiring the partition's VDD/VSS supply ports
 to the chip-top global rails, create proper PG terminals at the

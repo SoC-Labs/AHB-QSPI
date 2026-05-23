@@ -26,7 +26,7 @@ documented chip-top actions.
 =================================================================
   check_design / check_legality / check_pg_drc / pre_timing /
     check_mv_design / check_pin_placement / check_clock_trees  PASS
-  check_pg_connectivity   WAIVE  (1008 wire-stubs ≤ 1300, 0 macros)
+  check_pg_connectivity   WAIVE  (~1020 wire-stubs ≤ 1300, 0 macros)
   check_routes            WAIVE  (3 DRCs ≤ 5 incl. 2 Shorts, 0 opens)
   Formality LEC           FM_LEC_OK
   scen_slow setup WNS    -0.01 ns  (rounding-class)
@@ -157,7 +157,7 @@ These are explicitly punted to chip-top integration / a follow-up MR:
 | item | state | action |
 |---|---|---|
 | 2 routing **Shorts** in the central channel | bounded by `FC_ROUTES_DRC_MAX=5` | detailed-route ECO at chip-top with M7+ tracks + surrounding-block context (see `docs/chip_top_handoff.md` for the recipe) |
-| 1008 floating PG wire-stubs | bounded by `FC_PG_CONN_FLOAT_MAX=1300` | create proper partition PG terminals when wiring partition VDD/VSS to chip-top global rails |
+| ~1020 floating PG wire-stubs (1008–1024 run-to-run) | bounded by `FC_PG_CONN_FLOAT_MAX=1300` | create proper partition PG terminals when wiring partition VDD/VSS to chip-top global rails |
 | ETM extracted timing model | scaffold only | validate `syn/asic/primetime/scripts/extract_etm.tcl` against silicon, OR use the `.dlib` NDM for hierarchical STA |
 | IR-drop / EM signoff | NOT run | commission a separate IR/EM pass at chip-top (`pg_mesh.tcl` is the supply-network reference) |
 | Antenna rules | not loaded in this flow | source cln65lp antenna deck + run as part of chip-top DRC |

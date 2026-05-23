@@ -84,7 +84,7 @@ The `top_ahb_qspi` partition runs end-to-end through the Synopsys Fusion Compile
 RESULT: CLEAN (2 WAIVERS) — partition ready for chip-top integration
   check_design / check_legality / check_pg_drc / pre_timing /
     check_mv_design / check_pin_placement / check_clock_trees  PASS
-  check_pg_connectivity  WAIVE  (1008 wire-stubs ≤ 1300, 0 macros)
+  check_pg_connectivity  WAIVE  (~1020 wire-stubs ≤ 1300, 0 macros)
   check_routes           WAIVE  (3 DRCs ≤ 5 incl. 2 Shorts, 0 opens)
   Formality LEC          FM_LEC_OK
   scen_slow setup WNS    -0.01 ns
