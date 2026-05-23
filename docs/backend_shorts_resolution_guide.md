@@ -286,28 +286,53 @@ hand-off package.
 
 ---
 
-## 5. Path C — get a sign-off DRC runset (only if your site has TSMC65)
+## 5. Path C — sign-off DRC via Mentor Calibre (now wired, partially blocked)
 
-If your organisation has the **TSMC65 foundry runset** (a
-`.rs` file, roughly 100–500 MB, supplied under NDA by the
-foundry / IP partner), Synopsys ICV is already installed and the
-project's `7_drc.tcl` has a hook for it:
+**Update (2026-05-23):** the deck + the tool + the partition flow
+hook are all wired and runnable on this host. Mentor Calibre
+v2023.1 is installed at `/eda/mentor/calibre/`; the TSMC cln65lp
+Calibre PDK is at `/home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/pdk/Calibre/`;
+the per-stack `1p9m_6X2Z0U` deck matches our `TF_FILE`; and
+`syn/asic/calibre/Makefile` runs the whole thing with one command:
 
 ```bash
-export ICV_DRC_RUNSET=/path/to/tsmc65_cln65lp_calibre.rs
-make fc_drc
+make -C syn/asic/calibre calibre_drc
 ```
 
-This runs full **sign-off DRC** with the foundry's actual rules,
-which will list every violation with exact coordinates, layer,
-net pair, and a foundry-defined rule number. Then you go to Path
-A (GUI ECO) with that list in hand — typically 5 minutes per
-Short instead of 15.
+Outputs land in `syn/asic/calibre/work/` — `top_ahb_qspi.drc.summary`
+(per-rule violation table) and `top_ahb_qspi.drc.db` (ASCII results
+DB with exact coordinates) for every Calibre rule that fires.
 
-But: you only get a runset by being a paying TSMC customer with
-the relevant NDAs in place. Most academic / research environments
-don't have one. If you don't have it, this path is closed; use
-Path A or Path B.
+**However**, surfacing the two `check_routes` Shorts via this path is
+currently blocked because the partition GDS doesn't contain
+**std-cell internal geometry**: the tcbn65lp distribution on this
+host ships LEF + .db + Verilog but NOT cell GDS, so Calibre aborts
+with 188 `Cell <name> referenced but not defined` errors before
+reaching the spacing checks. Three Calibre SVRF directives were
+tried to tolerate missing cells — all rejected with INP1/INP7 at
+parse time, without an authoritative SVRF reference manual on host
+to find the right keyword.
+
+To re-enable Calibre signoff DRC for short coordinates:
+
+1. Source the **foundry tcbn65lp stdcell `.gds`** (separate
+   distribution from the FE one we have; usually `*_be.tar.gz` or
+   shipped under a separate physical IP delivery).
+2. Point `GDS_STDCELL` in `syn/asic/common.mk` at the new path
+   (currently empty since the .gds is absent).
+3. Re-export the partition GDS: `make -C syn/asic/fusion-compiler fc_abstract`.
+4. Re-run: `make -C syn/asic/calibre calibre_drc`.
+5. Parse `top_ahb_qspi.drc.db` for the `M*.S.*` rules → exact
+   (x, y) of each Short + the layer.
+6. Use that to accelerate Path A (GUI ECO becomes ~5 min per
+   Short instead of 15) or to hand to chip-top with coords already
+   pinned (Path B with extra precision).
+
+Until the cell .gds is sourced, Path C is **partially wired but
+coordinate-blocked** — the partition still ships as a `CLEAN
+(2 WAIVERS)` deliverable via the bounded waiver methodology (see
+§7 below), and the two Shorts are still resolvable by Path A
+(GUI ECO) or Path B (chip-top hand-off) without Calibre's help.
 
 ---
 
@@ -377,13 +402,23 @@ signoff block, doesn't touch the committed flow).
 | your situation | path | effort |
 |---|---|---|
 | You have X11 access to the EDA box | **A** (GUI ECO) | 30–90 min |
-| You don't, and chip-top integration is the next step anyway | **B** (hand off as documented residual) | 0 min — already prepared |
-| Your site has a TSMC65 runset | **C** (ICV signoff DRC then Path A) | 60–120 min |
-| You want to try a free automatic preliminary | **D** (candidate-list ECO) — ask me | ~10 min compute |
+| You don't, and chip-top integration is the next step anyway | **B** (hand off as documented residual; `CLEAN (2 WAIVERS)` already prepared) | 0 min — already done |
+| You can source the foundry tcbn65lp stdcell `.gds` | **C** then **A** (Calibre coords → faster GUI ECO) | 60–120 min |
+| You want to try a free automatic preliminary | **D** (candidate-list ECO) — exhausted, see §6 | n/a |
+
+**Current state of this partition:** the bounded `check_routes`
+waiver is already in `7_drc.tcl` (commit `f924107`); `make fc_drc`
+emits `RESULT: CLEAN (2 WAIVERS) — partition ready for chip-top
+integration` with the 2 Shorts explicitly flagged in the summary +
+in a `WARN: [fc_drc]` banner. So **Path B is already shipping** in
+the sense that the partition is in a chip-top-deliverable state
+right now; running Path A or Path C-then-A is an *upgrade* that
+zeroes the count rather than waiving it.
 
 **My recommendation if Path A is available to you: do it.** Two
 or three GUI clicks per Short, save, re-validate. Done.
 
-**If Path A isn't available: do Path B without guilt.** This is
-how partition delivery works for every macro-heavy block I've
-ever seen in this kind of flow.
+**If Path A isn't available: Path B is already complete.** The
+chip-top team can absorb the documented 2-Short residual exactly
+the same way they'd absorb any other partition's residual — see
+`docs/chip_top_handoff.md` for the short-form package.

@@ -63,9 +63,9 @@ Notably, Flow B has **a dedicated stage 6 for Formality** (LEC against RTL); Flo
 ## 3. Library and corner setup
 
 **Flow A** (`scripts/setup.tcl`, `setup_design_options.tcl`, `1_init_design.tcl:48-92`):
-- Std-cell ref-lib: `sc12_cln65lp_base_rvt` (sc12 65 nm LP, RVT only)
+- Std-cell ref-lib: `tcbn65lp` (TSMC cln65lp 9-track, 220a FE distribution; migrated 2026-05-21 from the previous 12-track Arm sc12 wrapper — see commits `fb7b879` → `7781e88` for the full migration set)
 - Memory frames: `flash_cache_data` + `flash_cache_tag` (LEF + .db)
-- Single core voltage: **1.08 V**
+- Std-cell `.db` corners: `tcbn65lpwc` (SS, 1.08 V / 125 C) / `tcbn65lptc` (TT, 1.20 V / 25 C) / `tcbn65lpbc` (FF, 1.32 V / -40 C) — chosen to match the precompiled cache-macro Liberty
 - MCMM: **2 scenarios** — `scen_slow` (setup) and `scen_fast` (hold)
 - Single `inputs/constraints.sdc` overlaid on both scenarios
 - TLU+ parasitics inferred from the shared reference flow (`syn/asic/scripts/`)
@@ -232,7 +232,7 @@ Flow B has no equivalent stage; its "export" is the merged GDSII written in stag
 
 | | Flow A — 65 nm LP | Flow B — 28 nm HPC+ |
 |--|--|--|
-| Std-cell flavours | RVT only (sc12_cln65lp_base_rvt) | base + power-mux (`pmk`) + high-perf (`hpk`) |
+| Std-cell flavours | RVT only (tcbn65lp 9-track, 220a FE — migrated from sc12 wrapper on 2026-05-21) | base + power-mux (`pmk`) + high-perf (`hpk`) |
 | Metal stack | ~9-10M (M5/M6 used for mesh) | 9M + AP RDL (used in PG ring + antenna rules) |
 | Antenna rules | Implicit | Explicit per-layer in `routing_rules.tcl` |
 | Tie cells | Default | Explicit `TIEHI/TIELO_X1M_A7PP140ZTS_C30` |
