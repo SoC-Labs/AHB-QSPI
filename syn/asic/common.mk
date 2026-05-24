@@ -83,14 +83,33 @@ export TLUPLUS_MAP    ?= $(TLUPLUS_PATH)/tluplus.map
 # ── GDS stream-out — layer map + macro/stdcell GDS to merge ────────────────
 # Layer map is also PDK data (Synopsys-format Milkyway -> GDS layer
 # numbers); reuse the Arm-supplied deck (matches the 1p9m_6x2z stack).
-# Std-cell GDS: the tcbn65lp distribution on this host does NOT ship a
-# .gds for the cells (only LEF, .db, .v are present). Leaving
-# GDS_STDCELL empty — write_gds will skip stdcell merge and emit a
-# partition GDS that contains only the partition's routing/via metal +
-# the cache-macro GDS. Chip-top integration must merge the tcbn65lp
-# stdcell GDS at LVS time (foundry-shipped under a separate distribution).
+#
+# Std-cell GDS: the tcbn65lp _FE_ distribution on this host (PHYS_IP_PATH
+# below) ships LEF / .db / .v only. The matching _BE_ pack ships the
+# stdcell .gds. Wire it in by setting TCBN65LP_BE to the BE pack root
+# (TSMCHOME tree), and GDS_STDCELL auto-resolves. Until the BE pack
+# lands, GDS_STDCELL stays empty: write_gds skips stdcell merge and
+# emits a partition GDS containing only routing/via metal + cache
+# macros, and Calibre signoff-DRC aborts with "Cell <name> referenced
+# but not defined" — chip-top integration merges the foundry stdcell
+# GDS at LVS time as a hand-off contract.
+#
+# When the BE pack arrives:
+#   1. Drop it next to the FE pack (sibling directory tcbn65lp_220a_BE)
+#      OR override TCBN65LP_BE on the make command line.
+#   2. Confirm the .gds path with: find $(TCBN65LP_BE) -name 'tcbn65lp*.gds*'
+#      and tweak GDS_STDCELL below if the layout differs from the guess.
+#   3. Rerun: make -C syn/asic/fusion-compiler fc_all + calibre_drc
+#      — Calibre's drc.db is now populated with Short coordinates,
+#      ready for Path C / path_d_eco.tcl.
 export GDS_LAYER_MAP   ?= /research/AAA/phys_ip_library/arm/tsmc/cln65lp/arm_tech/r2p0/milkyway/1p9m_6x2z/stream_out_layer_map
-export GDS_STDCELL     ?=
+export TCBN65LP_BE     ?= /home/dwn1c21/SoC-Labs/phys_ip/TSMC/65/CMOS/LP/stclib/9-track/tcbn65lp-set/tcbn65lp_220a_BE
+# Best-guess GDS path inside the BE pack — adjust once the real
+# layout is known. Resolved at make-eval time; if the file is absent
+# the variable expands to empty and write_gds skips stdcell merge
+# (current host behaviour, build stays green).
+GDS_STDCELL_CANDIDATE := $(TCBN65LP_BE)/TSMCHOME/digital/Back_End/gds/tcbn65lp_200a/tcbn65lp.gds
+export GDS_STDCELL     ?= $(wildcard $(GDS_STDCELL_CANDIDATE))
 export GDS_MEM_FCD     ?= $(MEM_BASE)/flash_cache_data/flash_cache_data.gds2
 export GDS_MEM_FCT     ?= $(MEM_BASE)/flash_cache_tag/flash_cache_tag.gds2
 export GDS_MERGE_FILES ?= $(GDS_STDCELL) $(GDS_MEM_FCD) $(GDS_MEM_FCT)

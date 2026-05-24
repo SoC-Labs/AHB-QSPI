@@ -66,16 +66,22 @@ sed -e "s|\"GDSFILENAME\"|\"$gds_in\"|"                                      \
     -e "s|^PRECISION\s\+[0-9]\+|PRECISION    10000|"                         \
     "$TSMC65_DRC_DECK" > "$deck_run"
 
-# NOTE: the tcbn65lp stdcell .gds is not available on this host. With
-# the merged partition GDS missing cell definitions, Calibre aborts on
-# "Cell <name> referenced but not defined" before running spacing
-# checks. Three SVRF variants were tried to tolerate missing cells
-# (LAYOUT IGNORE UNDEFINED REFERENCE, LAYOUT WARN MISSING CELL,
-# LAYOUT REFERENCE CELL "*" ABSENT_OK YES) — all rejected with INP1/
-# INP7. Without authoritative SVRF docs to find the right keyword, and
-# no foundry stdcell .gds to merge, signoff DRC is currently disabled
-# on this host. Source tcbn65lp .gds from the foundry distribution to
-# enable.
+# NOTE: this signoff DRC needs the foundry tcbn65lp stdcell .gds merged
+# into the partition GDS. The _FE_ pack on this host ships LEF/.db/.v
+# only — see syn/asic/common.mk GDS_STDCELL block for the auto-detect
+# wiring. With GDS_STDCELL empty, Calibre aborts on "Cell <name>
+# referenced but not defined" before running spacing checks. To enable:
+#   1. Drop the matching tcbn65lp_220a_BE pack into place (sibling of
+#      tcbn65lp_220a_FE), or override TCBN65LP_BE in common.mk.
+#   2. Rerun "make -C syn/asic/fusion-compiler fc_all" to restream the
+#      partition GDS with stdcell content.
+#   3. Rerun this script — the drc.db is now populated, and the result
+#      summary surfaces Short coordinates ready for path_d_eco.tcl's
+#      Phase A0 (set CALIBRE_DRC_REPORT to the drc.results dump).
+# Three SVRF "tolerate missing cells" variants (LAYOUT IGNORE UNDEFINED
+# REFERENCE, LAYOUT WARN MISSING CELL, LAYOUT REFERENCE CELL "*"
+# ABSENT_OK YES) were rejected with INP1/INP7 — keep the comment for
+# future explorers, but the supported path is "source the BE pack".
 
 echo "INFO: runset (placeholders substituted): $deck_run"
 echo "INFO: deck   : $TSMC65_DRC_DECK"

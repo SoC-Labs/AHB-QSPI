@@ -1,5 +1,6 @@
 #-----------------------------------------------------------------------------
 # Path D v2 — DRC-driven ECO, NON-DESTRUCTIVE (2026-05-20)
+# Path D v3 — Calibre-coord-driven preamble added (2026-05-24)
 #
 # v1 finding: blind candidate-list ECO on the DEF-parser top-10 produced
 # "Topology ECO not run, no qualifying violations" on every pair — i.e.
@@ -11,6 +12,14 @@
 # fall back to a bulk top-50 candidate ECO if route_eco didn't clear
 # everything. Then a final route_opt + route_detail cleanup pass.
 # Saves to throwaway alias only.
+#
+# v3 adds an OPTIONAL Phase A0: if env CALIBRE_DRC_REPORT points at a
+# Calibre text-format DRC dump (foundry tcbn65lp stdcell .gds is then
+# present in common.mk's GDS_STDCELL — see that file's banner), import
+# the Short markers via read_drc_error_file so route_eco in Phase A
+# has authoritative coordinates from signoff DRC rather than only the
+# in-design check_routes view. Skips quietly if the env var or file
+# is absent — Phase A v2 behaviour preserved.
 #-----------------------------------------------------------------------------
 
 set top_module       $::env(MODULE)
@@ -54,13 +63,51 @@ if {$b_short == 0 && $b_total == 0} {
     puts "FC_STAGE_OK: path_d_eco"; exit
 }
 
-# ── Phase A — route_eco with no -nets ── let it scan its own violations
+# ── Phase A0 — OPTIONAL: import Calibre signoff-DRC short coordinates ──
+# Activates when env CALIBRE_DRC_REPORT points at a text-format Calibre
+# DRC dump (drc.results / drc.txt). Requires the foundry tcbn65lp
+# stdcell .gds wired through common.mk (GDS_STDCELL non-empty). If
+# unavailable on this host, Phase A0 is a no-op and Phase A proceeds
+# unchanged.
+set calibre_rpt [expr {[info exists ::env(CALIBRE_DRC_REPORT)] ? $::env(CALIBRE_DRC_REPORT) : ""}]
 emit $fh ""
-emit $fh "--- Phase A: route_eco (no -nets, DRC-driven) ---"
-if {[catch {route_eco} err]} {
-    emit $fh [fmt "route_eco" "FAILED: $err"]
+emit $fh "--- Phase A0: Calibre coord import (optional) ---"
+if {$calibre_rpt ne "" && [file exists $calibre_rpt]} {
+    if {[catch {
+        read_drc_error_file -drc_type calibre -error_data calibre_shorts $calibre_rpt
+    } err]} {
+        emit $fh [fmt "read_drc_error_file" "FAILED: $err"]
+        emit $fh [fmt "fallback" "Phase A will use in-design check_routes only"]
+        set calibre_rpt ""
+    } else {
+        emit $fh [fmt "read_drc_error_file" "OK ($calibre_rpt)"]
+    }
 } else {
-    emit $fh [fmt "route_eco" "OK"]
+    emit $fh [fmt "CALIBRE_DRC_REPORT" "absent — skipping coord import"]
+    emit $fh [fmt "hint" "set GDS_STDCELL in common.mk + run make calibre_drc"]
+}
+
+# ── Phase A — route_eco with no -nets ── let it scan its own violations
+# When Phase A0 imported Calibre coords, prefer -error_data; otherwise
+# fall back to the v2 invocation that scans the in-design check_routes.
+emit $fh ""
+emit $fh "--- Phase A: route_eco (Calibre coords if available, else in-design DRC) ---"
+if {$calibre_rpt ne ""} {
+    set _eco_cmd "route_eco -error_data calibre_shorts"
+} else {
+    set _eco_cmd "route_eco"
+}
+if {[catch {eval $_eco_cmd} err]} {
+    emit $fh [fmt $_eco_cmd "FAILED: $err"]
+    # Fallback to plain route_eco if the -error_data variant isn't
+    # supported in this fc_shell release.
+    if {$calibre_rpt ne "" && [catch {route_eco} err2]} {
+        emit $fh [fmt "route_eco (fallback)" "FAILED: $err2"]
+    } elseif {$calibre_rpt ne ""} {
+        emit $fh [fmt "route_eco (fallback)" "OK"]
+    }
+} else {
+    emit $fh [fmt $_eco_cmd "OK"]
 }
 lassign [drc_counts] a_total a_short a_eol
 emit $fh [fmt "After Phase A" "$a_total DRCs ($a_short Shorts, $a_eol EOL)\
