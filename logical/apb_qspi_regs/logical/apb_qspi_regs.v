@@ -191,7 +191,11 @@ always @(posedge PCLK or negedge PRESETn) begin
                 10'h00A: reg10 <= PWDATA;
                 10'h00B: reg11 <= PWDATA;
                 10'h00C: reg12 <= PWDATA;
-                10'h00D: reg13 <= PWDATA[4:0];
+                // R9: clamp the programmed clock divide to a minimum of 1.
+                // CLK_DIV==0 would otherwise pass HCLK straight through in
+                // qspi_clock_div.v, defeating the SCLK CDC / nCS-setup guard.
+                // Valid divides (>=1) are stored unchanged.
+                10'h00D: reg13 <= (PWDATA[4:0]==5'h00) ? 5'h01 : PWDATA[4:0];
             endcase
         end
         if(qspi_enable_ack_sync)
