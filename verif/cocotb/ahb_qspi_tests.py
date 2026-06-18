@@ -3193,3 +3193,403 @@ async def test_xip_cache_pipelined_rw_interleave_regression(dut):
     await tb.config_ahb_master.write(0x00, 0x0)
     await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x0)
     await tb.config_ahb_master.write(0x34, 0x05)
+
+
+# ============================================================================
+# CPU-instruction-fetch XiP coverage (Part A of
+# docs/imem_xip/AHB_QSPI_XIP_COVERAGE_AND_DRIVERS.md)
+# ============================================================================
+#
+# Motivation / coverage gap being closed
+# --------------------------------------
+# The existing XiP tests (test_ahb_xip_read, test_xip_multiple_addresses,
+# test_xip_cache_pipelined_nseq_reads_regression) cover XiP *data* reads —
+# ascending sweeps, scattered addresses, reverse sweeps, back-to-back NSEQ.
+# They all PASS against the Verilog SST26VF064B model wired into this TB
+# (ahb_qspi_cocotb.v: `sst26vf064b u_sst26vf064b`).
+#
+# Yet at the SoC level a Cortex-M0+ executing BRANCHING CODE in place from
+# the XiP aperture HANGS on the first non-sequential INSTRUCTION fetch
+# (backward branch / loop / call-return). The QSPI IP non-seq *data* path is
+# fine, so the suspected gap was: no test mimics a CPU INSTRUCTION-FETCH
+# STREAM — a run of ascending fetches (PC, PC+4, ...) followed by a
+# backward-branch re-fetch of an *earlier* address that the cache has
+# already seen, then continuing. The tests below drive exactly that pattern.
+#
+# What this TB can and cannot present to the cache (verified)
+# ----------------------------------------------------------
+#  * HPROT: the cocotbext.ahb master never drives hprot. The TB hardwires
+#    data_HPROT = 4'b1000 (cacheable instruction-fetch) on the data port by
+#    default (ahb_qspi_cocotb.v:45). So EVERY AHB data-port read in this env
+#    already carries the M0+ instruction-fetch HPROT encoding into the CG092
+#    cache — these fetch-pattern tests therefore exercise the real opcode
+#    HPROT, not a data-load HPROT.
+#  * HTRANS: cocotbext.ahb only ever emits NONSEQ (it never drives SEQ —
+#    ahb_master.py hard-codes AHBTrans.NONSEQ for every beat). A real M0+
+#    linear prefetch would emit NONSEQ then SEQ; here each beat is NONSEQ.
+#    This is acceptable for the cache, which decodes set/tag from HADDR and
+#    treats a within-line ascending NONSEQ the same as SEQ for fill/hit
+#    purposes. The CPU-distinguishing behaviour that matters at the cache
+#    boundary — the *address ordering* (ascending fetch run, then a
+#    backward jump to a previously-fetched/earlier line out of sequence) —
+#    IS faithfully reproduced.
+#
+# Cache geometry (from logical/cache_subsytem/logical/cache_subsystem.v):
+#   LINEW=4  -> 16-byte lines (4 words/line)
+#   TAG RAM ADDR_W=8 -> 256 sets; 2 tag RAMs -> 2-way set-associative.
+#   => set index = HADDR[11:4], tag = HADDR[21:12]. Addresses 0x1000 apart
+#      alias to the same set (used by the eviction test).
+# ============================================================================
+
+
+async def _enter_plain_spi_xip_ready(dut, tb, *, opcode=0x03, dummy_cycles=0,
+                                     clk_div=2):
+    """Enter plain-SPI XiP and bring the CG092 cache to STATUS=READY.
+
+    Wrapper over the proven _switch_to_plain_spi_xip sequence but with the
+    AHB read opcode/dummy parameterisable so the fetch-stream tests can run
+    the *exact* mode the SoC stage-0 uses (0x03 slow-read, 0 dummy) as well
+    as fast-read. Assumes the caller has already done init_qpi + programmed
+    flash (flash is left in QPI mode by init_qpi; LEAVE_QPI_MODE here drops
+    it back to SPI for plain-SPI XiP)."""
+    await LEAVE_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x0)   # clear QIO_MODE
+    await tb.config_ahb_master.write(0x34, clk_div)
+
+    r = await tb.config_ahb_master.read(0x00, 4)
+    ctrl = int(r[0]['data'], 16)
+    ctrl &= ~((1 << 0) | (1 << 25))   # QIO_MODE=0, NO_CMD=0
+    ctrl |= (1 << 8)                  # XIP_ACTIVE=1
+    await tb.config_ahb_master.write(0x00, ctrl)
+    await tb.config_ahb_master.write(0x30, (dummy_cycles << 12) | opcode)
+
+    await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
+    await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
+    for _ in range(500):
+        await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
+        r = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
+        if (int(r[0]['data'], 16) & 0x3) == 2:
+            return
+        await Timer(time=10, units='us')
+    raise AssertionError("Cache did not reach STATUS=READY within budget")
+
+
+async def _enter_qpi_xip_ready(dut, tb, *, opcode=0x0B, dummy_cycles=4,
+                               no_cmd=True, cont_read_warmup=True, clk_div=1):
+    """Enter QPI XiP (optionally NO_CMD + continuous-read warmup) and bring
+    the cache to READY. Mirrors the load-bearing sequence in
+    _xip_baseline_minus (the cont_read warmup + RMW of CTRL are required).
+    Used by the fetch-loop NO_CMD/continuous-read parametrisation."""
+    # init_qpi already left flash in QPI mode + CTRL.QIO_MODE=1.
+    await tb.config_ahb_master.write(0x34, clk_div)
+
+    if cont_read_warmup:
+        # Primes flash into continuous-read and latches MODE_CODE=0xA0 +
+        # CONT_READ=1 in CTRL. Load-bearing — preserved by the RMW below.
+        await QPI_READ_WORDS(dut, tb, addr=0x0, n_words=4, cont_read=True)
+
+    r = await tb.config_ahb_master.read(0x00, 4)
+    ctrl = int(r[0]['data'], 16)
+    ctrl |= (1 << 0)                          # QIO_MODE=1
+    if no_cmd:
+        ctrl |= (1 << 25)
+    else:
+        ctrl &= ~(1 << 25)
+    ctrl |= (1 << 8)                          # XIP_ACTIVE=1
+    await tb.config_ahb_master.write(0x00, ctrl)
+    await tb.config_ahb_master.write(0x30, (dummy_cycles << 12) | opcode)
+
+    await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x1)
+    await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
+    for _ in range(500):
+        await tb.config_ahb_master.read(CACHE_CONFIG_ADDR, 4)
+        r = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR + 0x04, 4)
+        if (int(r[0]['data'], 16) & 0x3) == 2:
+            return
+        await Timer(time=10, units='us')
+    raise AssertionError("Cache did not reach STATUS=READY within budget (QPI)")
+
+
+async def _xip_cache_teardown(tb):
+    """Return the controller to a clean state for subsequent tests."""
+    await tb.config_ahb_master.write(0x00, 0x0)
+    await tb.config_ahb_master.write(CACHE_CONFIG_ADDR, 0x0)
+    await tb.config_ahb_master.write(0x34, 0x05)
+
+
+def _classify_rdata(hex_str):
+    """(value_or_None, has_x). X-bits in AHB rdata make int() raise."""
+    try:
+        return int(hex_str, 16), False
+    except (ValueError, TypeError):
+        return None, True
+
+
+async def _fetch_word(dut, tb, addr, label, expected, fetched):
+    """One AHB data-port read = one CPU instruction fetch. Records the
+    result (value-checked at the end) and logs it so a HANG (cocotbext.ahb
+    raises its internal Timeout exception) or an X/wrong word is obvious."""
+    r = await tb.data_ahb_master.read(addr, 4)
+    val, has_x = _classify_rdata(r[0]['data'])
+    tb.log.info("  fetch %-18s @ 0x%06x = %s (expect 0x%08x)",
+                label, addr, r[0]['data'], expected)
+    fetched.append((addr, label, val, has_x, expected))
+
+
+async def _run_cpu_fetch_loop(dut, tb, *, base_addr, opcode, dummy_cycles,
+                              qpi, no_cmd):
+    """Core of test_xip_cpu_fetch_loop, reused for the mode parametrisation.
+
+    Programs a small "code image" into flash, enters XiP, then drives the
+    AHB data master to mimic a CPU executing this loop in place:
+
+        L_top:  (word0) (word1) (word2) (word3)   ; ascending prefetch run
+                (word4) (word5) (word6) (word7)   ; crosses a line boundary
+        branch backward to L_top                  ; NONSEQ re-fetch of word0
+                (word0) (word1) (word2)           ; re-execute from earlier addr
+        branch forward over a line                ; NONSEQ skip to word6
+                (word6) (word7)
+
+    i.e. exactly the prefetch + backward-branch-re-fetch-of-an-earlier-line
+    pattern the SoC hangs on. Every fetch is value-checked against the
+    programmed flash contents; a HANG manifests as a cocotbext.ahb timeout
+    exception (the test then fails loudly, NOT as expect_fail).
+    """
+    # 8 words = 2 cache lines of "code".
+    code = [0xF00DC0DE ^ (i * 0x01010101) for i in range(8)]
+    addr_of = lambda i: base_addr + 4 * i
+
+    tb.log.info("=== program %d-word code image at 0x%06x ===",
+                len(code), base_addr)
+    await _program_flash_region(dut, tb, base_addr=base_addr, words=code)
+
+    if qpi:
+        await _enter_qpi_xip_ready(dut, tb, opcode=opcode,
+                                   dummy_cycles=dummy_cycles, no_cmd=no_cmd,
+                                   cont_read_warmup=True, clk_div=1)
+    else:
+        await _enter_plain_spi_xip_ready(dut, tb, opcode=opcode,
+                                         dummy_cycles=dummy_cycles, clk_div=2)
+
+    fetched = []
+
+    # --- Linear prefetch run: word0..word7 (ascending, crosses line 0->1) --
+    tb.log.info("=== linear prefetch run (PC, PC+4, ... across line boundary) ===")
+    for i in range(8):
+        await _fetch_word(dut, tb, addr_of(i), f"linear[{i}]", code[i], fetched)
+
+    # --- BACKWARD BRANCH: re-fetch word0 out of sequence (the SoC-hang case) -
+    # This is a NONSEQ fetch to an EARLIER, already-cached line. A correct
+    # cache returns word0 from line 0 (a hit); the SoC symptom is a hang here.
+    tb.log.info("=== BACKWARD BRANCH: NONSEQ re-fetch of earlier line (word0) ===")
+    await _fetch_word(dut, tb, addr_of(0), "branch-back", code[0], fetched)
+
+    # --- Re-execute a short run from the branch target -----------------------
+    tb.log.info("=== re-execute run from branch target (word1, word2) ===")
+    for i in (1, 2):
+        await _fetch_word(dut, tb, addr_of(i), f"reexec[{i}]", code[i], fetched)
+
+    # --- FORWARD BRANCH: NONSEQ skip forward to word6 (later line) -----------
+    tb.log.info("=== FORWARD BRANCH: NONSEQ skip to word6 ===")
+    await _fetch_word(dut, tb, addr_of(6), "branch-fwd", code[6], fetched)
+    await _fetch_word(dut, tb, addr_of(7), "fall-through", code[7], fetched)
+
+    # --- A second backward branch all the way to the top --------------------
+    tb.log.info("=== second BACKWARD BRANCH to top (word0), then word1 ===")
+    await _fetch_word(dut, tb, addr_of(0), "branch-back-2", code[0], fetched)
+    await _fetch_word(dut, tb, addr_of(1), "fall-through-2", code[1], fetched)
+
+    # Value-check everything.
+    xwords = [f for f in fetched if f[3]]
+    mism = [f for f in fetched if (not f[3]) and f[2] != f[4]]
+    assert not xwords and not mism, (
+        "CPU-fetch-loop returned bad data — this would localize the SoC XiP "
+        "instruction-fetch hang to the IP/cache/Verilog-flash model.\n"
+        + "".join(
+            f"  X    @0x{a:06x} {lbl}\n" for a, lbl, _, hx, _ in xwords)
+        + "".join(
+            f"  MIS  @0x{a:06x} {lbl}: got=0x{v:08x} exp=0x{e:08x}\n"
+            for a, lbl, v, _, e in mism))
+    tb.log.info("CPU-fetch-loop PASSED: %d fetches (incl. 3 backward + 1 "
+                "forward NONSEQ branch re-fetches) all returned correct data.",
+                len(fetched))
+
+
+@cocotb.test()
+async def test_xip_cpu_fetch_loop(dut):
+    """Mimic a Cortex-M0+ executing a small loop IN PLACE from the XiP
+    aperture: an ascending instruction-prefetch run (PC, PC+4, ... crossing
+    a cache-line boundary), then a BACKWARD BRANCH (NONSEQ fetch of an
+    earlier, already-cached line), re-execute, a FORWARD branch, and a second
+    backward branch to the top. Every fetched word is value-checked against
+    the programmed flash code image.
+
+    This is the exact access pattern the SoC-level M0+ hangs on at the first
+    non-sequential instruction fetch. If the ahb_qspi IP (cache + Verilog
+    SST26VF064B flash model wired into this TB) reproduces the hang, this
+    test will TIME OUT (cocotbext.ahb raises) or return X/wrong data and FAIL
+    — localizing the bug to the IP. If it PASSES, the IP is exonerated and
+    the bug is in the SoC integration / real-M0+ prefetch.
+
+    Default mode = nanoSoC stage-0's: plain SPI, 0x03 slow-read, 0 dummy.
+    """
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+    await _run_cpu_fetch_loop(dut, tb, base_addr=0x8000, opcode=0x03,
+                              dummy_cycles=0, qpi=False, no_cmd=False)
+    await _xip_cache_teardown(tb)
+
+
+@cocotb.test()
+async def test_xip_evict_then_refetch(dut):
+    """Access enough distinct cache lines to EVICT line 0, then take a
+    backward jump BACK to line 0 (a cold miss after eviction) and assert the
+    re-fill returns correct data.
+
+    The CG092 cache is 2-way, 256-set, 16B lines (set index = HADDR[11:4]).
+    Addresses 0x1000 apart alias to the SAME set, so 3 distinct tags into
+    set 0 guarantees the first (line 0) is evicted from a 2-way set. We then
+    re-fetch line 0 — the "backward branch to code that has since been
+    evicted" case — and check the cold re-fill.
+
+    We additionally sweep a long ascending run of distinct lines (well past
+    the 8 KB cache capacity) and then return to line 0, as a capacity-evict
+    cross-check that does not rely on the exact index function.
+    """
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+
+    # --- Program line 0 and two set-0 aliases (0x1000 apart) ---------------
+    L0   = 0x0000      # set 0, tag 0
+    A1   = 0x1000      # set 0, tag 1
+    A2   = 0x2000      # set 0, tag 2
+    d_l0 = [0x1EE70000 + i for i in range(4)]
+    d_a1 = [0x1EE71000 + i for i in range(4)]
+    d_a2 = [0x1EE72000 + i for i in range(4)]
+    for base, d in ((L0, d_l0), (A1, d_a1), (A2, d_a2)):
+        await _program_flash_region(dut, tb, base_addr=base, words=d)
+
+    # Also program a long ascending region of distinct lines for the
+    # capacity-evict cross-check (32 lines = 128 words from 0x3000).
+    SWEEP_BASE = 0x3000
+    sweep = [0xCA5C0000 + i for i in range(128)]
+    await _program_flash_region(dut, tb, base_addr=SWEEP_BASE, words=sweep)
+
+    await _enter_plain_spi_xip_ready(dut, tb, opcode=0x03, dummy_cycles=0,
+                                     clk_div=2)
+
+    fetched = []
+
+    # 1) Cold-fill line 0.
+    tb.log.info("=== fill line 0 (cold miss) ===")
+    await _fetch_word(dut, tb, L0, "L0.w0 (cold)", d_l0[0], fetched)
+
+    # 2) Touch two more tags in the SAME set -> evicts line 0 (2-way set).
+    tb.log.info("=== evict line 0 via set-0 aliases (A1, A2) ===")
+    await _fetch_word(dut, tb, A1, "A1.w0", d_a1[0], fetched)
+    await _fetch_word(dut, tb, A2, "A2.w0", d_a2[0], fetched)
+
+    # 3) Backward jump BACK to line 0 -> must be a correct cold RE-FILL.
+    tb.log.info("=== backward jump to evicted line 0 (cold re-fill) ===")
+    for j in range(4):
+        await _fetch_word(dut, tb, L0 + 4 * j, f"L0.w{j} (refill)",
+                          d_l0[j], fetched)
+
+    # 4) Capacity cross-check: sweep many distinct lines, then return to L0.
+    tb.log.info("=== capacity sweep over 32 distinct lines ===")
+    for i in range(0, 128, 4):
+        await _fetch_word(dut, tb, SWEEP_BASE + 4 * i, f"sweep[{i//4}]",
+                          sweep[i], fetched)
+    tb.log.info("=== return to line 0 after capacity sweep ===")
+    await _fetch_word(dut, tb, L0, "L0.w0 (post-sweep)", d_l0[0], fetched)
+
+    xwords = [f for f in fetched if f[3]]
+    mism = [f for f in fetched if (not f[3]) and f[2] != f[4]]
+    assert not xwords and not mism, (
+        "Evict-then-refetch returned bad data — a backward branch to an "
+        "evicted line does not re-fill correctly at the IP level.\n"
+        + "".join(f"  X    @0x{a:06x} {lbl}\n" for a, lbl, _, _, _ in xwords)
+        + "".join(
+            f"  MIS  @0x{a:06x} {lbl}: got=0x{v:08x} exp=0x{e:08x}\n"
+            for a, lbl, v, _, e in mism))
+    tb.log.info("Evict-then-refetch PASSED: %d fetches; line-0 re-filled "
+                "correctly after both associativity- and capacity-eviction.",
+                len(fetched))
+
+    await _xip_cache_teardown(tb)
+
+
+@cocotb.test()
+async def test_xip_cpu_fetch_loop_qpi_nocmd_contread(dut):
+    """Deliverable 3: run the CPU-fetch-loop in the QPI + NO_CMD +
+    continuous-read fast-read (0x0B) mode — the cache/flash configuration
+    closest to a continuous-read XiP boot. Same backward/forward branch
+    fetch pattern as test_xip_cpu_fetch_loop, different controller mode, to
+    check whether the SoC-hang reproduces under continuous-read NO_CMD."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+    await _run_cpu_fetch_loop(dut, tb, base_addr=0x9000, opcode=0x0B,
+                              dummy_cycles=4, qpi=True, no_cmd=True)
+    await _xip_cache_teardown(tb)
+
+
+@cocotb.test()
+async def test_xip_cpu_fetch_loop_soc_0x800b(dut):
+    """Deliverable 3: run the CPU-fetch-loop in the EXACT mode the SoC
+    stage-0 / xip_bringup uses — AHB_SPI_SETUP (reg12 @ 0x30) = 0x800B,
+    i.e. Fast-Read opcode 0x0B with 8 dummy cycles (DUMMY_CYCLES[15:12]=8),
+    driven over plain SPI (the mode `_switch_to_plain_spi_xip`'s comment
+    documents as the stage-0 XiP config; the existing
+    test_xip_plain_spi_fast_read confirms plain-SPI 0x0B/8-dummy line-fill
+    works). This is the closest IP-level analogue to the literal reg12 value
+    the SoC XiP boot programs, driven with the backward/forward branch fetch
+    pattern that the SoC hangs on."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+    await _run_cpu_fetch_loop(dut, tb, base_addr=0xA000, opcode=0x0B,
+                              dummy_cycles=8, qpi=False, no_cmd=False)
+    await _xip_cache_teardown(tb)
+
+
+@cocotb.test()
+async def test_xip_cpu_fetch_loop_cmd_per_line(dut):
+    """Deliverable 3 (command re-issued per line, NO_CMD path NOT used):
+    plain-SPI Fast-Read (0x0B, 8 dummy) XiP. Plain SPI has no NO_CMD /
+    continuous-read continuation optimisation, so the controller re-issues
+    the full Fast-Read command for EVERY cache line fill. Each backward /
+    forward branch fetch that misses therefore drives a fresh command
+    sequence — the command-re-issue arm — under the CPU fetch pattern.
+
+    This is the supported contrast to test_xip_cpu_fetch_loop (plain-SPI
+    slow-read 0x03/0-dummy): same command-per-line fill model, different
+    opcode/dummy. The (unsupported) QPI NO_CMD-off paths are deliberately
+    not used here — the existing empirical table above test_ahb_xip_read
+    documents that QPI XiP requires NO_CMD + a continuous-read warmup."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+    code = [0xB1A50000 + i for i in range(8)]
+    await _program_flash_region(dut, tb, base_addr=0xB000, words=code)
+    # Plain-SPI Fast-Read XiP -> command re-issued per line fill.
+    await _enter_plain_spi_xip_ready(dut, tb, opcode=0x0B, dummy_cycles=8,
+                                     clk_div=2)
+    fetched = []
+    for i in range(8):
+        await _fetch_word(dut, tb, 0xB000 + 4 * i, f"linear[{i}]",
+                          code[i], fetched)
+    # Backward branch to an earlier line, then forward.
+    await _fetch_word(dut, tb, 0xB000 + 0, "branch-back", code[0], fetched)
+    await _fetch_word(dut, tb, 0xB000 + 4 * 5, "branch-fwd", code[5], fetched)
+    await _fetch_word(dut, tb, 0xB000 + 0, "branch-back-2", code[0], fetched)
+    xwords = [f for f in fetched if f[3]]
+    mism = [f for f in fetched if (not f[3]) and f[2] != f[4]]
+    assert not xwords and not mism, (
+        "plain-SPI command-per-line CPU-fetch returned bad data.\n"
+        + "".join(f"  X    @0x{a:06x} {lbl}\n" for a, lbl, _, _, _ in xwords)
+        + "".join(
+            f"  MIS  @0x{a:06x} {lbl}: got=0x{v:08x} exp=0x{e:08x}\n"
+            for a, lbl, v, _, e in mism))
+    tb.log.info("plain-SPI command-per-line CPU-fetch PASSED: %d fetches OK.",
+                len(fetched))
+    await _xip_cache_teardown(tb)
