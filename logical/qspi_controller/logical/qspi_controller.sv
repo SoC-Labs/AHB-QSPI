@@ -391,7 +391,7 @@ always_comb begin
             next_state = DATA_I;
             // Next state decision from DATA_I if in QPI mode
             if(qspi_qio_mode_latched==1'b0) begin
-                if((byte_counter[3:0]==qspi_n_rw_bytes_latched)) begin
+                if((byte_counter==qspi_n_rw_bytes_latched)) begin
                     if(data_counter==3'h6)
                         next_state = IDLE;
                     else
