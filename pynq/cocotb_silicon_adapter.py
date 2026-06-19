@@ -86,6 +86,17 @@ class QspiAdapter(Adapter):
         "test_bug1_rdata_latch",
         "test_bug2_enable_ack_latch",
         "test_bug3_no_cmd_last_addr",
+        # Cache-BYPASS back-to-back-NONSEQ XiP repro tests (expect_fail, sim-only):
+        # they drive cocotbext.ahb pipelined mode (pip=True) — a BFM construct
+        # with no MMIO/PS-master equivalent — and reproduce a wrapper hazard that
+        # only the M0+ pipelined instruction-fetch stream triggers. The PS-driven
+        # AXI->AHB adapter serialises transfers and cannot emit that timing, so
+        # these are not meaningful on this silicon path (the XiP branch fix is
+        # HW-validated at the SoC level via xip_smoke_hw). See
+        # docs/xip_branch_fetch_hang_rootcause.md.
+        "test_xip_bypass_back_to_back_nonseq",
+        "test_xip_bypass_b2b_line_crossing",
+        "test_xip_bypass_b2b_slow_read_0x03",
     )
     # Run but a fail/crash is expected and informative, not a regression.
     # Each entry is an *inherent* silicon limitation (see the design doc
