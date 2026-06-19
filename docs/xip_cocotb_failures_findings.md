@@ -1,5 +1,16 @@
 # Findings: 5 failing XIP cocotb tests — root-cause diagnosis
 
+> **NOTE (2026-06-18):** These findings are about the **cocotb test-suite** XiP
+> failures, **not** the silicon **XiP branch-fetch hang**. For that, see
+> [`xip_branch_fetch_hang_rootcause.md`](xip_branch_fetch_hang_rootcause.md)
+> (reconciled root cause: an AHB back-to-back-NONSEQ handshake bug in
+> `ahb_qspi_interface.sv`, exposed because the CG092 cache runs in bypass).
+> Relevant gap for verification: every test below **enables the cache first**
+> and none drives a back-to-back NONSEQ in **bypass** mode — the exact
+> uncovered scenario that hangs on silicon. A bypass-mode test is being added
+> separately.
+
+
 **Investigator hand-off response to** `docs/xip_cocotb_failures_brief.md`.
 **Date:** 2026-05-18. **Branch:** `feat-nanosoc_int`. **Simulator:** vcs
 (T-2022.06-SP2), cocotb + cocotbext-ahb **0.5.1**, py3.10 (miniconda3).

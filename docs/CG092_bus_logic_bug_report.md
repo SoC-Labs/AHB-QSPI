@@ -1,5 +1,16 @@
 # Bug report: CG092 `p_flash_cache_f0_bus_logic` silently drops non-privileged APB writes
 
+> **NOTE (2026-06-18):** This is a **real, separate** CG092 bug (PPROT[0] gate
+> on register writes) and stands on its own. It is **related to** the silicon
+> **XiP branch-fetch hang** only in that, in this SoC, the CG092 cache is left
+> **disabled / in bypass** (`CCR.EN` resets to 0 and nothing enables it), so the
+> wrapper sees the raw M0+ fetch stream and the back-to-back-NONSEQ handshake
+> bug surfaces. Reconciled branch-hang root cause + fix:
+> [`xip_branch_fetch_hang_rootcause.md`](xip_branch_fetch_hang_rootcause.md)
+> (one fix direction there is to actually enable + configure the cache, which
+> this PPROT gate can silently block — re-verify the enable path on HW).
+
+
 ## Summary
 
 The ARM CG092 flash cache IP (`p_flash_cache_f0`, release `r2p0-00rel0`)

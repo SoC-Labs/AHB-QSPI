@@ -55,6 +55,13 @@ extern "C" {
 #define QSPI_BUSY_CLEAR_POLLS   1000000u
 #endif
 
+/* Bound for the CG092 cache CS->READY (and ->DISABLED) poll loop. The cache's
+ * automatic power-up + invalidate completes quickly, but this keeps a wedged or
+ * undecoded cache block from hanging a bootrom. */
+#ifndef QSPI_CACHE_READY_POLLS
+#define QSPI_CACHE_READY_POLLS  1000000u
+#endif
+
 /* Bound for the "wait for BUSY to set" loop. If BUSY's pulse is too short to
  * observe we simply fall through after this many polls -- by which point the
  * transaction has completed and RDATA is valid (no worse than the old code). */
@@ -152,6 +159,38 @@ void     qspi_xip_enable(void);
 /* Take the controller out of XiP back to APB-command mode (clears XIP_ACTIVE).
  * Required before issuing any qspi_cmd_* (program/erase) again. */
 void     qspi_xip_disable(void);
+
+/* -------------------------------------------------------------------------
+ * CG092 flash cache CONFIG/STATUS block (QSPI_CACHE_BASE, +0x1000 of the QSPI
+ * APB aperture; SoC system addresses 0x21001000 CONFIG / 0x21001004 STATUS).
+ *
+ * The cache resets DISABLED (CCR.EN=0). Enabling it (CCR.EN=1) triggers the
+ * CG092's automatic power-up + invalidate (APOW/AINV defaults); software then
+ * waits for SR.CS == READY (==2). This matches the proven cocotb sequence in
+ * verif/cocotb/ahb_qspi_tests.py (_enter_plain_spi_xip_ready /
+ * _disable_then_reenable_cache).
+ *
+ * REACHABILITY CAVEAT: a stage0_bootrom comment historically held that the
+ * +0x1000 window was NOT decoded (a read AHB-faulted), but RTL analysis shows
+ * it IS decoded at 0x21001000 (PADDR[15:12] decode, ADDRWIDTH=16 bridge).
+ * Re-verify on hardware before relying on these; if a read faults, a sys_desc
+ * decode change is needed. See sw/README.md.
+ * ------------------------------------------------------------------------- */
+
+/* Return non-zero if the cache reports CS == READY (==2), else 0. Safe to call
+ * any time; a single STATUS read with a fence. */
+int      qspi_cache_is_ready(void);
+
+/* Enable the CG092 flash cache: write CCR.EN=1 (with a read-back barrier), then
+ * poll SR until CS == READY, bounded by QSPI_CACHE_READY_POLLS. The automatic
+ * power-up + invalidate runs on the EN edge (APOW/AINV defaults). Returns 0 on
+ * READY, -1 if the poll hit its bound (cache wedged or +0x1000 not decoded). */
+int      qspi_cache_enable(void);
+
+/* Disable the CG092 flash cache: clear CCR.EN (with a read-back barrier). Does
+ * not block on the CS->DISABLED transition. Pair with qspi_cache_is_ready() if
+ * you need to confirm the wind-down. */
+void     qspi_cache_disable(void);
 
 /* SST26-family ships all blocks protected; clear global block protection so
  * erase/program take effect. Safe no-op on Micron N25Q (unknown opcode).

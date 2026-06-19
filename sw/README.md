@@ -21,6 +21,7 @@ No SoC headers, no CMSIS, no RTOS — only `<stdint.h>`. All MMIO goes through a
 ```
 -DQSPI_APB_BASE=0x21000000     # APB register block base (default 0x21000000)
 -DQSPI_XIP_BASE=0x24000000     # read-only XiP window base (default 0x24000000)
+-DQSPI_CACHE_BASE=0x21001000   # CG092 cache CCR/SR block (default APB base + 0x1000)
 -DQSPI_REG32(a)=...            # supply your own MMIO accessor (optional)
 -DQSPI_FAST_READ_DUMMY=9       # FAST_READ true dummy-cycle count (default 9)
 -DQSPI_BUSY_CLEAR_POLLS=...    # BUSY-clear timeout bound
@@ -41,6 +42,13 @@ uint32_t id = qspi_read_jedec();  /* go/no-go gate: 0 / 0xFFFFFF == not respondi
 qspi_xip_enable();                /* = the old xip_bringup(): AHB_SPI_SETUP=0x800B + XIP_ACTIVE + prime */
 /* ... reads from QSPI_XIP_BASE now hit the CG092 cache ... */
 qspi_xip_disable();               /* back to APB-command mode before erase/program */
+
+/* --- CG092 flash cache enable (CCR/SR @ +0x1000) --- */
+if (qspi_cache_enable() == 0) {   /* CCR.EN=1 -> auto power-up + invalidate -> CS==READY */
+    /* cache is live; XiP reads from QSPI_XIP_BASE are now cache-served */
+}
+int rdy = qspi_cache_is_ready();  /* non-zero once SR.CS == READY (==2) */
+qspi_cache_disable();             /* clear CCR.EN (does not block on wind-down) */
 
 /* --- program / erase --- */
 qspi_unlock_global();             /* SST26 ULBPR (no-op on N25Q) */
@@ -83,11 +91,24 @@ qspi_cmd_read_addr(QSPI_OP_FAST_READ, addr, 16,
    then RSTQIO/RSTEN/RST in both QPI and SPI framing). Run it before the first
    probe on any warm-resettable board.
 
-5. **Privileged CG092 cache CCR.** The CG092 cache CCR registers (APB
-   `0x1000–0x1FFF`) need a privileged APB master (`PPROT[0]=1`); in the current
-   SoC map **firmware cannot reach them**, so the cache runs with its reset
-   config. `qspi_xip_enable()` documents this; do not add CCR pokes expecting
-   them to take effect (they silently no-op).
+5. **CG092 cache CCR/SR enable + the +0x1000 reachability caveat.** The cache
+   resets **disabled** (`CCR.EN=0`). To use it, `qspi_cache_enable()` sets
+   `CCR.EN=1` (read-modify-write, preserving `STATISTIC_EN`) — which, with the
+   CG092's auto-power (`APOW`) / auto-invalidate (`AINV`) defaults, triggers the
+   automatic power-up + invalidate — then polls `SR.CS` until `READY` (`==2`),
+   bounded by `QSPI_CACHE_READY_POLLS`. This is the exact sequence the cocotb
+   suite uses (`verif/cocotb/ahb_qspi_tests.py`: write `CONFIG=0x1`, poll until
+   `(STATUS & 0x3)==2`).
+
+   **CAVEAT (re-verify on hardware):** the SoC's `stage0_bootrom` historically
+   carried a comment that the `+0x1000` cache window is **NOT decoded** (a read
+   AHB-faulted), and earlier driver notes assumed it needed a privileged APB
+   master. RTL analysis now shows the block **IS decoded** at `0x21001000`
+   (`PADDR[15:12]` decode, `ADDRWIDTH=16` bridge), so the API targets it
+   directly. Before relying on the cache from firmware, **re-verify reachability
+   on silicon**: if a read of `0x21001004` (STATUS) AHB-faults, a `sys_desc`
+   decode change is required (the API itself is bounded, so a fault/wedge shows
+   up as `qspi_cache_enable()` returning `-1`, not a hang).
 
 ## How SoC firmware should consume it
 

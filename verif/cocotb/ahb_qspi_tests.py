@@ -3593,3 +3593,314 @@ async def test_xip_cpu_fetch_loop_cmd_per_line(dut):
     tb.log.info("plain-SPI command-per-line CPU-fetch PASSED: %d fetches OK.",
                 len(fetched))
     await _xip_cache_teardown(tb)
+
+
+# ============================================================================
+# XiP CACHE-BYPASS back-to-back NONSEQ coverage (CG092 cache disabled)
+#
+# In the nanoSoC SoC the CG092 flash cache is DISABLED at reset (CCR.EN=0)
+# and firmware never writes the +0x1000 cache-config window, so the cache
+# runs in COMBINATIONAL BYPASS and every M0+ fetch reaches the
+# ahb_qspi_interface.sv wrapper directly. On a back-to-back NONSEQ (a taken
+# branch presenting a new address the same cycle the previous transfer's
+# data phase completes) the wrapper can re-serve the PREVIOUS transfer's
+# stale qspi_ready/HRDATA instead of fetching the new address.
+#
+# The existing XiP tests all ENABLE the cache first (_enter_*_xip_ready does
+# the CCR handshake + READY poll), which shields the wrapper, so they never
+# exercise this path. The helper below enters XiP WITHOUT the cache enable,
+# leaving CCR=0 -> bypass.
+# ============================================================================
+
+# Resolved hierarchy of the wrapper inside the cocotb top:
+#   dut.u_ahb_qspi_pads.u_top_ahb_qspi.u_ahb_qspi_interface
+_WRAP_PATH = "u_ahb_qspi_pads.u_top_ahb_qspi.u_ahb_qspi_interface"
+
+
+def _wrap(dut):
+    """Resolve the ahb_qspi_interface wrapper instance handle."""
+    h = dut
+    for seg in _WRAP_PATH.split('.'):
+        h = getattr(h, seg)
+    return h
+
+
+def _enum_name(sig):
+    """Best-effort decode of a small FSM state code to its enum label."""
+    names = {0: "IDLE", 1: "WAIT_READ", 2: "ERR1", 3: "ERR2"}
+    try:
+        return names.get(int(sig.value), str(sig.value))
+    except (ValueError, TypeError):
+        return str(sig.value)
+
+
+async def _wrapper_monitor(dut, tb, sink, *, stop):
+    """Per-HCLK sampler of the wrapper internals. Appends a dict per cycle to
+    `sink` until `stop.is_set()`. Used to capture the cycle where a NEW NONSEQ
+    transfer is accepted while qspi_ready/HRDATA still hold the previous
+    transfer's value (the stale-serve)."""
+    from cocotb.triggers import RisingEdge, First, Event
+    w = _wrap(dut)
+
+    def g(name):
+        try:
+            return getattr(w, name)
+        except AttributeError:
+            return None
+
+    sigs = {n: g(n) for n in (
+        "current_state", "next_state", "HADDR", "last_HADDR", "last_HTRANS",
+        "AHB_QSPI_ADDR", "qspi_ready", "qspi_started", "AHB_QSPI_ENABLE",
+        "ahb_qspi_enable_ack_sync", "ahb_qspi_busy_sync", "HREADYOUT",
+        "HRDATA", "HTRANS", "HSELx", "XIP_ACTIVE")}
+
+    def rd(sig):
+        if sig is None:
+            return None
+        try:
+            return int(sig.value)
+        except (ValueError, TypeError):
+            return str(sig.value)
+
+    cyc = 0
+    while not stop.is_set():
+        await RisingEdge(dut.HCLK)
+        cyc += 1
+        rec = {"cyc": cyc}
+        for n, s in sigs.items():
+            rec[n] = rd(s)
+        if rec.get("current_state") is not None:
+            rec["state"] = _enum_name(sigs["current_state"])
+        sink.append(rec)
+        # Bound memory in case stop is never set.
+        if len(sink) > 200000:
+            sink.pop(0)
+
+
+def _dump_stale_serve_evidence(tb, trace):
+    """Scan a wrapper trace for the stale-serve signature and log the window.
+
+    Signature: HREADYOUT==1 with current_state==IDLE while last_HTRANS[1]==1
+    (a transfer was in its data phase) AND a NEW NONSEQ is being presented
+    (HTRANS[1]==1) with HADDR != AHB_QSPI_ADDR(prev) — i.e. the new transfer
+    completes (HREADY=1) the same cycle without ever entering WAIT_READ for
+    its own address.
+    """
+    flagged = []
+    for i, r in enumerate(trace):
+        st = r.get("state")
+        lht = r.get("last_HTRANS")
+        htr = r.get("HTRANS")
+        hro = r.get("HREADYOUT")
+        qr = r.get("qspi_ready")
+        # THE STALE-SERVE: the FSM is back in IDLE with the PREVIOUS transfer
+        # still in its address phase (last_HTRANS[1]==1), a NEW NONSEQ is being
+        # presented this cycle (HTRANS[1]==1), HREADYOUT==1 AND qspi_ready is
+        # still 1 (left over from the prior transfer's WAIT_READ). The new
+        # transfer is therefore accepted+completed the same cycle without ever
+        # entering WAIT_READ for its own address -> it samples HRDATA, which
+        # still holds the PREVIOUS transfer's data.
+        if (st == "IDLE" and hro == 1 and qr == 1
+                and lht is not None and (lht & 0x2)
+                and htr is not None and (htr & 0x2)):
+            flagged.append((i, r))
+    def _hx(v):
+        """Format an int (or already-string/X value) as hex."""
+        if v is None:
+            return "?"
+        if isinstance(v, int):
+            return format(v, "x")
+        return str(v)
+    if flagged:
+        tb.log.info("=== STALE-SERVE candidate cycles (IDLE & HREADYOUT=1 "
+                    "while a new NONSEQ HTRANS=2 is presented) ===")
+        for i, r in flagged[:40]:
+            lo = max(0, i - 2)
+            hi = min(len(trace), i + 3)
+            tb.log.info("  --- window around cyc %d ---", r["cyc"])
+            for r2 in trace[lo:hi]:
+                tb.log.info(
+                    "   cyc=%-6s state=%-9s next=%s HTRANS=%s HADDR=0x%-7s "
+                    "last_HTRANS=%s last_HADDR=0x%-7s QSPI_ADDR=0x%-6s "
+                    "qspi_ready=%s started=%s EN=%s ack=%s busy=%s "
+                    "HREADYOUT=%s HRDATA=0x%s",
+                    r2.get("cyc"), r2.get("state"), r2.get("next_state"),
+                    r2.get("HTRANS"),
+                    _hx(r2.get("HADDR")),
+                    r2.get("last_HTRANS"),
+                    _hx(r2.get("last_HADDR")),
+                    _hx(r2.get("AHB_QSPI_ADDR")),
+                    r2.get("qspi_ready"), r2.get("qspi_started"),
+                    r2.get("AHB_QSPI_ENABLE"),
+                    r2.get("ahb_qspi_enable_ack_sync"),
+                    r2.get("ahb_qspi_busy_sync"),
+                    r2.get("HREADYOUT"),
+                    _hx(r2.get("HRDATA")))
+    else:
+        tb.log.info("=== No IDLE&HREADYOUT=1-with-new-NONSEQ cycles flagged "
+                    "in trace (%d cycles sampled) ===", len(trace))
+    return flagged
+
+
+async def _enter_plain_spi_xip_bypass(dut, tb, *, opcode=0x0B, dummy_cycles=8,
+                                      clk_div=2):
+    """Enter plain-SPI XiP but DO NOT enable the cache (CCR stays 0 => the
+    CG092 runs in combinational bypass). Mirrors the real SoC XiP config
+    (CTRL.XIP_ACTIVE=1, the AHB_SETUP opcode/dummy) but deliberately omits
+    the cache CCR.EN write + READY poll that every other XiP helper performs.
+    """
+    await LEAVE_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x0)        # clear QIO_MODE
+    await tb.config_ahb_master.write(0x34, clk_div)
+    r = await tb.config_ahb_master.read(0x00, 4)
+    ctrl = int(r[0]['data'], 16)
+    ctrl &= ~((1 << 0) | (1 << 25))                    # QIO_MODE=0, NO_CMD=0
+    ctrl |= (1 << 8)                                   # XIP_ACTIVE=1
+    await tb.config_ahb_master.write(0x00, ctrl)
+    await tb.config_ahb_master.write(0x30, (dummy_cycles << 12) | opcode)
+    # deliberately NO cache CCR enable / READY poll -> cache bypassed.
+
+
+async def _run_bypass_pattern(dut, tb, *, base, code, seq, sizes=None,
+                              opcode=0x0B, dummy_cycles=8, clk_div=2,
+                              label="", monitor=True):
+    """Program `code` at `base`, enter bypass XiP, drive the pipelined fetch
+    `seq` (word indices), value-check against the programmed flash. Optionally
+    runs the wrapper monitor and dumps stale-serve evidence. Returns the list
+    of (idx, word_idx, got_hex, expected) mismatches (empty == pass)."""
+    from cocotb.triggers import Event
+    await _program_flash_region(dut, tb, base_addr=base, words=code)
+    await _enter_plain_spi_xip_bypass(dut, tb, opcode=opcode,
+                                      dummy_cycles=dummy_cycles,
+                                      clk_div=clk_div)
+
+    addrs = [base + 4 * i for i in seq] if sizes is None else \
+        [base + off for off, _sz in seq]
+    if sizes is None:
+        exp = [code[i] for i in seq]
+        size_list = [4] * len(seq)
+    else:
+        exp = sizes  # caller supplies expected words for sized variant
+        size_list = [sz for _off, sz in seq]
+
+    trace = []
+    stop = Event()
+    mon = None
+    if monitor:
+        mon = cocotb.start_soon(_wrapper_monitor(dut, tb, trace, stop=stop))
+
+    res = await tb.data_ahb_master.read(addrs, size=size_list, pip=True)
+
+    if mon is not None:
+        stop.set()
+        await Timer(time=20, units='ns')
+
+    got = [r['data'] for r in res]
+    mism = []
+    tb.log.info("=== BYPASS pattern '%s': %d pipelined fetches ===",
+                label, len(addrs))
+    for i, (d, e) in enumerate(zip(got, exp)):
+        try:
+            v = int(d, 16)
+        except (ValueError, TypeError):
+            v = None
+        si = seq[i] if sizes is None else i
+        tb.log.info("  pip[%2d] sel=%s @0x%05x = %s (exp 0x%08x)",
+                    i, si, addrs[i], d, e)
+        if v != e:
+            mism.append((i, si, d, e))
+
+    if monitor:
+        _dump_stale_serve_evidence(tb, trace)
+
+    return mism
+
+
+# ---------------------------------------------------------------------------
+# Cache-BYPASS back-to-back-NONSEQ repro tests (XiP branch livelock).
+#
+# These three tests drive the exact CPU branch/loop fetch pattern with the
+# CG092 cache DISABLED (combinational bypass) — the state the nanoSoC firmware
+# historically left it in. They are marked expect_fail because XiP branch
+# execution in BYPASS is NOT fully fixable in our RTL alone:
+#   * The wrapper stale-serve (qspi_ready/HRDATA leaking onto a back-to-back
+#     NONSEQ) IS fixed in ahb_qspi_interface.sv (HREADYOUT completes only in
+#     WAIT_READ) — necessary and verified.
+#   * A residual one-transfer WORD-OFFSET lag remains in the read-only CG092
+#     bypass datapath (rdata_mux_sel re-registers only on completion), which
+#     cannot be corrected from our wrapper.
+# The SUPPORTED / validated fix is to ENABLE the cache (CCR.EN + STATUS=READY,
+# see sw/qspi_driver.c::qspi_cache_enable and the SoC firmware xip_bringup) —
+# the cache line buffer then shields the wrapper and XiP branch execution works
+# (verified end-to-end in the SoC sim soc_xip_smoke + loop: ABCXIP_SMOKE: PASS).
+# These tests are kept as the bypass-mode reproduction / regression sentinel;
+# they flip to XPASS if the CG092 bypass word-mux is ever corrected (e.g. via a
+# re-mux in cache_subsystem.v). See docs/xip_branch_fetch_hang_rootcause.md.
+# ---------------------------------------------------------------------------
+@cocotb.test(expect_fail=True)
+async def test_xip_bypass_back_to_back_nonseq(dut):
+    """REPRO (bypass, expect_fail): XiP in cache-BYPASS (CCR.EN=0), pipelined
+    back-to-back NONSEQ reads with branches. Demonstrates the bypass-mode XiP
+    branch corruption; the supported fix is to enable the cache (qspi_cache_enable).
+    """
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+    BASE = 0xC000
+    code = [0x5A5A0000 + i for i in range(8)]
+    seq = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 6, 7, 0, 1]
+    mism = await _run_bypass_pattern(
+        dut, tb, base=BASE, code=code, seq=seq,
+        opcode=0x0B, dummy_cycles=8, clk_div=2,
+        label="fast-read linear+branches")
+    await tb.config_ahb_master.write(0x00, 0x0)
+    await tb.config_ahb_master.write(0x34, 0x05)
+    assert not mism, (
+        "BYPASS back-to-back NONSEQ stale/wrong data:\n"
+        + "".join(f"  idx={i} w{si} got={d} exp=0x{e:08x}\n"
+                  for i, si, d, e in mism))
+
+
+@cocotb.test(expect_fail=True)
+async def test_xip_bypass_b2b_line_crossing(dut):
+    """REPRO variant (a): every adjacent pair lands in a DIFFERENT 16-byte
+    cache line (...,7,0 -> word7 line 0x10, word0 line 0x00), maximising the
+    chance the wrapper accepts a new-line NONSEQ while the prior transfer's
+    qspi_ready is still asserted."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+    BASE = 0xC400
+    code = [0x7A7A0000 + i for i in range(8)]
+    # word i is in line (i*4)//16 = i//4; alternate lines every access.
+    seq = [0, 7, 1, 6, 2, 5, 3, 4, 7, 0, 4, 3]
+    mism = await _run_bypass_pattern(
+        dut, tb, base=BASE, code=code, seq=seq,
+        opcode=0x0B, dummy_cycles=8, clk_div=2,
+        label="line-crossing alternation")
+    await tb.config_ahb_master.write(0x00, 0x0)
+    await tb.config_ahb_master.write(0x34, 0x05)
+    assert not mism, (
+        "BYPASS line-crossing back-to-back stale/wrong data:\n"
+        + "".join(f"  idx={i} w{si} got={d} exp=0x{e:08x}\n"
+                  for i, si, d, e in mism))
+
+
+@cocotb.test(expect_fail=True)
+async def test_xip_bypass_b2b_slow_read_0x03(dut):
+    """REPRO variant (b): opcode 0x03 slow-read, 0 dummy (the EXACT mode the
+    nanoSoC stage-0 firmware programs into the AHB_SETUP reg). Same
+    back-to-back NONSEQ branch pattern in bypass."""
+    tb = TB(dut)
+    await init_qpi(dut, tb)
+    BASE = 0xC800
+    code = [0x03030000 + i for i in range(8)]
+    seq = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 6, 7, 0, 1]
+    mism = await _run_bypass_pattern(
+        dut, tb, base=BASE, code=code, seq=seq,
+        opcode=0x03, dummy_cycles=0, clk_div=2,
+        label="slow-read 0x03/0-dummy branches")
+    await tb.config_ahb_master.write(0x00, 0x0)
+    await tb.config_ahb_master.write(0x34, 0x05)
+    assert not mism, (
+        "BYPASS slow-read 0x03 back-to-back stale/wrong data:\n"
+        + "".join(f"  idx={i} w{si} got={d} exp=0x{e:08x}\n"
+                  for i, si, d, e in mism))

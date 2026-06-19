@@ -133,7 +133,42 @@ reg [2:0]           last_HSIZE;
 reg         qspi_ready;
 reg         qspi_started;
 
-assign HREADYOUT = ((current_state==IDLE && last_HTRANS[1]==1'b0)||(current_state==ERR2)) ? 1'b1: qspi_ready;
+// HREADYOUT completion qualifier (back-to-back-NONSEQ stale-serve fix).
+//
+// A transfer may ONLY complete (HREADYOUT=1) on the data from its OWN fetch.
+//
+// THE BUG (silicon-confirmed XiP branch livelock): the previous form
+//   ((IDLE && last_HTRANS[1]==0) || ERR2) ? 1 : qspi_ready
+// fell through to the *registered* qspi_ready in EVERY state that is not
+// "IDLE with no pending transfer" or ERR2 — including the cycle the FSM has
+// already dropped back to IDLE after a completed read while qspi_ready is
+// still asserted (qspi_ready only clears one cycle later, in the datapath
+// `else` branch). On a BACK-TO-BACK NONSEQ (a taken branch / loop presents a
+// new address the same cycle the prior transfer completes) that left-over
+// qspi_ready completed the NEW transfer in IDLE with the PREVIOUS transfer's
+// HRDATA -> stale/wrong data, M0+ livelock. Straight-line code is immune (its
+// fetches never present a new NONSEQ the same cycle a transfer completes).
+//
+// FIX: qspi_ready may drive HREADYOUT ONLY while the FSM is in WAIT_READ — the
+// state that actually owns and fetched this transfer's data. Any newly
+// address-phase-accepted transfer is therefore forced through a fresh
+// WAIT_READ (the FSM clears qspi_ready/qspi_started in the `else` branch on
+// leaving WAIT_READ, then re-fetches), so the branch-target fetch always
+// returns its own data. Cases:
+//   - WAIT_READ: complete on qspi_ready (this transfer's own fetch).
+//   - ERR2:      complete the 2nd cycle of the AHB-Lite error response.
+//   - IDLE:      ready=1 only when there is no pending transfer
+//                (last_HTRANS[1]==0, i.e. IDLE/BUSY) — zero wait state;
+//                a pending NONSEQ reads 0 (not-ready) so it cannot reuse the
+//                stale qspi_ready and must enter WAIT_READ to be fetched.
+//   - ERR1:      hold HREADYOUT low (error phase 1).
+// The WAIT_READ data-capture path (when/how HRDATA is latched and qspi_ready
+// asserted) is UNCHANGED, so normal single / sequential line-fill data and
+// timing are bit-for-bit preserved.
+assign HREADYOUT = (current_state==WAIT_READ) ? qspi_ready                :
+                   (current_state==ERR2)      ? 1'b1                      :
+                   (current_state==IDLE)      ? (last_HTRANS[1]==1'b0)    :
+                                                 1'b0; // ERR1
 assign HRESP = (current_state == ERR1 || current_state == ERR2) ? 1'b1 : 1'b0;
 
 always @(posedge HCLK or negedge HRESETn) begin

@@ -1,5 +1,16 @@
 # Brief: 5 failing XIP cocotb tests — investigation hand-off
 
+> **NOTE (2026-06-18):** This doc covers the **cocotb test-suite** XiP failures
+> (all since resolved — see `xip_cocotb_failures_findings.md`). It is **not**
+> about the silicon **XiP branch-fetch hang**, whose reconciled root cause
+> (an AHB back-to-back-NONSEQ handshake bug in `ahb_qspi_interface.sv`, exposed
+> because the CG092 cache runs in bypass) is in
+> [`xip_branch_fetch_hang_rootcause.md`](xip_branch_fetch_hang_rootcause.md).
+> Note the coverage gap that doc identifies: these tests all **enable the cache
+> first** and none drives a back-to-back NONSEQ in bypass — which is why the
+> suite is green while silicon hangs.
+
+
 **Status:** open. 5 of 55 cocotb tests fail. **Pre-existing on
 `feat-nanosoc_int` — not caused by the QSPI_RDATA read-mux change in
 the same working tree** (proven: the 3 fast-failing tests fail

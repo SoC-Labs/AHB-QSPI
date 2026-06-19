@@ -1,5 +1,14 @@
 # QSPI Controller — Area & Timing Optimisation Plan
 
+> **NOTE (2026-06-18):** This is an area/timing optimisation plan only. For
+> completeness: the `qspi_controller.sv` `NO_CMD`/`NO_FETCH` stale-address path
+> was once suspected for the silicon **XiP branch-fetch hang** but is **refuted**
+> (it is gated by `QSPI_NO_CMD`, which is `0` in the SoC XiP config, so it never
+> fires). The reconciled branch-hang root cause lives in the **wrapper**
+> (`ahb_qspi_interface.sv` back-to-back-NONSEQ handshake): see
+> [`xip_branch_fetch_hang_rootcause.md`](xip_branch_fetch_hang_rootcause.md).
+
+
 Plan for reducing area and logic depth in
 [`logical/qspi_controller/logical/qspi_controller.sv`](../logical/qspi_controller/logical/qspi_controller.sv),
 based on lint and TSMC65LP synthesis runs (2026-04-16).

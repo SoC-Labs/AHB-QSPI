@@ -1,51 +1,142 @@
-# XiP branch-fetch hang — root cause + fix (ahb_qspi wrapper)
+# XiP branch-fetch hang — reconciled root cause + fix (ahb_qspi wrapper)
 
-Hardware-confirmed bug: a Cortex-M0+ executing code in place from the QSPI XiP
-aperture runs **straight-line** code fine but **HANGS on the first non-sequential
-instruction fetch** (a taken branch / loop / call-return). Confirmed
-deterministically on z2_01 silicon (Micron N25Q256A) and reproduced in the SoC
-cocotb sim. XiP code execution is a standard technique and straight-line XiP
-already works here, so this is a fixable wrapper bug — not a fundamental limit.
+> **STATUS 2026-06-18: RECONCILED / ROOT-CAUSED.** This rewrite SUPERSEDES the
+> earlier `last_HADDR` "address-latch" theory (kept, refuted, at the bottom).
+> The corrected root cause below is backed by SoC-sim observation with a **real
+> Cortex-M0+**, RTL + TRM analysis, and the subrepo regression.
 
-## Root cause (high-confidence, static RTL analysis)
+## Symptom (hardware-confirmed, sim-reproduced)
 
-`logical/ahb_qspi_interface/logical/ahb_qspi_interface.sv`: the QSPI byte address
-sent to the controller is captured from the **combinational `HADDR`** (≈ line 255),
-guarded only by "not in `WAIT_READ`" — *not* from the address-phase-latched
-`last_HADDR` (already registered ≈ line 150 every HCLK).
+A real Cortex-M0+ executing cold code **in place** from the QSPI XiP aperture:
 
-On a taken branch the M0+ presents a **new non-sequential address** while the
-previous fetch is still in `WAIT_READ`. Because capture is gated on "not
-WAIT_READ" and uses combinational `HADDR`, the branch-target address is not
-latched at the correct cycle. Downstream, `logical/qspi_controller/logical/
-qspi_controller.sv` (the `NO_CMD` optimisation ≈ L252-256 + `last_QSPI_ADDR`
-update ≈ L610) then sees the address unchanged and re-fetches the **stale**
-address — returning wrong instruction bytes. The M0+ never advances past the
-branch and spins. (Silicon/sim probe matches: CSn keeps toggling — the controller
-*is* fetching, just the wrong address — and `cpu_0_lockup` never asserts.)
+- runs **straight-line** code fine, but
+- **LIVELOCKS on a backward branch / loop / call-return** (first non-sequential
+  fetch). HW-confirmed on z2_01 silicon (Micron N25Q256A) and reproduced in SoC
+  cocotb (`cocotb/soc_xip_smoke` in the nanosoc-multicore-system repo).
 
-Straight-line code never presents a new address mid-`WAIT_READ`, so it's immune.
-The IP's own cocotb tests pass because the AHB BFM issues one transaction at a
-time and can't emit the M0+ pipelined NONSEQ/prefetch timing.
+It is a **wrong-data livelock, not a bus deadlock**: the wrapper watchdog never
+fires, `cpu_0_lockup` stays `0`, CSn keeps toggling (the controller *is*
+fetching — just the wrong data is consumed for the branch target). The CPU
+receives stale instruction bytes for the branch target and spins.
 
-NOT the cause (checked): the CDC sync (correct 3-FF/2-FF), the CG092 cache (it
-amplifies a stalled `HREADYOUT` but doesn't originate it), the SoC interconnect
-(treats XiP like IMEM).
+## What it is NOT (corrections to the old doc)
 
-## Fix (this RTL)
+All three of these were previously blamed and are now **refuted**:
 
-Primary (≈1 line): capture the address from the latched `last_HADDR` instead of
-combinational `HADDR` (or latch on every valid address phase `HREADY & HTRANS[1]`),
-so a non-sequential branch target is captured before the next controller command.
+1. **NOT the `ahb_qspi_interface.sv` combinational-`HADDR`-vs-`last_HADDR`
+   address latch (old "≈line 255" theory).**
+   Refuted by SoC-sim measurement: at every miss, `last_HADDR == HADDR`, and
+   `AHB_QSPI_ADDR` (`ahb_qspi_interface.sv:255`,
+   `{HADDR[ADDR_W-1:4],4'b0000}`) always latches the correct cache line.
+   Swapping the source to `last_HADDR` is a **no-op** — the address was never
+   the dropped quantity.
 
-Belt-and-braces: in `qspi_controller.sv`, re-latch `addr_code`/`last_QSPI_ADDR`
-on every `QSPI_enable` rise so the `NO_CMD` skip can't fire on a stale compare.
+2. **NOT the `qspi_controller` `NO_CMD` / `NO_FETCH` stale-address
+   optimisation.**
+   The `NO_FETCH` skip (`qspi_controller.sv:252-254`,
+   `if(QSPI_enable_sync && qspi_no_cmd_latched) if(last_QSPI_ADDR==QSPI_ADDR)
+   next_state = NO_FETCH;`) is gated by `qspi_no_cmd_latched`, which derives
+   from the `QSPI_NO_CMD` input. In the SoC XiP config `NO_CMD == 0`
+   (`AHB_SETUP = 0x800B`, command re-issued per access), so this path is
+   **inactive** and cannot be the cause.
+
+3. **NOT inside the vendor CG092 cache-core hit logic.**
+   The CG092 (`p_flash_cache_f0`) is **DISABLED** in this SoC: `CCR.EN` resets
+   to `0` (CCR reset value `0x40`, `STATISTIC_EN=1`, `EN=0`) and **nothing ever
+   enables it**. It therefore runs in combinational **BYPASS** through the thin
+   `cache_subsystem.v` passthrough (`logical/cache_subsytem/logical/
+   cache_subsystem.v`) and cannot produce a cache hit at all.
+
+## The actual root cause — AHB back-to-back-NONSEQ handshake bug in OUR wrapper
+
+Because the cache is disabled (bypass), **every** M0+ fetch reaches
+`ahb_qspi_interface.sv` directly — there is no cache line to shield the wrapper
+from the CPU's pipelined AHB timing.
+
+The wrapper FSM is `IDLE → WAIT_READ → IDLE` (`ahb_qspi_interface.sv:159-185`).
+A read is "done" when `qspi_ready` asserts in `WAIT_READ`
+(`ahb_qspi_interface.sv:245-249`), at which point:
+
+```
+// ahb_qspi_interface.sv:136
+assign HREADYOUT = ((current_state==IDLE && last_HTRANS[1]==1'b0)
+                    || (current_state==ERR2)) ? 1'b1 : qspi_ready;
+```
+
+On a **back-to-back NONSEQ** transfer — a taken branch presents a new
+(non-sequential) address in the **same cycle** the previous transfer completes
+— the wrapper **re-serves the previous transfer's `qspi_ready` / `HRDATA`** for
+the newly-accepted transfer instead of forcing a fresh fetch. `HREADYOUT`
+(line 136) asserts `1` using the **stale** `qspi_ready`, and the data path
+(`ahb_qspi_interface.sv:228-259`) hands back the prior line's `HRDATA`. The CPU
+samples that stale word as its branch-target instruction and livelocks.
+
+Straight-line code never presents a new NONSEQ address in the same cycle a
+transfer completes (its fetches are SEQ / spaced), so it is immune — exactly
+the observed straight-line-OK / branch-hangs split.
+
+In short: it is an **AHB back-to-back-NONSEQ handshake bug in our wrapper RTL
+(`ahb_qspi_interface.sv`)**, exposed only because the CG092 cache is in bypass
+and the wrapper sees the raw M0+ fetch stream.
+
+## Why the subrepo tests pass / the coverage gap
+
+Every existing subrepo XiP cocotb test **enables the cache first** (which
+shields the wrapper behind the CG092 line buffer) and **none drives a
+back-to-back NONSEQ transfer in bypass mode**. So the suite is green while
+silicon hangs. The AHB BFM also issues one transaction at a time and cannot
+emit the M0+ pipelined NONSEQ/prefetch timing. A new **bypass-mode
+back-to-back-NONSEQ** test is being added separately to close this gap.
+
+## Fix directions (both pursued from the submodule, not in this docs-only pass)
+
+1. **RTL fix in `ahb_qspi_interface.sv`** so a newly-accepted transfer can't
+   reuse the prior transfer's `qspi_ready` / `HRDATA`. Force a fresh
+   `WAIT_READ` (clear `qspi_ready`/`qspi_started` for any new
+   address-phase-accepted transfer before re-asserting `HREADYOUT`), so the
+   branch-target fetch always returns its own data.
+
+2. **Enable + configure the CG092 cache** (write `CCR.EN`, poll `STATUS` for
+   READY) so it shields the wrapper *and* adds the XiP read performance the
+   feature wants. Reachable at **`0x21001000`** (the bootrom's "not
+   decoded / hardfault" note appears stale — **re-verify on HW**). This is the
+   preferred long-term path: it both fixes the symptom and is the intended
+   operating mode; the bypass-mode wrapper fix (1) is the defence-in-depth for
+   any access that bypasses the cache.
 
 ## Verify (in simulation, no hardware per iteration)
 
-The SoC cocotb env `cocotb/soc_xip_smoke` (in the nanosoc-multicore-system repo)
-runs a **real M0+** from the XiP aperture and reproduces this hang when the cold
-firmware contains a loop. Use it (plus its `test_xip_probe.py`) to confirm the
-address is dropped before the fix and tracks correctly after. Re-run this repo's
-XiP cocotb suite (`make run_cocotb TESTCASE=test_xip_* COCOTB_SIMULATOR=vcs`) to
-check for regressions. Full plan: `docs/imem_xip/HW_SOLUTION_PLAN.md` in the SoC repo.
+- SoC env `cocotb/soc_xip_smoke` (nanosoc-multicore-system repo) runs a real
+  M0+ from the XiP aperture and reproduces the hang when the cold firmware
+  contains a loop — use it to confirm the branch-target fetch returns stale
+  data before the fix and fresh data after.
+- Re-run this repo's XiP cocotb suite
+  (`make run_cocotb TESTCASE=test_xip_* SIMULATOR=vcs`) plus the new
+  bypass-mode back-to-back-NONSEQ test for regressions.
+
+## Related known issue (SEPARATE bug — do not conflate with the branch hang)
+
+The subrepo regression found a **distinct** defect:
+`test_xip_cpu_fetch_loop` **FAILS in `0x03` / 0-dummy read mode** — the first
+cache-line returns **corrupted data** (a consistent wrong word, **not a hang**).
+This is a data-corruption bug in the 0-dummy read path, unrelated to the
+bypass-mode back-to-back-NONSEQ branch livelock above. Tracked as a separate
+known issue.
+
+---
+
+## SUPERSEDED (kept for the record) — the original `last_HADDR` address-latch theory
+
+> The text below is the **refuted** earlier explanation. It is retained so the
+> reasoning trail is visible; do **not** act on it. See "What it is NOT" above
+> for why each claim fails.
+
+The old theory held that `ahb_qspi_interface.sv` captured the QSPI byte address
+from combinational `HADDR` (≈line 255) rather than the address-phase-latched
+`last_HADDR` (≈line 150), so a branch target presented mid-`WAIT_READ` was
+dropped and `qspi_controller`'s `NO_CMD`/`last_QSPI_ADDR` skip re-fetched the
+stale address. **Refuted:** (a) `last_HADDR == HADDR` at every miss in sim, so
+the latch source is irrelevant (the swap is a no-op); (b) `NO_CMD == 0` in the
+SoC XiP config, so the `NO_FETCH` skip never fires; (c) the dropped quantity is
+the *handshake/data* (`qspi_ready`/`HRDATA`) on a back-to-back NONSEQ, not the
+*address*.

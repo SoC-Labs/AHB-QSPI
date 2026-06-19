@@ -39,6 +39,21 @@
 #define QSPI_XIP_BASE  0x24000000UL
 #endif
 
+/* QSPI_CACHE_BASE - the CG092 flash-cache CONFIG/STATUS (CCR/SR) APB block.
+ * It sits at offset +0x1000 within the QSPI APB aperture (the controller's own
+ * registers occupy +0x000..0x0FF). Derived from QSPI_APB_BASE by default so a
+ * consumer that overrides the APB base gets the cache block for free; can be
+ * overridden independently (-DQSPI_CACHE_BASE=0x...) for a standalone block.
+ *
+ * In the nanoSoC SoC (QSPI_APB_BASE=0x21000000) this resolves to the system
+ * addresses:
+ *     CONFIG (CCR) -> 0x21001000
+ *     STATUS (SR)  -> 0x21001004
+ */
+#ifndef QSPI_CACHE_BASE
+#define QSPI_CACHE_BASE  (QSPI_APB_BASE + 0x1000UL)
+#endif
+
 /* Generic 32-bit MMIO accessor. A consumer that already has a register
  * accessor can predefine QSPI_REG32 before including this header. */
 #ifndef QSPI_REG32
@@ -127,5 +142,51 @@
  *   NOTE: CLK_DIV=1 garbles RDID on real silicon; use >= 2 for command mode.
  * ------------------------------------------------------------------------- */
 #define QSPI_CLK_DIV_Msk          0x1Fu
+
+/* =========================================================================
+ * CG092 flash cache (CoreLink AHB Flash Cache) CONFIG/STATUS block.
+ *
+ * Register offsets + bit layout transcribed from the CG092 r2p0 RTL:
+ *   $ARM_IP_LIBRARY_PATH/CG092/CG092-BU-50000-r2p0-00rel0/p_flash_cache_f0/
+ *     logical/p_flash_cache_f0/verilog/p_flash_cache_f0_gen_const_pkg.vh
+ *       P_CCR_REG_OFFSET = 0x000, P_SR_REG_OFFSET = 0x004
+ *       P_CCR_*_BIT_RESET (STATISTIC_EN resets 1; all others 0 -> CCR=0x40)
+ *     .../p_flash_cache_f0_core.v (ip_rdata mux ~L1532 CCR, ~L1544 SR)
+ *
+ * Offsets are relative to QSPI_CACHE_BASE (QSPI_APB_BASE + 0x1000); see the
+ * SoC system addresses 0x21001000 / 0x21001004 noted at QSPI_CACHE_BASE above.
+ * The existing cocotb suite drives this exact block (verif/cocotb/
+ * ahb_qspi_tests.py: CACHE_CONFIG_ADDR=0x1000, STATUS at +0x04, enable via
+ * CONFIG=0x1 then poll until (STATUS & 0x3)==2).
+ * ========================================================================= */
+#define QSPI_CACHE_CONFIG_OFFSET  0x0000u   /* CCR - Cache Control Register */
+#define QSPI_CACHE_STATUS_OFFSET  0x0004u   /* SR  - Status Register        */
+
+/* -------------------------------------------------------------------------
+ * CCR (CONFIG, +0x00). Reset value = 0x40 (only STATISTIC_EN resets set).
+ *   Setting EN=1 with the CG092's auto-power (APOW) / auto-invalidate (AINV)
+ *   defaults triggers the automatic power-up + invalidate; software then polls
+ *   SR until CS==READY. Per CG092 RTL ip_rdata mux (p_flash_cache_f0_core.v).
+ * ------------------------------------------------------------------------- */
+#define QSPI_CACHE_CCR_EN         (1u << 0)   /* cache enable                     */
+#define QSPI_CACHE_CCR_INV_REQ    (1u << 1)   /* manual invalidate in-progress/req */
+#define QSPI_CACHE_CCR_POW_REQ    (1u << 2)   /* manual power request             */
+#define QSPI_CACHE_CCR_MAN_POW    (1u << 3)   /* set manual-power mode            */
+#define QSPI_CACHE_CCR_MAN_INV    (1u << 4)   /* set manual-invalidate mode       */
+#define QSPI_CACHE_CCR_PREFETCH   (1u << 5)   /* set prefetch                     */
+#define QSPI_CACHE_CCR_STAT_EN    (1u << 6)   /* statistics enable (resets to 1)  */
+#define QSPI_CACHE_CCR_RESET      0x40u       /* reset value (STATISTIC_EN only)  */
+
+/* -------------------------------------------------------------------------
+ * SR (STATUS, +0x04). Read-only. CS[1:0] is the cache state machine; the cache
+ * is usable once CS == READY. (CG092 RTL: ip_rdata[1:0]=sr_cs, [2]=inv_stat,
+ * [4]=pow_stat; reset CS=0.)
+ * ------------------------------------------------------------------------- */
+#define QSPI_CACHE_SR_CS_Pos      0
+#define QSPI_CACHE_SR_CS_Msk      (0x3u << QSPI_CACHE_SR_CS_Pos)
+#define QSPI_CACHE_SR_INV_STAT    (1u << 2)   /* invalidate-status                */
+#define QSPI_CACHE_SR_POW_STAT    (1u << 4)   /* power-status                     */
+#define QSPI_CACHE_CS_DISABLED    0u          /* CS == 0: disabled / off          */
+#define QSPI_CACHE_CS_READY       2u          /* CS == 2: enabled + ready         */
 
 #endif /* AHB_QSPI_QSPI_REGS_H */

@@ -17,6 +17,9 @@
 /* Address helpers built on the configurable base (qspi_regs.h). */
 #define QSPI_R(off)   QSPI_REG32(QSPI_APB_BASE + (off))
 
+/* CG092 flash-cache CONFIG/STATUS block (QSPI_CACHE_BASE = APB base + 0x1000). */
+#define QSPI_CACHE_R(off)  QSPI_REG32(QSPI_CACHE_BASE + (off))
+
 /* A data-synchronisation barrier where available. The cmsdk_ahb_to_apb bridge
  * can drop back-to-back writes on a fast in-order M0+ unless the prior write is
  * fenced; a register read-back + dsb makes the CMD land before we poll BUSY.
@@ -236,18 +239,63 @@ void qspi_xip_enable(void)
      * the cache/controller serves data. */
     (void)QSPI_REG32(QSPI_XIP_BASE);
 
-    /* CAVEAT (privileged CG092 cache CCR): the CG092 flash cache CCR registers
-     * (APB 0x1000-0x1FFF) require a privileged APB master (PPROT[0]=1) to
-     * write. In the current SoC map firmware CANNOT reach them, so the cache
-     * runs with its reset config -- functional but not firmware-tunable. Do NOT
-     * add CCR pokes here expecting them to take; they silently no-op. See
-     * CG092_bus_logic_bug_report.md. */
+    /* NOTE (CG092 cache CCR/SR @ +0x1000): this path leaves the cache at its
+     * reset config (disabled). To actually turn the cache on, call
+     * qspi_cache_enable() (CCR.EN=1 -> auto power-up + invalidate -> SR.CS
+     * READY). A stage0_bootrom comment historically held the +0x1000 window was
+     * not decoded / needed a privileged master; RTL analysis shows it IS
+     * decoded at 0x21001000 -- but re-verify on silicon before relying on it
+     * (qspi_cache_enable() is bounded, so a fault/wedge returns -1, not a hang).
+     * See sw/README.md and CG092_bus_logic_bug_report.md. */
 }
 
 void qspi_xip_disable(void)
 {
     QSPI_R(QSPI_CTRL_OFFSET) &= ~QSPI_CTRL_XIP_ACTIVE;
     (void)QSPI_R(QSPI_CTRL_OFFSET);            /* drain */
+}
+
+int qspi_cache_is_ready(void)
+{
+    uint32_t sr = QSPI_CACHE_R(QSPI_CACHE_STATUS_OFFSET);
+    QSPI_DSB();
+    return ((sr & QSPI_CACHE_SR_CS_Msk) == QSPI_CACHE_CS_READY) ? 1 : 0;
+}
+
+int qspi_cache_enable(void)
+{
+    /* Write CCR.EN=1. The CG092 resets with auto-power (APOW) and
+     * auto-invalidate (AINV), so setting EN alone triggers the automatic
+     * power-up + invalidate; we then wait for SR.CS==READY. Preserve the other
+     * CCR bits (notably STATISTIC_EN, which resets set) by read-modify-write.
+     * Read-back barrier so the cmsdk APB bridge lands the write before we poll
+     * (same idiom as the controller path). */
+    uint32_t ccr = QSPI_CACHE_R(QSPI_CACHE_CONFIG_OFFSET);
+    QSPI_CACHE_R(QSPI_CACHE_CONFIG_OFFSET) = ccr | QSPI_CACHE_CCR_EN;
+    (void)QSPI_CACHE_R(QSPI_CACHE_CONFIG_OFFSET);   /* read-back barrier */
+    QSPI_DSB();
+
+    /* Poll SR until CS reaches READY (==2). Bounded so an undecoded/wedged
+     * cache block cannot hang the caller (see the +0x1000 reachability caveat
+     * in qspi_driver.h / README). */
+    uint32_t p = 0;
+    while ((QSPI_CACHE_R(QSPI_CACHE_STATUS_OFFSET) & QSPI_CACHE_SR_CS_Msk)
+               != QSPI_CACHE_CS_READY
+           && ++p < QSPI_CACHE_READY_POLLS) {
+        /* spin: waiting for cache power-up + invalidate to complete */
+    }
+
+    return (p >= QSPI_CACHE_READY_POLLS) ? -1 : 0;
+}
+
+void qspi_cache_disable(void)
+{
+    /* Clear CCR.EN, preserving the other CCR bits. The cache walks CS back to
+     * DISABLED after the last in-flight burst; we do not block on it here. */
+    uint32_t ccr = QSPI_CACHE_R(QSPI_CACHE_CONFIG_OFFSET);
+    QSPI_CACHE_R(QSPI_CACHE_CONFIG_OFFSET) = ccr & ~QSPI_CACHE_CCR_EN;
+    (void)QSPI_CACHE_R(QSPI_CACHE_CONFIG_OFFSET);   /* read-back barrier / drain */
+    QSPI_DSB();
 }
 
 void qspi_unlock_global(void)
