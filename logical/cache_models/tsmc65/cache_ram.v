@@ -96,13 +96,30 @@ flash_cache_data data_ram_0_word_3_i (
 wire    cs_tag0;
 assign  cs_tag0         = TAG_CS & (TAG_WE | TAG_RD);
 
-// flash_cache_tag is compiled with write_mask=on (see flash_cache_tag.spec),
-// so WEN is an 11-bit per-bit write enable — replicate the active-low
-// TAG_WE across every bit to write the whole word.
+// flash_cache_tag is compiled with write_mask=on (see the "Write Mask: On"
+// header in flash_cache_tag.v, and GroupWriteEnable in its .memlib), so WEN
+// is an 11-bit per-bit write enable — replicate the active-low TAG_WE across
+// every bit to write the whole word. Ganging every bit is correct here: the
+// controller exposes a single RAMTAGnWE and only ever writes whole tag words
+// (all-zero on invalidate, {tag,valid} on linefill), so there is no per-bit
+// mask to honour.
+//
+// GWEN is the macro's global write enable and selects read vs write for the
+// cycle: low = write, high = read. WEN only masks which bits of a write land,
+// so GWEN must be driven too. Leaving it unconnected broke both flows:
+//   - synthesis tied it low (TIEL), parking the macro permanently in write
+//     mode, so the read path never ran and Q never presented tag data;
+//   - in simulation an unconnected input is z, and the model's isBitX(GWEN)
+//     check then forces writeEnable and D to X while still taking the write
+//     branch -- actively corrupting the addressed row rather than merely
+//     suppressing reads.
+// flash_cache_data has no GWEN port (write_mask=off), which is why only the
+// tag RAM needs this.
 flash_cache_tag tag_ram_0_i (
     .Q(TAG_RDATA),
     .CLK(CLK),
     .CEN(~cs_tag0),
+    .GWEN(~TAG_WE),
     .WEN({11{~TAG_WE}}),
     .A(TAG_ADDR),
     .D(TAG_WDATA),

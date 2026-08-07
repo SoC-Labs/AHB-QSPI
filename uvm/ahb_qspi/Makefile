@@ -28,8 +28,34 @@ QSPI_MON_DIR      = $(UVM_TB_DIR)/agents/qspi_monitor
 SEQ_DIR           = $(UVM_TB_DIR)/sequences
 TEST_DIR          = $(UVM_TB_DIR)/tests
 
-# Simulation output
+# ---------------------------------------------------------------
+# Cache RAM model selection
+# ---------------------------------------------------------------
+# generic (default) - behavioural p_flash_cache_f0_sp_ram. Fast, but its
+#                     port list is (CLK, A, CEN, WEN, Q, D): no GWEN, no
+#                     write mask, so it cannot exercise those pins.
+# asic              - logical/cache_models/tsmc65/cache_ram.v against the
+#                     real precompiled TSMC65 macros. This is the RTL that
+#                     goes to silicon; run it before signing off synthesis.
+#
+#   make run_all CACHE_MODEL=asic
+#
+# SIM_DIR is model-scoped so the two never share a build directory --
+# switching models without a rebuild would otherwise silently re-run the
+# previous model's simv.
+CACHE_MODEL ?= generic
+
+ifeq ($(CACHE_MODEL),asic)
+QSPI_FLIST   = $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_ASIC_SIM.flist
+SIM_DIR      = sim_build_asic
+else ifeq ($(CACHE_MODEL),generic)
+QSPI_FLIST   = $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_SIM.flist
 SIM_DIR      = sim_build
+else
+$(error CACHE_MODEL must be 'generic' or 'asic', got '$(CACHE_MODEL)')
+endif
+
+# Simulation output
 COV_DIR      = coverage_report
 
 # Default test
@@ -68,6 +94,36 @@ VCS_FLAGS += -f $(FLIST_EXPANDED)
 
 # Top-level testbench
 VCS_FLAGS += $(TB_DIR)/top.sv
+
+# Cache tag RAM observer — only meaningful against the real macros, whose
+# read path can go X. Compiled as an extra top alongside test_top.
+# (uninstantiated, so VCS elaborates it as an additional top automatically)
+# CACHE_ASIC_MODEL gates the tag-RAM checks in ahb_qspi_cache_tag_test, which
+# reference the probe hierarchically and only exist in this build.
+ifeq ($(CACHE_MODEL),asic)
+VCS_FLAGS += $(TB_DIR)/cache_tag_probe.sv
+VCS_FLAGS += +define+CACHE_ASIC_MODEL
+
+# The ARM macros carry $setuphold checks that a zero-delay RTL sim cannot
+# satisfy: the launch flop and the macro input change in the same delta, against
+# a 500 ps hold requirement. Every one of the 10 macro instances violates, and
+# the model's response is not a warning -- flash_cache_tag.v:602 failedWrite()
+# wipes the ENTIRE array to X, not just the addressed word, so the 256 invalidate
+# writes are obliterated ~2.7 us before the first lookup reads them.
+#
+# Hold at a macro input is an STA/P&R signoff obligation. RTL sim structurally
+# cannot evaluate it and will always violate it, so the checks are pure noise
+# here and cost no coverage. Verified this does not weaken the regression:
+# with the flag on, removing .GWEN(~TAG_WE) from cache_ram.v still fails the
+# test (2 X reads, 2 UVM_ERROR) exactly as it does without it.
+#
+# SIM_TYPE=gate turns the checks back on -- if this bench is ever run
+# gate-level with SDF back-annotation, the checks are meaningful and wanted.
+SIM_TYPE ?= rtl
+ifeq ($(SIM_TYPE),rtl)
+VCS_FLAGS += +notimingcheck
+endif
+endif
 
 # Output
 VCS_FLAGS += -l $(SIM_DIR)/compile.log
@@ -108,7 +164,8 @@ TESTS = ahb_qspi_register_test \
         ahb_qspi_corner_case_test \
         ahb_qspi_rdata_readonly_test \
         ahb_qspi_xip_stress_test \
-        ahb_qspi_reset_recovery_test
+        ahb_qspi_reset_recovery_test \
+        ahb_qspi_cache_tag_test
 
 # ---------------------------------------------------------------
 # Targets
@@ -148,9 +205,9 @@ help:
 	@echo "  VERBOSITY=<UVM_NONE|...|UVM_DEBUG> - UVM verbosity (default: UVM_MEDIUM)"
 
 # Generate expanded filelist (resolve env vars that VCS cannot expand)
-$(FLIST_EXPANDED): | $(SIM_DIR)
+$(FLIST_EXPANDED): $(QSPI_FLIST) | $(SIM_DIR)
 	python3 $(UVM_TB_DIR)/expand_flist.py \
-		$(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_SIM.flist \
+		$(QSPI_FLIST) \
 		$(UVM_TB_DIR)/$(FLIST_EXPANDED)
 
 compile: $(FLIST_EXPANDED) | $(SIM_DIR)

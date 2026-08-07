@@ -154,6 +154,18 @@ package ahb_qspi_pkg;
   `include "qspi_transaction.sv"
   `include "qspi_monitor.sv"
 
+  // Cache tag RAM observation counters, populated by the cache_tag_probe
+  // module (CACHE_MODEL=asic builds only) and read by ahb_qspi_cache_tag_test.
+  // These live here as package statics rather than as probe members because
+  // SystemVerilog forbids hierarchical references from inside a package, so
+  // the probe has to push to the test rather than the test pull from it.
+  class cache_tag_stats;
+    static int unsigned tag_reads   = 0;
+    static int unsigned tag_x_reads = 0;
+    static int unsigned hit_events  = 0;
+    static int unsigned miss_events = 0;
+  endclass
+
   // Environment
   `include "ahb_qspi_scoreboard.sv"
   `include "ahb_qspi_coverage.sv"
@@ -186,6 +198,7 @@ package ahb_qspi_pkg;
   `include "ahb_qspi_rdata_readonly_test.sv"
   `include "ahb_qspi_xip_stress_test.sv"
   `include "ahb_qspi_reset_recovery_test.sv"
+  `include "ahb_qspi_cache_tag_test.sv"
   `include "ahb_qspi_debug_test.sv"
 
 endpackage

@@ -33,6 +33,7 @@ verif/VIP/SST26VF064B.v
 
 # ── UVM ───────────────────────────────────────────────────────────────────
 uvm/ahb_qspi/sim_build
+uvm/ahb_qspi/sim_build_asic
 uvm/ahb_qspi/csrc
 uvm/ahb_qspi/xprop.log
 vc_hdrs.h

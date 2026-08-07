@@ -1,0 +1,23 @@
+// Simulation filelist for the RTL that actually goes to silicon.
+//
+// Identical to ahb_QSPI_SIM.flist except for the cache RAM model: this one
+// pulls logical/cache_models/tsmc65/cache_ram.v and the real precompiled
+// TSMC65 macros instead of the behavioural generic model.
+//
+// Why this exists: ahb_QSPI_ASIC.flist was previously consumed only by
+// syn/asic (synthesis + Formality) and never simulated, while every sim
+// path -- UVM, cocotb, CDC -- used the generic model. The generic model's
+// p_flash_cache_f0_sp_ram has no GWEN port and no write mask, so it cannot
+// exercise those pins at all. That gap let a tag-RAM GWEN connection bug
+// reach a P&R netlist undetected. Run the regression against this flist so
+// the silicon-bound RTL is covered.
+
+-f $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI.flist
+-f $(SOCLABS_AHB_QSPI_DIR)/flist/VIP/ahb_QSPI_VIP.flist
+
+$(SOCLABS_AHB_QSPI_DIR)/logical/cache_models/tsmc65/cache_ram.v
+
+/research/precompiled_mems/TSMC65/flash_cache_data/flash_cache_data.v
+/research/precompiled_mems/TSMC65/flash_cache_tag/flash_cache_tag.v
+
+$(SOCLABS_AHB_QSPI_DIR)/pad_level/generic/ahb_qspi_pads.v
