@@ -271,7 +271,10 @@ wire [3:0]           QSPI_N_RW_BYTES;
 wire [21:0]          QSPI_ADDR;
 wire [127:0]         QSPI_WDATA;
 wire                 QSPI_ENABLE_ACK;
-wire                 QSPI_BUSY;
+// (no `wire QSPI_BUSY` here: it was declared but neither driven nor read.
+//  The two consumers bind other nets -- u_qspi_controller takes the live
+//  ~QSPI_nCS expression and u_apb_qspi_regs takes APB_QSPI_BUSY -- so the
+//  orphan carried no status and removing it loses none.)
 wire [127:0]         QSPI_RDATA;
 
 wire [7:0]           AHB_QSPI_CMD;

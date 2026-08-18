@@ -135,7 +135,7 @@ assign QSPI_N_RW_BYTES = reg2[19:16];
 
 assign QSPI_ADDR = reg3[21:0];
 
-function [31:0] qspi_wdata_qpi_xform;
+function automatic [31:0] qspi_wdata_qpi_xform;
     input [31:0] data;
     begin
         qspi_wdata_qpi_xform =
@@ -143,7 +143,7 @@ function [31:0] qspi_wdata_qpi_xform;
     end
 endfunction
 
-function [31:0] qspi_wdata_spi_xform;
+function automatic [31:0] qspi_wdata_spi_xform;
     input [31:0] data;
     begin
         qspi_wdata_spi_xform =
@@ -196,6 +196,12 @@ always @(posedge PCLK or negedge PRESETn) begin
                 // qspi_clock_div.v, defeating the SCLK CDC / nCS-setup guard.
                 // Valid divides (>=1) are stored unchanged.
                 10'h00D: reg13 <= (PWDATA[4:0]==5'h00) ? 5'h01 : PWDATA[4:0];
+                // Unmapped / read-only words (0x004-0x007 are the RDATA
+                // window, 0x3F4-0x3FF the ID block): a write to them is
+                // discarded. Stated explicitly so the decode is complete --
+                // the branch was always the implicit "hold" of a clocked
+                // case, so this changes no hardware.
+                default: ;
             endcase
         end
         if(qspi_enable_ack_sync)
