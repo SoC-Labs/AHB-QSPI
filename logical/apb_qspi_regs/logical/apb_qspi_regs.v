@@ -196,6 +196,10 @@ always @(posedge PCLK or negedge PRESETn) begin
                 // qspi_clock_div.v, defeating the SCLK CDC / nCS-setup guard.
                 // Valid divides (>=1) are stored unchanged.
                 10'h00D: reg13 <= (PWDATA[4:0]==5'h00) ? 5'h01 : PWDATA[4:0];
+                // Every other offset is read-only (STATUS bits, RDATA0-3, the ID
+                // block) or unmapped: a write there changes nothing. Explicit,
+                // so lint sees an intended no-op, not a forgotten arm (CDEFNC).
+                default: ;
             endcase
         end
         if(qspi_enable_ack_sync)
