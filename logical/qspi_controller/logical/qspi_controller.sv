@@ -16,7 +16,7 @@ module qspi_controller (
 
     input  wire [7:0]   QSPI_CMD,
     input  wire         QSPI_ENABLE,
-    output reg          QSPI_ENABLE_ACK,
+    output reg          QSPI_ENABLE_ACK,   // registered in the QSPI_SCLK_i domain (CDC: see below)
     input  wire         QSPI_READ,
     input  wire         QSPI_WRITE,
     input  wire         QSPI_ADDR_EN,
@@ -241,10 +241,31 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     end
 end
 
+// QSPI_ENABLE_ACK crosses into HCLK (ahb_qspi_interface) and PCLK
+// (apb_qspi_regs), where a 2-FF synchroniser samples it. It used to be driven
+// straight from this always_comb decode of current_state and the counters, so
+// a decode glitch on an SCLK edge could be captured as a false acknowledge
+// (HAL CBPAHI on the synchronisers' first flops; ticket T-L3-QSPI-CDC). The
+// decode is now enable_ack_comb, and QSPI_ENABLE_ACK is its registered copy:
+// a single flop output, glitch-free, one SCLK cycle later. The ordering the
+// handshakes rely on is kept: BUSY (~nCS, registered in qspi_controller_mux)
+// still rises before the acknowledge and the acknowledge still falls before
+// BUSY does.
+logic enable_ack_comb;
+
+always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
+    if(~HRESETn)
+        QSPI_ENABLE_ACK <= 1'b0;
+    else if (soft_reset_sync)
+        QSPI_ENABLE_ACK <= 1'b0;
+    else
+        QSPI_ENABLE_ACK <= enable_ack_comb;
+end
+
 // FSM:Next state decision tree
 always_comb begin
     next_state = IDLE;
-    QSPI_ENABLE_ACK = 1'b0;
+    enable_ack_comb = 1'b0;
     case(current_state)
         IDLE: begin
             if(QSPI_enable_sync && !qspi_no_cmd_latched) begin
@@ -258,16 +279,16 @@ always_comb begin
             //op_counter=3'h0;
         end
         NO_FETCH: begin
-            QSPI_ENABLE_ACK = 1'b1;
+            enable_ack_comb = 1'b1;
             if(!QSPI_enable_sync)
                 next_state = IDLE;
         end
         OP: begin
-            QSPI_ENABLE_ACK = 1'b1;
+            enable_ack_comb = 1'b1;
             next_state = OP;
             // Next state decision from OP if in QPI mode
             if(qspi_qio_mode_latched==1'b1 & op_counter==3'h1) begin
-                QSPI_ENABLE_ACK = 1'b0;
+                enable_ack_comb = 1'b0;
                 if(qspi_addr_en_latched)
                     next_state = ADDR;
                 else if(qspi_dummy_cycles_latched!=4'h0)
@@ -281,7 +302,7 @@ always_comb begin
             end
             // Next state decision from OP if in SPI mode
             else if(qspi_qio_mode_latched==1'b0 & op_counter==3'h7) begin
-                QSPI_ENABLE_ACK = 1'b0;
+                enable_ack_comb = 1'b0;
                 if(qspi_addr_en_latched)
                     next_state = ADDR;
                 else if(qspi_dummy_cycles_latched!=4'h0)
@@ -297,10 +318,10 @@ always_comb begin
             end
         end
         ADDR: begin
-            QSPI_ENABLE_ACK = 1'b1;
+            enable_ack_comb = 1'b1;
             // Next state decision from ADDR if in QPI mode
             if(qspi_qio_mode_latched==1'b1 & addr_counter==5'h05) begin
-                QSPI_ENABLE_ACK = 1'b0;
+                enable_ack_comb = 1'b0;
                 if(qspi_cont_read_latched)
                     next_state = MODE;
                 else if(qspi_dummy_cycles_latched!=4'h0)
@@ -314,7 +335,7 @@ always_comb begin
             end
             // Next state decision from ADDR if in SPI mode
             else if(qspi_qio_mode_latched==1'b0 & addr_counter==5'h17) begin
-                QSPI_ENABLE_ACK = 1'b0;
+                enable_ack_comb = 1'b0;
                 if(qspi_dummy_cycles_latched!=4'h0)
                     next_state = DUMMY;
                 else if(qspi_read_latched)

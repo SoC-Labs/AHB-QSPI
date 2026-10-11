@@ -62,11 +62,17 @@ assign QSPI_N_RW_BYTES = (XIP_ACTIVE==1'b1)? AHB_QSPI_N_RW_BYTES : APB_QSPI_N_RW
 assign QSPI_ADDR = (XIP_ACTIVE==1'b1)? AHB_QSPI_ADDR : APB_QSPI_ADDR;
 assign QSPI_WDATA = (XIP_ACTIVE==1'b1)? AHB_QSPI_WDATA : APB_QSPI_WDATA;
 
-assign AHB_QSPI_ENABLE_ACK = (XIP_ACTIVE==1'b1) ? QSPI_ENABLE_ACK : 1'b0;
+// AHB_QSPI_ENABLE_ACK: registered below (CDC). QSPI_ENABLE_ACK is already a
+// flop (qspi_controller.sv), but the XIP_ACTIVE gate is a PCLK-domain register,
+// so the gated value had sources in two domains in its fan-in (SpyGlass
+// Ac_glitch03 on ahb_qspi_enable_ack_meta). The APB acknowledge's gate is in
+// its own sink's domain (PCLK), so it stays a gate.
+wire AHB_QSPI_ENABLE_ACK_in = (XIP_ACTIVE==1'b1) ? QSPI_ENABLE_ACK : 1'b0;
 assign AHB_QSPI_RDATA = (XIP_ACTIVE==1'b1) ?  QSPI_RDATA : 128'd0;
 
 assign APB_QSPI_ENABLE_ACK = (XIP_ACTIVE==1'b0) ? QSPI_ENABLE_ACK : 1'b0;
-assign APB_QSPI_BUSY = (XIP_ACTIVE==1'b0) ? QSPI_BUSY : 1'b1;
+// APB_QSPI_BUSY: registered below (CDC), from this select.
+wire APB_QSPI_BUSY_in = (XIP_ACTIVE==1'b0) ? QSPI_BUSY : 1'b1;
 assign APB_QSPI_RDATA = (XIP_ACTIVE==1'b0) ?  QSPI_RDATA : 128'd0;
 
 wire AHB_QSPI_BUSY_in = (XIP_ACTIVE==1'b1) ? QSPI_BUSY : 1'b1;
@@ -83,5 +89,33 @@ always @(posedge QSPI_SCLK or negedge HRESETn) begin
         AHB_QSPI_BUSY_del2 <= AHB_QSPI_BUSY_del1;
     end
 end
-assign AHB_QSPI_BUSY = (AHB_QSPI_BUSY_in | AHB_QSPI_BUSY_del | AHB_QSPI_BUSY_del1 | AHB_QSPI_BUSY_del2);
+
+// Both BUSY outputs cross into another clock domain, where a 2-FF synchroniser
+// samples them (ahb_qspi_interface: HCLK; apb_qspi_regs: PCLK). They used to be
+// combinational -- an OR of the combinational BUSY_in with the three delay
+// flops, and a mux of ~nCS (itself a decode) -- so a glitch on an SCLK edge
+// could be captured as a false BUSY (HAL CBPAHI on the synchronisers' first
+// flops; ticket T-L3-QSPI-CDC). Each is now a single flop in the QSPI_SCLK
+// domain: glitch-free, one SCLK cycle later in both directions. Reset values
+// are the old outputs' values in reset (AHB: the delay flops reset to 1;
+// APB: no transaction, XIP off).
+reg AHB_QSPI_BUSY_q;
+reg APB_QSPI_BUSY_q;
+reg AHB_QSPI_ENABLE_ACK_q;
+always @(posedge QSPI_SCLK or negedge HRESETn) begin
+    if(~HRESETn) begin
+        AHB_QSPI_BUSY_q       <= 1'b1;
+        APB_QSPI_BUSY_q       <= 1'b0;
+        AHB_QSPI_ENABLE_ACK_q <= 1'b0;
+    end else begin
+        AHB_QSPI_BUSY_q       <= AHB_QSPI_BUSY_in | AHB_QSPI_BUSY_del | AHB_QSPI_BUSY_del1 | AHB_QSPI_BUSY_del2;
+        APB_QSPI_BUSY_q       <= APB_QSPI_BUSY_in;
+        AHB_QSPI_ENABLE_ACK_q <= AHB_QSPI_ENABLE_ACK_in;
+    end
+end
+// AHB side: the acknowledge is now two SCLK cycles after the FSM decode, BUSY
+// (three delay flops, then this one) still falls well after it.
+assign AHB_QSPI_ENABLE_ACK = AHB_QSPI_ENABLE_ACK_q;
+assign AHB_QSPI_BUSY = AHB_QSPI_BUSY_q;
+assign APB_QSPI_BUSY = APB_QSPI_BUSY_q;
 endmodule
