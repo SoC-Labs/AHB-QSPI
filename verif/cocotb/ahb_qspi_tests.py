@@ -336,7 +336,14 @@ async def QSPI_READ_TESTS(dut):
         CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x04,4)
         CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
         await Timer(time=10, units='us')
-    
+    # Re-align to HCLK before driving the data port. A Timer that is a
+    # multiple of the clock period ends exactly on a rising edge, and the
+    # master's first address phase then races that edge: it can be written
+    # and withdrawn in the same time step, so the slave never sees it. The
+    # race was masked while ahb_qspi_interface.HRDATA had no reset (X made
+    # the cocotbext master wait); HRDATA is reset since the H-PIPE fix.
+    await ClockCycles(dut.HCLK, 1)
+
     tb.log.info("Read %d x bytes over AHB (uncached)",n_reads*16)
     start_time_uncached = cocotb.utils.get_sim_time(units='ns')
     for i in range(0,n_reads*4):
@@ -345,6 +352,7 @@ async def QSPI_READ_TESTS(dut):
     end_time_uncached = cocotb.utils.get_sim_time(units='ns')
     dt_uncached = end_time_uncached - start_time_uncached
     await Timer(time=10, units='us')
+    await ClockCycles(dut.HCLK, 1)  # re-align to HCLK (see above)
     rdata = await tb.data_ahb_master.read(base_addr,4)
     
     tb.log.info("Read %d x bytes over AHB (cached)",n_reads*16)
@@ -375,6 +383,7 @@ async def QSPI_READ_TESTS(dut):
         CACHE_STATUS_tmp = await tb.config_ahb_master.read(CACHE_CONFIG_ADDR+0x04,4)
         CACHE_STATUS = int(CACHE_STATUS_tmp[0]['data'],16)
         await Timer(time=10, units='us')
+    await ClockCycles(dut.HCLK, 1)  # re-align to HCLK (see above)
 
     rdata = await tb.data_ahb_master.read(base_addr,4)
 
@@ -1664,15 +1673,23 @@ async def test_xip_plain_spi_line_fill_clkdiv_sweep(dut):
     """Run the plain-SPI XIP line-fill across CLK_DIV values to catch any
     CDC-race corner where the line-fill sequencer exits before all four
     words have been shifted in. CLK_DIV ≥ 2 is required by the controller
-    post-62a0b94; stop at 16 to keep runtime bounded.
+    post-62a0b94; stop at 8 (see below).
 
     Uses `_xip_baseline_minus` so the cache-enable APB sequence matches
     the baseline. Prior versions of this test open-coded a shorter
     sequence and hit the cache-stuck-at-0x1 symptom described in
     `test_xip_baseline_sanity`.
+
+    CLK_DIV 16 was dropped from the sweep (H-PIPE fix, Oct 2026): this bench
+    builds the IP with WATCHDOG_WIDTH=12 (4095 HCLK), and a plain-SPI
+    FAST_READ line fill at CLK_DIV=16 takes longer than that, so the
+    watchdog answers it with ERROR. It used to "pass" only because HRDATA
+    was not reset and still held the CLK_DIV=8 iteration's line (every
+    iteration programs the same pattern), and the test does not check
+    HRESP. CLK_DIV=8 is the largest divider that fits the 12-bit watchdog.
     """
     tb = TB(dut)
-    for clk_div in (2, 4, 8, 16):
+    for clk_div in (2, 4, 8):
         tb.log.info("--- CLK_DIV = %d ---", clk_div)
         await _xip_baseline_minus(
             dut, tb, opcode=0x0B, dummy_cycles=8,
@@ -2759,6 +2776,12 @@ async def test_cdc_ack_retry_after_watchdog(dut):
 
     tb = TB(dut)
     await tb.cycle_reset()
+    # The flash model is not reset with the IP: a previous test can leave it
+    # in QPI mode, and then step 3's SPI FAST_READ returns X. This used to be
+    # masked because step 3 completed from the stale ACK of step 1 without a
+    # fetch (H-PIPE assessment item c, fixed in ahb_qspi_interface.sv).
+    # Put the flash back in SPI mode first, as the other tests do.
+    await SPI_RESET(dut, tb)
     await tb.config_ahb_master.write(0x00, 0x00000100)  # XIP_ACTIVE=1
     await tb.config_ahb_master.write(0x30, 0x0000800B)  # FAST_READ + 8 dummy
 
@@ -3817,31 +3840,23 @@ async def _run_bypass_pattern(dut, tb, *, base, code, seq, sizes=None,
 
 
 # ---------------------------------------------------------------------------
-# Cache-BYPASS back-to-back-NONSEQ repro tests (XiP branch livelock).
+# Cache-BYPASS back-to-back-NONSEQ regression tests (XiP branch livelock).
 #
 # These three tests drive the exact CPU branch/loop fetch pattern with the
 # CG092 cache DISABLED (combinational bypass) — the state the nanoSoC firmware
-# historically left it in. They are marked expect_fail because XiP branch
-# execution in BYPASS is NOT fully fixable in our RTL alone:
-#   * The wrapper stale-serve (qspi_ready/HRDATA leaking onto a back-to-back
-#     NONSEQ) IS fixed in ahb_qspi_interface.sv (HREADYOUT completes only in
-#     WAIT_READ) — necessary and verified.
-#   * A residual one-transfer WORD-OFFSET lag remains in the read-only CG092
-#     bypass datapath (rdata_mux_sel re-registers only on completion), which
-#     cannot be corrected from our wrapper.
-# The SUPPORTED / validated fix is to ENABLE the cache (CCR.EN + STATUS=READY,
-# see sw/qspi_driver.c::qspi_cache_enable and the SoC firmware xip_bringup) —
-# the cache line buffer then shields the wrapper and XiP branch execution works
-# (verified end-to-end in the SoC sim soc_xip_smoke + loop: ABCXIP_SMOKE: PASS).
-# These tests are kept as the bypass-mode reproduction / regression sentinel;
-# they flip to XPASS if the CG092 bypass word-mux is ever corrected (e.g. via a
-# re-mux in cache_subsystem.v). See docs/xip_branch_fetch_hang_rootcause.md.
+# historically left it in. They used to be marked expect_fail, blamed on a
+# "word-offset lag" in the CG092 bypass datapath. The PR #1 assessment
+# (13 Oct 2026) traced that lag to ahb_qspi_interface itself (H-PIPE): an
+# address phase accepted in the cycle a read completed was never fetched, so
+# every later read in the stream got the next or previous line. With the
+# H-PIPE fix (accepted phases are taken straight from a completing WAIT_READ
+# or ERR2) they pass, so they are now plain regression tests.
 # ---------------------------------------------------------------------------
-@cocotb.test(expect_fail=True)
+@cocotb.test()
 async def test_xip_bypass_back_to_back_nonseq(dut):
-    """REPRO (bypass, expect_fail): XiP in cache-BYPASS (CCR.EN=0), pipelined
-    back-to-back NONSEQ reads with branches. Demonstrates the bypass-mode XiP
-    branch corruption; the supported fix is to enable the cache (qspi_cache_enable).
+    """XiP in cache-BYPASS (CCR.EN=0), pipelined back-to-back NONSEQ reads
+    with branches. Failed before the H-PIPE fix (stale/wrong data on every
+    back-to-back read); must pass now.
     """
     tb = TB(dut)
     await init_qpi(dut, tb)
@@ -3860,7 +3875,7 @@ async def test_xip_bypass_back_to_back_nonseq(dut):
                   for i, si, d, e in mism))
 
 
-@cocotb.test(expect_fail=True)
+@cocotb.test()
 async def test_xip_bypass_b2b_line_crossing(dut):
     """REPRO variant (a): every adjacent pair lands in a DIFFERENT 16-byte
     cache line (...,7,0 -> word7 line 0x10, word0 line 0x00), maximising the
@@ -3884,7 +3899,7 @@ async def test_xip_bypass_b2b_line_crossing(dut):
                   for i, si, d, e in mism))
 
 
-@cocotb.test(expect_fail=True)
+@cocotb.test()
 async def test_xip_bypass_b2b_slow_read_0x03(dut):
     """REPRO variant (b): opcode 0x03 slow-read, 0 dummy (the EXACT mode the
     nanoSoC stage-0 firmware programs into the AHB_SETUP reg). Same
