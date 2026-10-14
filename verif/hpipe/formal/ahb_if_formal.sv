@@ -8,6 +8,7 @@
 //   HPIPE_SRC  pass SOFT_RESET_HCLK_CYCLES to the DUT (fixed RTL only)
 //   WDCOVER    cover: a read accepted after a watchdog ERROR completes OKAY
 //              and was fetched (shows the *_wdsr checks are not vacuous)
+//   P7         the watchdog ERROR is per transfer (see the property)
 //   HPIPE_INV  helper invariants for k-induction (hierarchical references
 //              into the DUT; read with yosys-slang)
 //   SLANG      set by gen_sby.sh for the yosys-slang frontend
@@ -290,6 +291,13 @@ module ahb_if_formal #(
     // ------------------------------------------------------------------
     // Properties
     // ------------------------------------------------------------------
+    // Length of the current data phase in cycles (P7).
+    reg [15:0] dp_len;
+    always @(posedge HCLK) begin
+        if (!HRESETn || HREADY) dp_len <= 16'd0;
+        else if (dp_len != 16'hffff) dp_len <= dp_len + 16'd1;
+    end
+
     reg q_err1;     // previous cycle was ERR phase 1 in our data phase
     reg q_sel_open; // previous cycle was an open (waited) data phase of ours
     reg q_resp;     // HRESP in the previous cycle
@@ -333,6 +341,14 @@ module ahb_if_formal #(
                 assert(HRESP);
             if (dp_sel && !dp_trans[1])
                 assert(!HRESP);
+`endif
+`ifdef P7
+            // P7 (added for the H-PIPE fix): a read with XIP on is answered
+            // ERROR (watchdog) only after its OWN data phase has waited for
+            // at least the full watchdog period (2^WDW - 1 cycles): the
+            // watchdog is per transfer, not carried over from earlier ones.
+            if (dp_sel && dp_trans[1] && !dp_write && dp_xip && HRESP && !HREADYOUT && !q_resp)
+                assert(dp_len >= (1 << WDW) - 1);
 `endif
 `ifdef P6
             // P6: writes and XIP-off transfers must be answered ERROR

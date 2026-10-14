@@ -29,6 +29,8 @@
             if (AHB_QSPI_ENABLE)  assert(i_wr || i_err1);
             if (AHB_QSPI_ENABLE)  assert(!dut.qspi_started);
             if (dut.watchdog_cnt != 0) assert(i_wr);
+            // The watchdog counts only within the current data phase (P7).
+            if (i_wr) assert(dut.watchdog_cnt <= dp_len);
             if (dut.soft_reset_cnt != 0) assert(SOFT_RESET);
         end
         // The rest relate the DUT to the controller handshake model.

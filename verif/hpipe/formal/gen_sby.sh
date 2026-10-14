@@ -7,8 +7,10 @@
 # formal/ahb_qspi_interface/gen_sby.sh (AHB-QSPI PR #1 assessment, 13 Oct
 # 2026). Additions for the H-PIPE fix:
 #   - *_wdsr* checks: watchdog reachable (WDW=4) with a short soft-reset pulse
-#     (SOFT_RESET_HCLK_CYCLES=4), so reads AFTER the soft reset are inside the
-#     BMC depth. They need the parameter, i.e. the fixed RTL; on older RTL
+#     (SOFT_RESET_HCLK_CYCLES=4, or 16 for *_wdsr16*), so reads AFTER the soft
+#     reset are inside the BMC depth. The 16-cycle pulse is long enough for a
+#     fetch to start and be acknowledged inside it (needed to catch plant H7).
+#   - p7_*: P7, the watchdog ERROR is per transfer. They need the parameter, i.e. the fixed RTL; on older RTL
 #     they are skipped. A2's original *_wd checks are kept unchanged.
 #   - FRONTEND=slang (env) reads through yosys-slang instead of read -formal;
 #     INV=1 (env) adds the helper invariants (-DHPIPE_INV, ahb_if_formal.sv)
@@ -53,6 +55,10 @@ CHECKS=(
   "p1_wdsr_model:P1:1:0:0:4:60:4"
   "p2_wdsr_model:P2:1:0:0:4:60:4"
   "p6_wdsr_model:P6:1:0:0:4:60:4"
+  "p1_wdsr16_model:P1:1:0:0:4:60:16"
+  "p2_wdsr16_model:P2:1:0:0:4:60:16"
+  "p7_wd_model:P7:1:0:0:4:60:"
+  "p7_wd_multi:P7:1:1:0:4:60:"
   "p1_wdsr_multi:P1:1:1:0:4:60:4"
 )
 COVER="cover_model::1:0:0:4:40:"
