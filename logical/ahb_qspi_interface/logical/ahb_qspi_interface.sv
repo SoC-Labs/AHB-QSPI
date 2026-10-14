@@ -14,7 +14,11 @@ module ahb_qspi_interface #(
     // return AXI SLVERR (bus error / SIGBUS) mid-stress-test.
     // Override to smaller values for tight simulation loops (the
     // cocotbext.ahb master has a 5000-cycle internal timeout).
-    parameter WATCHDOG_WIDTH = 16
+    parameter WATCHDOG_WIDTH = 16,
+    // Length of the SOFT_RESET pulse sent to the QSPI controller after a
+    // watchdog expiry, in HCLK cycles (1..255). 128 gives ~2 QSPI_SCLK_i
+    // cycles at CLK_DIV=31. Override only in formal/simulation harnesses.
+    parameter SOFT_RESET_HCLK_CYCLES = 128
     )(
     input  wire                 HCLK,
     input  wire                 HRESETn,
@@ -133,41 +137,48 @@ reg [2:0]           last_HSIZE;
 reg         qspi_ready;
 reg         qspi_started;
 
-// HREADYOUT completion qualifier (back-to-back-NONSEQ stale-serve fix).
+// Address-phase acceptance and HREADYOUT (H-PIPE fix).
 //
-// A transfer may ONLY complete (HREADYOUT=1) on the data from its OWN fetch.
+// AHB-Lite: an address phase is ACCEPTED on a rising HCLK edge where
+// HREADY=1, and it belongs to this slave when HSELx=1 and HTRANS is NONSEQ or
+// SEQ. Every accepted transfer must get its own data phase, and only an
+// accepted transfer may start one.
 //
-// THE BUG (silicon-confirmed XiP branch livelock): the previous form
-//   ((IDLE && last_HTRANS[1]==0) || ERR2) ? 1 : qspi_ready
-// fell through to the *registered* qspi_ready in EVERY state that is not
-// "IDLE with no pending transfer" or ERR2 — including the cycle the FSM has
-// already dropped back to IDLE after a completed read while qspi_ready is
-// still asserted (qspi_ready only clears one cycle later, in the datapath
-// `else` branch). On a BACK-TO-BACK NONSEQ (a taken branch / loop presents a
-// new address the same cycle the prior transfer completes) that left-over
-// qspi_ready completed the NEW transfer in IDLE with the PREVIOUS transfer's
-// HRDATA -> stale/wrong data, M0+ livelock. Straight-line code is immune (its
-// fetches never present a new NONSEQ the same cycle a transfer completes).
+// THE BUG (H-PIPE, assessment 13 Oct 2026, ADJUDICATION.md section 4): WAIT_READ
+// (on completion) and ERR2 went to IDLE unconditionally, so a transfer
+// accepted on the completion edge was dropped. IDLE then decoded only the
+// *current* HTRANS and latched the *current* HADDR, and the orphaned data phase
+// completed from IDLE with the previous HRDATA (stale data, dropped writes),
+// or hung when the next address phase was not ours (IDLE HREADYOUT was
+// last_HTRANS[1]==0, registered without HSELx). IDLE also decoded address
+// phases with HREADY low (another slave's wait state), giving a one-cycle
+// ERROR or a phantom fetch on a multi-slave bus.
 //
-// FIX: qspi_ready may drive HREADYOUT ONLY while the FSM is in WAIT_READ — the
-// state that actually owns and fetched this transfer's data. Any newly
-// address-phase-accepted transfer is therefore forced through a fresh
-// WAIT_READ (the FSM clears qspi_ready/qspi_started in the `else` branch on
-// leaving WAIT_READ, then re-fetches), so the branch-target fetch always
-// returns its own data. Cases:
+// THE FIX:
+//   - `accept` (HREADY & HSELx & HTRANS[1]) is the only way into WAIT_READ or
+//     ERR1, from IDLE, from a completing WAIT_READ and from ERR2. A transfer
+//     accepted on a completion edge goes straight to its own WAIT_READ (or
+//     ERR1): zero added latency, and no transfer is ever dropped.
+//   - IDLE therefore never owns a pending NONSEQ/SEQ data phase: its data phase
+//     is IDLE/BUSY or another slave's, so IDLE drives HREADYOUT=1 (zero-wait
+//     OKAY, AHB-Lite 3.2).
+//   - The completion cycle (WAIT_READ & qspi_ready) is a "leaving" cycle for
+//     the datapath: it clears the handshake and captures the new HADDR, so a
+//     back-to-back read starts a fresh fetch (no stale qspi_ready, the
+//     original 31f5cfc livelock).
+// Cases:
 //   - WAIT_READ: complete on qspi_ready (this transfer's own fetch).
 //   - ERR2:      complete the 2nd cycle of the AHB-Lite error response.
-//   - IDLE:      ready=1 only when there is no pending transfer
-//                (last_HTRANS[1]==0, i.e. IDLE/BUSY) — zero wait state;
-//                a pending NONSEQ reads 0 (not-ready) so it cannot reuse the
-//                stale qspi_ready and must enter WAIT_READ to be fetched.
+//   - IDLE:      1 (no pending transfer of ours can exist here).
 //   - ERR1:      hold HREADYOUT low (error phase 1).
-// The WAIT_READ data-capture path (when/how HRDATA is latched and qspi_ready
-// asserted) is UNCHANGED, so normal single / sequential line-fill data and
-// timing are bit-for-bit preserved.
+wire accept = HREADY & HSELx & HTRANS[1];
+// Next state for a transfer accepted this cycle: reads with XIP on are
+// fetched; writes and any transfer with XIP off get the 2-cycle ERROR.
+wire accept_err = ~XIP_ACTIVE | HWRITE;
+
 assign HREADYOUT = (current_state==WAIT_READ) ? qspi_ready                :
                    (current_state==ERR2)      ? 1'b1                      :
-                   (current_state==IDLE)      ? (last_HTRANS[1]==1'b0)    :
+                   (current_state==IDLE)      ? 1'b1                      :
                                                  1'b0; // ERR1
 assign HRESP = (current_state == ERR1 || current_state == ERR2) ? 1'b1 : 1'b0;
 
@@ -195,22 +206,23 @@ always_comb begin
     next_state = IDLE;
 
     case(current_state)
-        IDLE:           if(HTRANS[1]==1'b0)
-                            next_state = IDLE;
-                        else if(HSELx) begin
-                            if(~XIP_ACTIVE)
-                                next_state = ERR1;
-                            else if(HSELx & HWRITE)
-                                next_state = ERR1;
-                            else
-                                next_state = WAIT_READ;
-                        end
+        // IDLE, ERR2 and a completing WAIT_READ all take an address phase
+        // accepted on this edge (see "Address-phase acceptance" above).
+        IDLE:           if(accept)
+                            next_state = accept_err ? ERR1 : WAIT_READ;
                         else
                             next_state = IDLE;
         ERR1:           next_state = ERR2;
-        ERR2:           next_state = IDLE;
-        WAIT_READ:      if(qspi_ready)
+        ERR2:           if(accept)
+                            next_state = accept_err ? ERR1 : WAIT_READ;
+                        else
                             next_state = IDLE;
+        WAIT_READ:      if(qspi_ready) begin
+                            if(accept)
+                                next_state = accept_err ? ERR1 : WAIT_READ;
+                            else
+                                next_state = IDLE;
+                        end
                         else if(watchdog_expired)
                             next_state = ERR1;
                         else
@@ -223,7 +235,12 @@ always @(posedge HCLK or negedge HRESETn) begin
     if(~HRESETn) begin
         watchdog_cnt <= {WATCHDOG_WIDTH{1'b0}};
     end else begin
-        if(current_state == WAIT_READ && !watchdog_expired)
+        // Counts per transfer: it restarts in the completion cycle (a
+        // back-to-back read stays in WAIT_READ), and it does not count while
+        // a fetch is held off by SOFT_RESET (see the stale-ACK guard below),
+        // which is a bounded wait, not a hang.
+        if(current_state == WAIT_READ && !qspi_ready && !SOFT_RESET &&
+           !watchdog_expired)
             watchdog_cnt <= watchdog_cnt + 1'b1;
         else
             watchdog_cnt <= {WATCHDOG_WIDTH{1'b0}};
@@ -240,16 +257,17 @@ end
 // 2-FF synchroniser inside the controller to propagate the reset even
 // at the slowest practical QSPI_SCLK_i (CLK_DIV=31 -> QSPI_SCLK_i =
 // HCLK/62, so 128 HCLK gives us ~2 QSPI_SCLK_i cycles of margin).
-localparam SOFT_RESET_HCLK_CYCLES = 8'd128;
 reg [7:0] soft_reset_cnt;
 always @(posedge HCLK or negedge HRESETn) begin
     if(~HRESETn) begin
         soft_reset_cnt <= 8'd0;
         SOFT_RESET     <= 1'b0;
     end else begin
-        if(watchdog_expired) begin
-            // Watchdog just fired this cycle — start the soft-reset pulse
-            soft_reset_cnt <= SOFT_RESET_HCLK_CYCLES;
+        if(watchdog_expired && !qspi_ready) begin
+            // Watchdog just fired this cycle — start the soft-reset pulse.
+            // (Not when the transfer completes in the same cycle: the FSM
+            // then takes the completion, so there is nothing to recover.)
+            soft_reset_cnt <= SOFT_RESET_HCLK_CYCLES[7:0];
             SOFT_RESET     <= 1'b1;
         end else if (soft_reset_cnt != 8'd0) begin
             soft_reset_cnt <= soft_reset_cnt - 8'd1;
@@ -260,20 +278,35 @@ always @(posedge HCLK or negedge HRESETn) begin
     end
 end
 
+// Fetch handshake.
+//
+// Stale-ACK guard (assessment item c, A2 formal p1_wd): after a watchdog
+// ERROR the controller may still be wedged with ENABLE_ACK high, and the next
+// read used to see that stale acknowledge, set qspi_started without a fetch,
+// and complete OKAY with old data once BUSY fell. Now:
+//   - ENABLE is raised only when the controller is quiescent (busy_sync and
+//     ack_sync both low) and no SOFT_RESET pulse is in progress, so the next
+//     fetch can neither be cut short by the soft reset nor inherit its state;
+//   - qspi_started is set only by an acknowledge seen while ENABLE is high,
+//     i.e. an acknowledge of THIS request.
+// In normal operation ack_sync and SOFT_RESET are already low when a read
+// enters WAIT_READ (ACK falls before BUSY), so neither term adds latency.
 always @(posedge HCLK or negedge HRESETn) begin
     if(~HRESETn) begin
         AHB_QSPI_ENABLE <= 1'b0;
         qspi_ready <= 1'b0;
         qspi_started <= 1'b0;
         AHB_QSPI_ADDR <= 22'd0;
+        HRDATA <= {DATA_W{1'b0}};
     end else begin
-        if(current_state == WAIT_READ) begin
-            if(ahb_qspi_busy_sync!=1'b1) begin
+        if(current_state == WAIT_READ && !qspi_ready) begin
+            if(ahb_qspi_busy_sync!=1'b1 && !ahb_qspi_enable_ack_sync &&
+               !SOFT_RESET) begin
                 if(qspi_started==1'b0) begin
                     AHB_QSPI_ENABLE <= 1'b1;
                 end
             end
-            if(ahb_qspi_enable_ack_sync) begin
+            if(ahb_qspi_enable_ack_sync && AHB_QSPI_ENABLE) begin
                 AHB_QSPI_ENABLE <= 1'b0;
                 qspi_started <= 1'b1;
             end
@@ -284,6 +317,9 @@ always @(posedge HCLK or negedge HRESETn) begin
                 end
             end
         end else begin
+            // Not fetching, or completing this cycle (qspi_ready): clear the
+            // handshake and capture the address phase on the bus, which is
+            // the one a transfer accepted this cycle will fetch.
             AHB_QSPI_ENABLE <= 1'b0;
             qspi_started <= 1'b0;
             qspi_ready <=1'b0;
