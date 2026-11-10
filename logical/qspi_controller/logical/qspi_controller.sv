@@ -241,6 +241,36 @@ always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
     end
 end
 
+// Request re-arm guard.
+// The requester clears QSPI_ENABLE when it sees QSPI_ENABLE_ACK, but that
+// handshake now takes several SCLK cycles to come back round (ACK is
+// registered below, crosses a 2-FF synchroniser into HCLK/PCLK, and the
+// cleared ENABLE crosses the 3-FF synchroniser above). A QPI opcode-only
+// command spends just 2 cycles in OP, so the FSM was back in IDLE while
+// QSPI_enable_sync still showed the request it had already served, and it
+// started the same command again inside the same nCS window (WREN 06h seen by
+// the flash as 0606h, which a real MT25Q rejects). A request is now accepted
+// only if QSPI_enable_sync has been seen low since the last accepted request.
+reg armed;
+always @(posedge QSPI_SCLK_i or negedge HRESETn) begin
+    if(~HRESETn)
+        armed <= 1'b1;
+    else if (soft_reset_sync)
+        armed <= 1'b1;                  // as before the guard: FSM back in IDLE
+    else if (current_state==IDLE && next_state!=IDLE)
+        armed <= 1'b0;                  // request accepted
+    else if (!QSPI_enable_sync)
+        armed <= 1'b1;                  // request withdrawn: re-arm
+end
+// The control bus (including qspi_no_cmd_latched, used by the IDLE decision
+// below) is captured on QSPI_enable_sync_rise and only becomes valid on the
+// following cycle. Accepting the request on the rise cycle itself would make
+// IDLE decide with the previous command's settings (e.g. take NO_FETCH for a
+// read that has NO_CMD cleared). Without the re-arm guard that wrong decision
+// was hidden by the NO_FETCH->IDLE bounce restarting the request; with the
+// guard it would drop the transfer, so start one cycle after the rise.
+wire start_req = QSPI_enable_sync & ~QSPI_enable_sync_rise & armed;
+
 // QSPI_ENABLE_ACK crosses into HCLK (ahb_qspi_interface) and PCLK
 // (apb_qspi_regs), where a 2-FF synchroniser samples it. It used to be driven
 // straight from this always_comb decode of current_state and the counters, so
@@ -268,9 +298,9 @@ always_comb begin
     enable_ack_comb = 1'b0;
     case(current_state)
         IDLE: begin
-            if(QSPI_enable_sync && !qspi_no_cmd_latched) begin
+            if(start_req && !qspi_no_cmd_latched) begin
                 next_state = OP;
-            end else if(QSPI_enable_sync && qspi_no_cmd_latched) begin
+            end else if(start_req && qspi_no_cmd_latched) begin
                 if(last_QSPI_ADDR==QSPI_ADDR)
                     next_state = NO_FETCH;
                 else
@@ -280,6 +310,11 @@ always_comb begin
         end
         NO_FETCH: begin
             enable_ack_comb = 1'b1;
+            // Hold until the request is withdrawn. With next_state defaulting
+            // to IDLE this used to bounce NO_FETCH<->IDLE on the stale enable;
+            // with the re-arm guard that bounce would end after one cycle, so
+            // the hold is made explicit (the behaviour before the default).
+            next_state = NO_FETCH;
             if(!QSPI_enable_sync)
                 next_state = IDLE;
         end
@@ -688,7 +723,8 @@ always_comb begin
     endcase
 end
 
-assign QSPI_nCS = ((QSPI_enable_sync==1'b1) ||(current_state!=IDLE) || (QSPI_SCLK_e==1'b1))?1'b0:1'b1;
+// A request that has already been served (armed==0) must not hold nCS low.
+assign QSPI_nCS = ((start_req==1'b1) ||(current_state!=IDLE) || (QSPI_SCLK_e==1'b1))?1'b0:1'b1;
 //assign QSPI_SCLK_e = (current_state!=IDLE)?1'b1:1'b0;w
 
 assign QSPI_IO_e[3] = (qspi_qio_mode_latched==1'b1)?QSPI_IO_e_int:1'b1;

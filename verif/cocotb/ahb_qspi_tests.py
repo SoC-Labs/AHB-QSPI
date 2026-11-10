@@ -9,7 +9,7 @@ from cocotb.triggers import Timer, ClockCycles
 from cocotbext.ahb import AHBLiteMaster, AHBBus
 
 from SST26VF064B import *
-from SST26VF064B import poll_busy_clear, POLL_TIMEOUT_CYCLES
+from SST26VF064B import poll_busy_clear, POLL_TIMEOUT_CYCLES, _flash_cmd_byte
 
 QSPI_CONFIG_ADDR = 0x0
 CACHE_CONFIG_ADDR = 0x1000
@@ -1286,6 +1286,18 @@ async def _xip_baseline_minus(dut, tb, *, opcode, dummy_cycles, qio_mode,
         # LOAD-BEARING — without them, the next APB read to flash after
         # XIP enable sends the wrong continuation sequence and the cache
         # never reaches READY. PRESERVE them via read-modify-write below.
+        if qio_mode and not no_cmd:
+            # NO_CMD=0: every line fill sends the opcode, so the flash must
+            # not be left in continuous-read mode (mode byte Axh), or it
+            # takes the next opcode as address bits. Use mode byte FFh:
+            # CONT_READ stays set because the two mode cycles are part of
+            # the 0Bh SQI read frame, but the flash never enters
+            # continuous-read. (This only worked before because the
+            # controller sent the previous command's mode code, 00h, on the
+            # first read after MODE_CODE changed.)
+            r = await tb.config_ahb_master.read(0x00, 4)
+            ctrl = int(r[0]['data'], 16) | (0xFF << 16) | (1 << 24)
+            await tb.config_ahb_master.write(0x00, ctrl)
         await QPI_READ_WORDS(dut, tb, addr=addr, n_words=4, cont_read=True)
 
     # Read-modify-write CTRL so the MODE_CODE and CONT_READ bits set by
@@ -3384,6 +3396,20 @@ async def _run_cpu_fetch_loop(dut, tb, *, base_addr, opcode, dummy_cycles,
     code = [0xF00DC0DE ^ (i * 0x01010101) for i in range(8)]
     addr_of = lambda i: base_addr + 4 * i
 
+    # Erase-before-use. The suite shares one flash model with no reset
+    # between tests, and page program can only clear bits, so a code image
+    # programmed over an earlier test's data reads back as old AND new
+    # (test_cdc_rdata_stability_at_low_clkdiv leaves DEADBEEF/CAFEBABE/12345678/
+    # 87654321 at 0x8000, which made line 0 of this loop read wrong).
+    # SPI_SECTOR_ERASE uses SPI framing, so drop to SPI first, then restore
+    # the state init_qpi set up (QPI + QIO_MODE + WEL + unprotected).
+    await SPI_RESET(dut, tb)
+    await SPI_SECTOR_ERASE(dut, tb, addr=base_addr)
+    await SET_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x1)
+    await SPI_WRITE_ENABLE(dut, tb)
+    await SPI_CLR_PROTECTION(dut, tb)
+
     tb.log.info("=== program %d-word code image at 0x%06x ===",
                 len(code), base_addr)
     await _program_flash_region(dut, tb, base_addr=base_addr, words=code)
@@ -3919,3 +3945,107 @@ async def test_xip_bypass_b2b_slow_read_0x03(dut):
         "BYPASS slow-read 0x03 back-to-back stale/wrong data:\n"
         + "".join(f"  idx={i} w{si} got={d} exp=0x{e:08x}\n"
                   for i, si, d, e in mism))
+
+# ============================================================================
+# Regression: opcode-only commands must be one byte per nCS window
+# ============================================================================
+
+class _NcsWindowMonitor:
+    """Pin-level monitor: for every nCS-low window, count QSPI_SCLK rising
+    edges and record the IO[3:0] value sampled on each edge."""
+
+    def __init__(self, dut):
+        self.dut = dut
+        self.windows = []          # list of (sclk_edges, [io samples])
+        cocotb.start_soon(self._run())
+
+    async def _run(self):
+        from cocotb.triggers import First, FallingEdge, RisingEdge
+        while True:
+            await FallingEdge(self.dut.QSPI_nCS)
+            samples = []
+            while True:
+                await First(RisingEdge(self.dut.QSPI_SCLK),
+                            RisingEdge(self.dut.QSPI_nCS))
+                if str(self.dut.QSPI_nCS.value) == "1":
+                    break
+                # Keep the raw 4-character bit string (IO3..IO0). In SPI mode
+                # only IO0 is driven, IO3..IO1 may be Z/X, so do not convert
+                # the whole bus to an integer here.
+                samples.append(str(self.dut.QSPI_IO.value).lower())
+            self.windows.append((len(samples), samples))
+
+    @staticmethod
+    def first_byte(samples, qpi):
+        if qpi:
+            bits = "".join(s[-4:] for s in samples[:2])   # IO3..IO0 per edge
+            if len(samples) < 2:
+                return None
+        else:
+            bits = "".join(s[-1] for s in samples[:8])    # SPI: MOSI is IO0
+            if len(samples) < 8:
+                return None
+        if any(c not in "01" for c in bits):
+            return None
+        return int(bits, 2)
+
+
+@cocotb.test()
+async def test_op_only_single_byte_framing(dut):
+    """Opcode-only commands (WREN 06h, WRDI 04h) must be framed as exactly one
+    byte per nCS window: 8 SCLKs in SPI mode, 2 in QPI mode.
+
+    Regression for the QPI "command sent twice" bug: with the registered /
+    synchronised ENABLE_ACK path the request was still visible to the FSM when
+    it returned to IDLE after the 2-cycle QPI opcode, so the controller started
+    the same command again without raising nCS (flash sees 0606h and rejects
+    it; the bench flash model accepted it, so earlier tests did not fail).
+    Checked across several CLK_DIV values."""
+    tb = TB(dut)
+    await tb.cycle_reset()
+    await SPI_RESET(dut, tb)
+    mon = _NcsWindowMonitor(dut)
+
+    async def check(op, qpi, div):
+        await ClockCycles(dut.HCLK, 20)
+        mon.windows.clear()
+        await _flash_cmd_byte(dut, tb, op)
+        await ClockCycles(dut.HCLK, 50)        # nCS back high and settled
+        want = 2 if qpi else 8
+        mode = "QPI" if qpi else "SPI"
+        assert len(mon.windows) == 1, (
+            f"{mode} op {op:02X}h CLK_DIV={div}: expected 1 nCS window, "
+            f"saw {len(mon.windows)}")
+        edges, samples = mon.windows[0]
+        assert edges == want, (
+            f"{mode} op {op:02X}h CLK_DIV={div}: {edges} SCLK edges in one "
+            f"nCS window, expected {want} (IO3..IO0 per edge: {samples})")
+        got = _NcsWindowMonitor.first_byte(samples, qpi)
+        assert got == op, (
+            f"{mode} op {op:02X}h CLK_DIV={div}: first byte on the pins was "
+            f"{got if got is None else hex(got)} (IO3..IO0 per edge: {samples})")
+        tb.log.info("%s %02Xh CLK_DIV=%d: 1 window, %d SCLK edges - OK",
+                    mode, op, div, edges)
+
+    divs = (1, 2, 4, 0x1F)
+
+    # SPI framing (8 SCLKs) - always passed, kept as the reference
+    await tb.config_ahb_master.write(0x00, 0x0)
+    for div in divs:
+        await tb.config_ahb_master.write(0x34, div)
+        for op in (0x06, 0x04):
+            await check(op, False, div)
+
+    # QPI framing (2 SCLKs) - the failing case
+    await tb.config_ahb_master.write(0x34, 0x01)
+    await SET_QPI_MODE(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x1)      # QIO_MODE=1
+    for div in divs:
+        await tb.config_ahb_master.write(0x34, div)
+        for op in (0x06, 0x04):
+            await check(op, True, div)
+
+    # leave the flash and controller in SPI mode for the next test
+    await tb.config_ahb_master.write(0x34, 0x01)
+    await SPI_RESET(dut, tb)
+    await tb.config_ahb_master.write(0x00, 0x0)
