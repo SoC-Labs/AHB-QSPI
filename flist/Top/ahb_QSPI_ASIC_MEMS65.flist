@@ -1,0 +1,6 @@
+// ASIC Memories for TSMC 65nm
+
+$(SOCLABS_AHB_QSPI_DIR)/logical/cache_models/tsmc65/cache_ram.v
+
+/research/precompiled_mems/TSMC65/flash_cache_data/flash_cache_data.v
+/research/precompiled_mems/TSMC65/flash_cache_tag/flash_cache_tag.v

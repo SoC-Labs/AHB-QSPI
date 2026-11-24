@@ -54,7 +54,7 @@ vcs_coverage_report:
 flist_makefile_nanosoc: 
 	@mkdir -p $(COCOTB_DIR)
 	@(cd $(COCOTB_DIR); \
-	$(SOCLABS_SOCTOOLS_FLOW_DIR)/bin/filelist_compile.py -m -f $(DESIGN_VC) -o $(MAKEFILE_FILELIST);)
+	$(SOCLABS_SOCTOOLS_FLOW_DIR)/bin/filelist_compile.py -m -f $(DESIGN_VC) -i $(FLIST_INCLUDES) -o $(MAKEFILE_FILELIST);)
 
 run_cocotb: flist_makefile_nanosoc
 	@mkdir -p $(SIM_DIR)

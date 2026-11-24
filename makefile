@@ -14,6 +14,8 @@ export GATE_SIMS
 SIM_TOP_DIR ?= $(SOCLABS_AHB_QSPI_DIR)/simulate/sim
 SIM_DIR ?= $(SIM_TOP_DIR)
 
+ASIC_MEMS ?= no
+NODE ?= 16
 
 ifeq ($(ASIC),yes)
 	DESIGN_VC ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_ASIC.flist
@@ -22,6 +24,19 @@ else ifeq ($(GATE_SIMS),yes)
 else
 	DESIGN_VC ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_SIM.flist
 endif
+
+ifeq ($(ASIC_MEMS),yes)
+	ifeq ($(NODE),65)
+		FLIST_INCLUDES ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_ASIC_MEMS65.flist
+	else ifeq ($(NODE),16)
+		FLIST_INCLUDES ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_ASIC_MEMS16.flist
+	endif
+else
+	FLIST_INCLUDES ?= $(SOCLABS_AHB_QSPI_DIR)/flist/Top/ahb_QSPI_GEN_MEMS.flist
+endif
+
+export FLIST_INCLUDES
+export ASIC_MEMS
 
 documentation:
 	pdflatex --output-directory=./docs/tex/ ./docs/tex/ahb_qspi.tex

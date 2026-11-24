@@ -23,34 +23,19 @@ module cache_ram #(
 wire    cs_ram0_word0;
 assign  cs_ram0_word0   = CLD_CS[0] & (CLD_WE | CLD_RD[0]);
 
-flash_cache_data data_ram_0_word_0_i (
-    .CENY(),
-    .GWENY(),
-    .AY(),
+TS5N16FFCLLULVTA256X32M2SSHO data_ram_0_word_0_i (
     .Q(CLD_RDATA[31:0]),
-    .SO(),
-    .PRDYN(),
-
     .CLK(CLK),
-    .CEN(~cs_ram0_word0),
-    .GWEN(~CLD_WE),
+    .CEB(~cs_ram0_word0),
+    .WEB(~CLD_WE),
     .A(CLD_ADDR),
     .D(CLD_WDATA[31:0]),
-    .STOV(1'b0),
-    .EMA(3'b011),
-    .EMAW(2'b01),
-    .EMAS(1'b0),
-    .RET1N(1'b1),
-    .PGEN(1'b0),
-    .TEN(1'b1),
-    .TCEN(1'b1),
-    .TGWEN(1'b1),
-    .TA(8'd0),
-    .TD(32'd0),
-    .SI(2'b00),
-    .SE(1'b0),
-    .DFTRAMBYP(1'b0),
-    .RET2N(1'b1)
+    .SLP        (1'b0),
+    .DSLP       (1'b0),
+    .SD         (1'b0),
+    .PUDELAY    (),      // Propogation of SD
+    .RTSEL      (2'b01),
+    .WTSEL      (2'b01)
 );
 
 // ----------------------------------------------------------------------------
@@ -59,34 +44,20 @@ flash_cache_data data_ram_0_word_0_i (
 wire    cs_ram0_word1;
 assign  cs_ram0_word1   = CLD_CS[1] & (CLD_WE | CLD_RD[1]);
 
-flash_cache_data data_ram_0_word_1_i (
-    .CENY(),
-    .GWENY(),
-    .AY(),
+TS5N16FFCLLULVTA256X32M2SSHO data_ram_0_word_1_i (
     .Q(CLD_RDATA[63:32]),
-    .SO(),
-    .PRDYN(),
-
     .CLK(CLK),
-    .CEN(~cs_ram0_word1),
-    .GWEN(~CLD_WE),
+    .CEB(~cs_ram0_word1),
+    .WEB(~CLD_WE),
     .A(CLD_ADDR),
     .D(CLD_WDATA[63:32]),
-    .STOV(1'b0),
-    .EMA(3'b011),
-    .EMAW(2'b01),
-    .EMAS(1'b0),
-    .RET1N(1'b1),
-    .PGEN(1'b0),
-    .TEN(1'b1),
-    .TCEN(1'b1),
-    .TGWEN(1'b1),
-    .TA(8'd0),
-    .TD(32'd0),
-    .SI(2'b00),
-    .SE(1'b0),
-    .DFTRAMBYP(1'b0),
-    .RET2N(1'b1)
+    .SLP        (1'b0),
+    .DSLP       (1'b0),
+    .SD         (1'b0),
+    .PUDELAY    (),      // Propogation of SD
+    .RTSEL      (2'b01),
+    .WTSEL      (2'b01)
+
 );
 
 // ----------------------------------------------------------------------------
@@ -95,34 +66,20 @@ flash_cache_data data_ram_0_word_1_i (
 wire    cs_ram0_word2;
 assign  cs_ram0_word2   = CLD_CS[2] & (CLD_WE | CLD_RD[2]);
 
-flash_cache_data data_ram_0_word_2_i (
-    .CENY(),
-    .GWENY(),
-    .AY(),
+TS5N16FFCLLULVTA256X32M2SSHO data_ram_0_word_2_i (
     .Q(CLD_RDATA[95:64]),
-    .SO(),
-    .PRDYN(),
-
     .CLK(CLK),
-    .CEN(~cs_ram0_word2),
-    .GWEN(~CLD_WE),
+    .CEB(~cs_ram0_word2),
+    .WEB(~CLD_WE),
     .A(CLD_ADDR),
     .D(CLD_WDATA[95:64]),
-    .STOV(1'b0),
-    .EMA(3'b011),
-    .EMAW(2'b01),
-    .EMAS(1'b0),
-    .RET1N(1'b1),
-    .PGEN(1'b0),
-    .TEN(1'b1),
-    .TCEN(1'b1),
-    .TGWEN(1'b1),
-    .TA(8'd0),
-    .TD(32'd0),
-    .SI(2'b00),
-    .SE(1'b0),
-    .DFTRAMBYP(1'b0),
-    .RET2N(1'b1)
+    .SLP        (1'b0),
+    .DSLP       (1'b0),
+    .SD         (1'b0),
+    .PUDELAY    (),      // Propogation of SD
+    .RTSEL      (2'b01),
+    .WTSEL      (2'b01)
+
 );
 
 // ----------------------------------------------------------------------------
@@ -131,34 +88,19 @@ flash_cache_data data_ram_0_word_2_i (
 wire    cs_ram0_word3;
 assign  cs_ram0_word3   = CLD_CS[3] & (CLD_WE | CLD_RD[3]);
 
-flash_cache_data data_ram_0_word_3_i (
-    .CENY(),
-    .GWENY(),
-    .AY(),
+TS5N16FFCLLULVTA256X32M2SSHO data_ram_0_word_3_i (
     .Q(CLD_RDATA[127:96]),
-    .SO(),
-    .PRDYN(),
-
     .CLK(CLK),
-    .CEN(~cs_ram0_word3),
-    .GWEN(~CLD_WE),
+    .CEB(~cs_ram0_word3),
+    .WEB(~CLD_WE),
     .A(CLD_ADDR),
     .D(CLD_WDATA[127:96]),
-    .STOV(1'b0),
-    .EMA(3'b011),
-    .EMAW(2'b01),
-    .EMAS(1'b0),
-    .RET1N(1'b1),
-    .PGEN(1'b0),
-    .TEN(1'b1),
-    .TCEN(1'b1),
-    .TGWEN(1'b1),
-    .TA(8'd0),
-    .TD(32'd0),
-    .SI(2'b00),
-    .SE(1'b0),
-    .DFTRAMBYP(1'b0),
-    .RET2N(1'b1)
+    .SLP        (1'b0),
+    .DSLP       (1'b0),
+    .SD         (1'b0),
+    .PUDELAY    (),      // Propogation of SD
+    .RTSEL      (2'b01),
+    .WTSEL      (2'b01)
 );
 
 // ----------------------------------------------------------------------------
@@ -167,34 +109,19 @@ flash_cache_data data_ram_0_word_3_i (
 wire    cs_tag0;
 assign  cs_tag0         = TAG_CS & (TAG_WE | TAG_RD);
 
-flash_cache_tag tag_ram_0_i (
-    .CENY(),
-    .GWENY(),
-    .AY(),
+TS5N16FFCLLULVTA256X11M2SSHO tag_ram_0_i (
     .Q(TAG_RDATA),
-    .SO(),
-    .PRDYN(),
-
     .CLK(CLK),
-    .CEN(~cs_tag0),
-    .GWEN(~TAG_WE),
+    .CEB(~cs_tag0),
+    .WEB(~TAG_WE),
     .A(TAG_ADDR),
     .D(TAG_WDATA),
-    .STOV(1'b0),
-    .EMA(3'b011),
-    .EMAW(2'b01),
-    .EMAS(1'b0),
-    .RET1N(1'b1),
-    .PGEN(1'b0),
-    .TEN(1'b1),
-    .TCEN(1'b1),
-    .TGWEN(1'b1),
-    .TA(8'd0),
-    .TD(11'd0),
-    .SI(2'b00),
-    .SE(1'b0),
-    .DFTRAMBYP(1'b0),
-    .RET2N(1'b1)
+    .SLP        (1'b0),
+    .DSLP       (1'b0),
+    .SD         (1'b0),
+    .PUDELAY    (),      // Propogation of SD
+    .RTSEL      (2'b01),
+    .WTSEL      (2'b01)
 );
 
 

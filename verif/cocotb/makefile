@@ -38,6 +38,10 @@ ifeq ($(GATE_SIMS),yes)
 	EXTRA_ARGS += +define+GATE_SIMS
 endif
 
+ifeq ($(ASIC_MEMS),yes)
+	EXTRA_ARGS += +define+TSMC_CM_UNIT_DELAY
+endif
+
 ifeq ($(SIM), icarus)
 	PLUSARGS += -fst
 

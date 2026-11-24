@@ -1,0 +1,6 @@
+// ASIC Memories for TSMC 16nm
+
+$(SOCLABS_AHB_QSPI_DIR)/logical/cache_models/tsmc16/cache_ram.v
+
+$(TSMC_16_MEMS)/rf_11b_256w/ts5n16ffcllulvta256x11m2ssho_120a/VERILOG/ts5n16ffcllulvta256x11m2ssho_120a.v
+$(TSMC_16_MEMS)/rf_32b_256w/ts5n16ffcllulvta256x32m2ssho_120a/VERILOG/ts5n16ffcllulvta256x32m2ssho_120a.v           
